@@ -7,14 +7,15 @@ A single-user research paper filtering system that helps researchers keep up wit
 - **Backend**: FastAPI, SQLAlchemy, SQLite, Redis, RQ workers
 - **Frontend**: Next.js (App Router), React Query, Tailwind CSS, shadcn/ui
 - **LLM**: OpenRouter (deepseek/deepseek-v4-flash via novita)
-- **Runtime**: Docker Compose (Redis, API, Worker)
+- **Runtime**: Docker Compose (Redis), local backend + frontend
 
 ## Quick Start
 
 ### Prerequisites
 
-- Docker & Docker Compose
+- Python 3.12+
 - Node.js 18+ and pnpm
+- Docker & Docker Compose (for Redis)
 - An OpenRouter API key (optional — demo mode works without one)
 
 ### 1. Environment Setup
@@ -24,18 +25,26 @@ cp .env.example .env
 # Edit .env and set OPENROUTER_API_KEY if you have one
 ```
 
-### 2. Start Backend Services
+### 2. Start Redis
 
 ```bash
-docker compose up --build
+docker compose up -d
 ```
 
-This starts:
-- **redis** on port 6379
-- **api** (FastAPI) on port 8000
-- **worker** (RQ background jobs)
+This starts Redis on port 6379. If Redis is not available, jobs run in background threads automatically.
 
-### 3. Start Frontend
+### 3. Start Backend
+
+```bash
+cd backend
+pip install -e ".[dev]"
+mkdir -p data
+uvicorn app.main:app --reload --port 8000
+```
+
+The API runs at http://localhost:8000 with hot-reload enabled.
+
+### 4. Start Frontend
 
 ```bash
 cd frontend
@@ -45,36 +54,13 @@ pnpm dev
 
 Frontend runs at http://localhost:3000 and connects to the API at http://localhost:8000.
 
-### 4. Use the App
+### 5. Use the App
 
 1. Open http://localhost:3000
 2. Complete onboarding by entering your research interests
 3. Review and edit proposed filters, then complete setup
 4. Run a daily search from the Daily page
 5. Browse matches, open papers, generate idea maps
-
-## Development (without Docker)
-
-### Backend
-
-```bash
-cd backend
-pip install -e ".[dev]"
-mkdir -p data
-
-# Start the API server
-DATABASE_URL=sqlite:///./data/paper_search.db APP_ENV=development REDIS_URL=redis://localhost:6379/0 uvicorn app.main:app --reload --port 8000
-```
-
-If Redis is not available, jobs run in background threads automatically.
-
-### Frontend
-
-```bash
-cd frontend
-pnpm install
-pnpm dev
-```
 
 ## Running Tests
 
