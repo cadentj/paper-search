@@ -2,17 +2,17 @@
 
 ## Summary
 
-Build a prototype for a single researcher to keep up with relevant research by onboarding into natural-language filters and running those filters over daily paper batches.
+Build a local single-user prototype that helps a researcher keep up with relevant papers by:
 
-The product center is not a generic paper feed. It is a daily view of what changed in the user's research interest space:
+1. Onboarding them into natural-language filters.
+2. Running daily searches over a small paper batch.
+3. Showing a cited Daily summary and grouped paper matches.
+4. Letting the user archive filters or hide uninteresting matches.
+5. Generating HTML-based idea maps for opened papers.
 
-- Claims the user believes or wants tracked can be supported, refuted, or complicated by new papers.
-- Questions the user cares about can be informed by relevant papers.
-- Topics the user follows can surface broadly relevant work.
+V1 should feel like a coherent research workflow, not a generic paper database. Production deployment, multi-user support, custom historical searches, and non-HTML paper parsing are out of scope.
 
-V1 should prioritize a coherent end-to-end experience with text-based onboarding, mocked arXiv abstracts, a real async backend shape, and a frontend layout that can later plug into real ingestion.
-
-## Tech Stack
+## Stack
 
 ### Frontend
 
@@ -20,11 +20,9 @@ V1 should prioritize a coherent end-to-end experience with text-based onboarding
 - TypeScript
 - Tailwind CSS
 - shadcn/ui
-- React Query via `@tanstack/react-query` for server state
+- `@tanstack/react-query` for server state and polling
 - Zustand only for local UI state
 - lucide-react for icons
-
-Do not use TanStack Router for v1. The earlier plan mentioned both Next.js and TanStack Router, but the final decision is Next.js App Router.
 
 ### Backend
 
@@ -32,27 +30,25 @@ Do not use TanStack Router for v1. The earlier plan mentioned both Next.js and T
 - Python with `uv`
 - SQLite
 - Redis
-- RQ for background jobs
+- RQ background jobs
 - SQLAlchemy
 - Alembic
 - Pydantic
-- OpenAI Python SDK for LLM jobs
+- OpenRouter LLM calls using `deepseek/deepseek-v4-flash` with provider `novita`
 
-### Local Development
+### Local Runtime
 
-Use Docker Compose for backend infrastructure:
+Use Docker Compose for:
 
 - `api`: FastAPI server
 - `worker`: RQ worker
-- `redis`: queue and short-lived job state
+- `redis`: queue
 
-SQLite is the durable app database. Store the local database in a mounted backend data directory, for example `backend/data/paper_search.db`, so the API and worker can both access the same file.
+SQLite lives in a mounted backend data directory, for example `backend/data/paper_search.db`, shared by API and worker. Enable SQLite WAL mode during initialization.
 
-The frontend can run outside Docker with `pnpm dev` and talk to FastAPI through `NEXT_PUBLIC_API_URL`.
+The frontend runs with `pnpm dev` and calls FastAPI through `NEXT_PUBLIC_API_URL`.
 
 ## Repository Shape
-
-Recommended structure:
 
 ```txt
 .
@@ -72,8 +68,8 @@ Recommended structure:
 ├── frontend/
 │   ├── app/
 │   ├── components/
-│   ├── lib/
 │   ├── hooks/
+│   ├── lib/
 │   └── stores/
 ├── docker-compose.yml
 ├── .env.example
@@ -81,108 +77,147 @@ Recommended structure:
 └── impl-plan.md
 ```
 
-## Core Product Concepts
+## Product Model
 
 ### Onboarding
 
-Onboarding converts the user's research interests into initial filters.
+Onboarding is text-only.
 
-V1 onboarding is text-only:
+The user enters freeform notes about:
 
-1. The user describes their current research interests, active hypotheses, open questions, and topics they want to track.
-2. The backend extracts proposed claim/question/topic filters from that text.
-3. The user reviews, edits, removes, or adds proposed filters.
-4. The user confirms onboarding, which creates the selected filters.
+- current research interests
+- hypotheses they are tracking
+- open questions
+- broad topics they want to follow
 
-Do not implement voice transcription, document upload, Google Docs import, paper import, or codebase ingestion in v1.
+The backend converts this into proposed filters using three default templates:
 
-### Filter
+- Claim template: search for warrants for or against a proposition.
+- Question template: search for answers or partial answers to a question.
+- Topic template: search for abstracts relevant to a topic.
 
-A filter is a standing research interest. It is not just a saved keyword search. It contains the user-facing research statement plus instructions for how the LLM should judge papers against that statement.
+The user can edit, remove, or add proposed filters before completing onboarding.
 
-Filter types:
+Onboarding is complete when at least one filter has `status = "active"`.
 
-- `claim`: a proposition the user believes or wants tracked.
-- `question`: an open research question the user wants papers to inform.
-- `topic`: a broader area the user wants to stay current on.
-- `custom`: a user-defined filter type with custom judge instructions.
+### Filters
 
-Examples:
+A filter is a JSON-defined search instruction. There is no top-level `kind` enum and no versioning.
 
-- Claim: "LLM-as-judge evaluation is unreliable."
-- Question: "When do SAE features become causally meaningful?"
-- Topic: "Mechanistic interpretability for reasoning models."
+```ts
+type FilterDefinition = {
+  name: string
+  statement: string
+  description?: string
+  search: {
+    instructions: string
+    outputMode: "warrants" | "answers" | "relevance"
+  }
+}
+```
 
-Because onboarding is now in scope, do not silently seed filters into a fresh database. A fresh user should start on the onboarding flow. For demo resilience, the onboarding extraction endpoint can return deterministic fallback proposals if `OPENAI_API_KEY` is missing.
+Filters have lifecycle state:
 
-### Search Run
+```ts
+type FilterStatus = "active" | "archived"
+```
 
-A search run is one execution of active filters over a paper batch.
+- `active`: included in daily searches.
+- `archived`: shown in an archived section on the Filters page, not run.
 
-For v1, the paper batch comes from a mocked arXiv endpoint that returns 10 deterministic abstract-like papers. Later, this can be replaced by real arXiv ingestion without changing the UI contract.
+Clicking Not Interested on a filter archives it. The filter is not deleted.
 
-### Paper Match
+### Daily Searches
 
-A paper match is the LLM's judgment that a paper is relevant to a filter.
+V1 has only daily searches. There is no custom search mode.
 
-For claim filters, the important stance values are:
+A daily search run:
 
-- `supports`
-- `refutes`
-- `complicates`
-- `irrelevant`
+1. Loads current active filters.
+2. Loads the daily paper batch from an internal deterministic mock paper provider.
+3. Runs each active filter over the paper abstracts.
+4. Stores paper matches.
+5. Generates a concise cited summary over surfaced matches.
 
-For question and topic filters, the important stance values are:
+The mock paper provider is an implementation detail, not a persisted paper source in the data model.
 
-- `relevant`
-- `irrelevant`
+### Search History
 
-### Idea Map
+The Search page is a history page for previous daily searches.
 
-An idea map is generated lazily for a paper when the user opens it. It decomposes the paper into core claims, warrants, and evidence. In v1, the evidence can be based on mocked metadata or abstract-level text rather than real PDF extraction.
+It should list prior daily search runs and let the user open a run to inspect:
 
-## Backend Data Models
+- status
+- generated summary
+- summary citations
+- grouped paper matches
 
-The schema examples below describe the logical tables. Implement them with SQLAlchemy types that work on SQLite:
+The Search page does not start custom searches in v1.
 
-- IDs should be UUID strings stored as `TEXT`.
-- Timestamps should use SQLAlchemy `DateTime`, stored by SQLite as text/datetime-compatible values.
-- JSON fields should use SQLAlchemy `JSON`, stored by SQLite as JSON text.
-- Scores can be `Float` in v1 instead of database-specific numeric types.
+### Persistence Policy
+
+Keep local data persistently unless the user uses the dev reset control.
+
+- Filters persist as active or archived.
+- Papers persist.
+- Cached arXiv HTML persists.
+- Daily search runs persist as history.
+- Paper matches persist as historical results.
+- Idea maps persist and are reused.
+- Feedback persists and controls hiding/archiving behavior.
+
+Paper matches are not deleted when the user clicks Not Interested. A feedback row hides them from default Daily views.
+
+### Idea Maps
+
+An idea map is generated from arXiv HTML when the user opens a paper.
+
+It is intentionally simple:
+
+- A paper has claims.
+- Each claim has warrants.
+- Each warrant has one citation into the HTML text.
+- If a warrant needs multiple citations, split it into multiple warrants under the same claim.
+
+Click behavior:
+
+- Click claim: expand or collapse warrants.
+- Click warrant: jump the HTML viewer to the cited text and highlight it.
+
+Papers without arXiv HTML are skipped for idea-map generation.
+
+## Data Models
+
+Use SQLAlchemy types compatible with SQLite:
+
+- IDs are UUID strings stored as `TEXT`.
+- Timestamps use SQLAlchemy `DateTime`.
+- JSON fields use SQLAlchemy `JSON`.
+- Scores use `Float`.
 
 ### `filters`
-
-Stores standing user interests and the instructions used to judge papers.
 
 ```sql
 filters (
   id text primary key,
-  type text not null,
   name text not null,
-  statement text not null,
-  description text,
+  definition json not null,
+  status text not null default 'active',
 
-  judge_instructions text not null,
-  rerank_instructions text,
-  version integer not null default 1,
-
-  active boolean not null default true,
   created_at datetime not null,
-  updated_at datetime not null
+  updated_at datetime not null,
+  archived_at datetime
 )
 ```
 
-Behavior:
+Notes:
 
-- `statement` is the concise natural-language filter.
-- `judge_instructions` tells the model how to evaluate abstracts for this filter.
-- `rerank_instructions` tells the model how to order matches within the filter.
-- `version` increments when judge or rerank instructions change.
-- V1 does not need a separate table for filter type definitions.
+- `name` is denormalized from `definition.name`.
+- `definition` is the source of truth for statement and search instructions.
+- Filters are not versioned.
+- Archived filters are not run.
 
 ### `onboarding_extractions`
-
-Stores one onboarding extraction run from raw user text into proposed filters.
 
 ```sql
 onboarding_extractions (
@@ -202,50 +237,37 @@ onboarding_extractions (
 )
 ```
 
-Allowed `status` values:
+Allowed statuses:
 
 - `queued`
 - `running`
 - `completed`
 - `failed`
 
-Suggested JSON shape for `proposed_filters`:
+Proposed filter shape:
 
 ```ts
 type ProposedFilter = {
   id: string
-  type: "claim" | "question" | "topic"
   name: string
-  statement: string
-  description?: string
   rationale: string
-  judgeInstructions: string
-  rerankInstructions?: string
+  definition: FilterDefinition
 }
 ```
 
-Behavior:
-
-- Proposed filters are not active filters until the user confirms them.
-- The frontend may edit proposed filters before saving them.
-- If `OPENAI_API_KEY` is missing, return deterministic fallback proposals so the onboarding UI remains demoable.
-
 ### `papers`
-
-Stores normalized paper records from the mocked arXiv source.
 
 ```sql
 papers (
   id text primary key,
-  external_id text unique,
-  source text not null default 'mock_arxiv',
+  arxiv_id text unique,
 
   title text not null,
   abstract text not null,
   authors json not null,
   categories json,
   published_at datetime,
-  pdf_url text,
+  html_url text,
   landing_url text,
 
   created_at datetime not null,
@@ -253,69 +275,57 @@ papers (
 )
 ```
 
-Behavior:
+Notes:
 
-- `external_id` should be stable across mock runs so matches can reference papers consistently.
-- `authors` can be a JSON array of strings.
-- `categories` can mimic arXiv categories but does not need to be exhaustive.
+- `arxiv_id` is stable and used to construct `https://arxiv.org/html/{arxiv_id}`.
+- V1 daily paper records come from the internal mock provider, but are stored as normal papers.
+
+### `paper_html`
+
+Cache fetched arXiv HTML.
+
+```sql
+paper_html (
+  paper_id text primary key references papers(id),
+  source_url text not null,
+  html text not null,
+  content_hash text,
+  fetched_at datetime not null
+)
+```
 
 ### `search_runs`
 
-Stores one execution of filters over a paper batch.
+One row per daily search execution.
 
 ```sql
 search_runs (
   id text primary key,
-  mode text not null,
   status text not null,
+  run_date date not null,
 
-  paper_source text not null default 'mock_arxiv',
-  paper_limit integer not null default 10,
+  candidate_count integer,
+  match_count integer,
+  summary text,
+  summary_citations json not null default '[]',
 
   started_at datetime,
   completed_at datetime,
   error text,
-
   created_at datetime not null
 )
 ```
 
-Allowed `mode` values:
-
-- `daily`
-- `manual`
-
-Allowed `status` values:
+Allowed statuses:
 
 - `queued`
 - `running`
 - `completed`
 - `failed`
 
-### `search_run_filters`
-
-Snapshots the filter configuration used for a run.
-
-```sql
-search_run_filters (
-  id text primary key,
-  search_run_id text not null references search_runs(id),
-  filter_id text not null references filters(id),
-
-  filter_version integer not null,
-  statement_snapshot text not null,
-  judge_instructions_snapshot text not null,
-  rerank_instructions_snapshot text
-)
-```
-
-Reason:
-
-Filters can evolve. A previous search run should still explain which filter text and instructions were used at the time it ran.
+`run_date` is not unique. Local demos may create multiple daily runs on the same date.
 
 ### `paper_matches`
-
-Stores LLM judgments for filter-paper pairs.
 
 ```sql
 paper_matches (
@@ -332,24 +342,23 @@ paper_matches (
   matched_claims json not null default '[]',
   abstract_evidence json not null default '[]',
 
-  rank integer,
   llm_model text,
   llm_response_id text,
-
   created_at datetime not null
 )
 ```
 
-Behavior:
+Expected stance values:
 
-- Store irrelevant matches only if useful for debugging. The API should usually return relevant, supports, refutes, and complicates matches.
-- `matched_claims` should be short claims extracted from the abstract.
-- `abstract_evidence` should be snippets or sentence references from the abstract.
-- `rank` is per filter within a search run.
+- `supports`
+- `refutes`
+- `complicates`
+- `relevant`
+- `irrelevant`
+
+The API should usually hide irrelevant matches and matches with `not_interested` feedback.
 
 ### `idea_maps`
-
-Stores generated paper decompositions.
 
 ```sql
 idea_maps (
@@ -358,6 +367,8 @@ idea_maps (
   status text not null,
 
   claims json not null default '[]',
+  source_url text,
+  dropped_reason text,
   llm_model text,
   llm_response_id text,
   error text,
@@ -367,36 +378,53 @@ idea_maps (
 )
 ```
 
-Allowed `status` values:
+Allowed statuses:
 
 - `queued`
 - `running`
 - `completed`
 - `failed`
+- `skipped`
 
-Suggested JSON shape for `claims`:
+Idea map JSON:
 
 ```ts
+type IdeaMap = {
+  claims: IdeaMapClaim[]
+}
+
 type IdeaMapClaim = {
   id: string
-  claim: string
-  importance: "central" | "supporting" | "minor"
-  warrants: {
-    id: string
-    warrant: string
-    evidence: {
-      id: string
-      kind: "abstract" | "paper_text" | "figure" | "citation"
-      text: string
-      page?: number
-    }[]
-  }[]
+  text: string
+  warrants: IdeaMapWarrant[]
+}
+
+type IdeaMapWarrant = {
+  id: string
+  text: string
+  citation: HtmlCitation
+}
+
+type HtmlCitation = {
+  blockId: string
+  quote: string
+  prefix?: string
+  suffix?: string
+  htmlAnchor: string
+  sectionTitle?: string
 }
 ```
 
-### `feedback`
+Citation validation:
 
-Stores user feedback on matches and idea-map evidence.
+- Parse arXiv HTML into addressable blocks.
+- Model must cite a `blockId` and exact quote or prefix/suffix.
+- Verify the block exists.
+- Verify the quote exists in the block text, or prefix/suffix identify a valid span.
+- Drop invalid warrants or run one repair pass.
+- Store only validated citations.
+
+### `feedback`
 
 ```sql
 feedback (
@@ -406,16 +434,16 @@ feedback (
 
   value text not null,
   note text,
-
   created_at datetime not null
 )
 ```
 
 Allowed `target_type` values:
 
+- `filter`
 - `paper_match`
 - `idea_map_claim`
-- `evidence`
+- `idea_map_warrant`
 
 Allowed `value` values:
 
@@ -423,36 +451,42 @@ Allowed `value` values:
 - `downvote`
 - `not_interested`
 
-V1 stores feedback but does not need to rewrite prompts from feedback yet.
+Feedback behavior:
 
-## LLM Output Contracts
+- `not_interested` on a filter archives the filter.
+- `not_interested` on a paper match hides the match from default Daily and Search views.
+- `upvote` and `downvote` are stored for future prompt tuning but do not change behavior in v1.
 
-Use structured outputs with Pydantic schemas in the worker. The worker should normalize model output before writing to SQLite through the same SQLAlchemy models used by the API.
+## LLM Contracts
 
-### Onboarding Extraction Output
+Use structured outputs with Pydantic schemas in worker code. The LLM client should call OpenRouter with:
+
+- `OPENROUTER_API_KEY`
+- model `deepseek/deepseek-v4-flash`
+- provider `novita`
+
+### Onboarding Extraction
 
 ```ts
 type OnboardingExtractionOutput = {
-  proposedFilters: {
-    type: "claim" | "question" | "topic"
-    name: string
-    statement: string
-    description?: string
-    rationale: string
-    judgeInstructions: string
-    rerankInstructions?: string
-  }[]
+  proposedFilters: ProposedFilter[]
 }
 ```
 
-The extraction prompt should prefer a small, high-quality set of filters over a long list. Target 2-4 claims, 2-3 questions, and 1-3 topics unless the user's input clearly calls for fewer.
+Prompt target:
 
-### Filter Judge Output
+- 2-4 warrant-search filters
+- 2-3 answer-search filters
+- 1-3 relevance-search filters
+
+Prefer fewer high-quality filters over a long list.
+
+### Filter Search
 
 ```ts
-type FilterJudgeOutput = {
+type FilterSearchOutput = {
   matches: {
-    paperExternalId: string
+    arxivId: string
     stance: "supports" | "refutes" | "complicates" | "relevant" | "irrelevant"
     relevanceScore: number
     confidence: number
@@ -463,25 +497,32 @@ type FilterJudgeOutput = {
 }
 ```
 
-### Rerank Output
+### Daily Summary
 
 ```ts
-type RerankOutput = {
-  rankings: {
-    paperExternalId: string
-    rank: number
-    reason: string
+type SearchRunSummaryOutput = {
+  summary: string
+  citations: {
+    paperMatchId?: string
+    arxivId: string
+    citedFor: string
   }[]
 }
 ```
 
-### Idea Map Output
+### Idea Map
 
 ```ts
-type IdeaMapOutput = {
-  claims: IdeaMapClaim[]
-}
+type IdeaMapOutput = IdeaMap
 ```
+
+Definitions for the idea-map prompt:
+
+- Claim: a concise proposition the paper argues, demonstrates, or relies on.
+- Warrant: the specific reason the paper gives for believing the claim. This is usually a result, experiment, theorem, ablation, argument, or comparison.
+- Citation: the exact HTML text location that justifies the warrant.
+
+The model should split warrants if one warrant needs multiple citations.
 
 ## Backend API
 
@@ -491,18 +532,6 @@ type IdeaMapOutput = {
 GET /health
 ```
 
-Returns service health and basic dependency status.
-
-### Mock arXiv
-
-```http
-GET /mock/arxiv?limit=10
-```
-
-Returns 10 deterministic mock paper abstracts.
-
-This endpoint exists to keep frontend and backend development unblocked before real arXiv ingestion.
-
 ### Onboarding
 
 ```http
@@ -510,28 +539,28 @@ GET /onboarding/status
 POST /onboarding/extractions
 GET /onboarding/extractions/{extraction_id}
 POST /onboarding/complete
+POST /dev/reset-onboarding
 ```
 
-`GET /onboarding/status` behavior:
+`GET /onboarding/status` returns whether at least one active filter exists.
 
-- Return whether onboarding is complete.
-- For v1, onboarding is complete when at least one active filter exists.
-- Include active filter count.
+`POST /onboarding/extractions` creates an extraction row and enqueues `extract_onboarding_filters`.
 
-`POST /onboarding/extractions` behavior:
+`POST /onboarding/complete` accepts edited proposed filters, creates active filters, and returns them.
 
-1. Accept a raw text description of the user's interests.
-2. Create an `onboarding_extractions` row with `queued` status.
-3. Enqueue an RQ job to extract proposed filters.
-4. Return the extraction id.
+`POST /dev/reset-onboarding` is local-development only. Enable it only when `APP_ENV=development` or `ENABLE_DEV_RESET=true`.
 
-`GET /onboarding/extractions/{id}` returns extraction status, proposed filters, and any error.
+Reset behavior:
 
-`POST /onboarding/complete` behavior:
+1. Delete onboarding extractions.
+2. Delete feedback.
+3. Delete idea maps.
+4. Delete paper matches.
+5. Delete search runs.
+6. Delete filters.
+7. Keep papers and `paper_html` by default.
 
-1. Accept the user's edited list of proposed filters.
-2. Create active `filters` rows using default instructions where needed.
-3. Return created filters.
+The endpoint returns counts for changed rows and fails outside development mode.
 
 ### Filters
 
@@ -539,30 +568,29 @@ POST /onboarding/complete
 GET /filters
 POST /filters
 PATCH /filters/{filter_id}
-DELETE /filters/{filter_id}
+POST /filters/{filter_id}/archive
+POST /filters/{filter_id}/restore
 ```
 
-Delete can soft-disable by setting `active = false`.
+`GET /filters` should support active and archived sections. Archived filters are visible but not run.
 
-For built-in filter types, `POST /filters` should fill in default judge and rerank instructions if the request does not provide custom instructions.
-
-### Search Runs
+### Daily Search Runs
 
 ```http
+GET /search-runs
 GET /search-runs/latest
-POST /search-runs
+POST /search-runs/daily
 GET /search-runs/{search_run_id}
 GET /search-runs/{search_run_id}/matches
 ```
 
-`POST /search-runs` behavior:
+`POST /search-runs/daily` flow:
 
-1. Create `search_runs` row with `queued` status.
-2. Snapshot all active filters into `search_run_filters`.
-3. Load 10 mock arXiv papers and upsert them into `papers`.
-4. Enqueue one RQ job for the run.
+1. Create `search_runs` row with `queued` status and today's `run_date`.
+2. Load daily mock paper batch and upsert papers.
+3. Enqueue `run_daily_search`.
 
-`GET /search-runs/{id}/matches` should return results grouped by filter for the Daily page.
+`GET /search-runs` powers the Search history page.
 
 ### Papers and Idea Maps
 
@@ -572,11 +600,11 @@ POST /papers/{paper_id}/idea-map
 GET /papers/{paper_id}/idea-map
 ```
 
-`POST /papers/{paper_id}/idea-map` behavior:
+`POST /papers/{paper_id}/idea-map` flow:
 
 1. Return existing completed idea map if present.
-2. Return existing queued or running idea map if already in progress.
-3. Otherwise create an `idea_maps` row and enqueue an RQ job.
+2. Return existing queued/running/skipped idea map if present.
+3. Otherwise create `idea_maps` row and enqueue `generate_idea_map`.
 
 ### Feedback
 
@@ -584,49 +612,46 @@ GET /papers/{paper_id}/idea-map
 POST /feedback
 ```
 
-Records user feedback on paper matches, claims, or evidence.
+This records feedback. For `not_interested` on filters, the API should also archive the filter.
 
 ## Worker Jobs
 
 ### `extract_onboarding_filters(extraction_id)`
 
-Flow:
-
 1. Mark extraction `running`.
-2. Load the raw onboarding text.
-3. If `OPENAI_API_KEY` is configured, ask the model for proposed claim/question/topic filters using the structured output schema.
-4. If `OPENAI_API_KEY` is missing, use deterministic fallback proposals from the same schema shape.
-5. Persist normalized `proposed_filters`.
+2. Load raw onboarding text.
+3. Ask the model for proposed filters using default templates and structured output.
+4. In demo mode without `OPENROUTER_API_KEY`, return deterministic proposals with the same shape.
+5. Persist `proposed_filters`.
 6. Mark extraction `completed`.
 7. On failure, mark `failed` and store the error.
 
-### `run_search(search_run_id)`
-
-Main job for a search run.
-
-Flow:
+### `run_daily_search(search_run_id)`
 
 1. Mark run `running`.
-2. Load run filter snapshots.
-3. Load the paper batch.
-4. For each filter snapshot, call the LLM judge over all 10 abstracts.
+2. Load active filters.
+3. Load the daily paper batch.
+4. For each active filter, search all abstracts using `filter.definition.search`.
 5. Persist `paper_matches`.
-6. Run reranking for each filter if multiple relevant matches exist.
-7. Mark run `completed`.
-8. If any unrecoverable error occurs, mark run `failed` and store the error.
-
-The v1 paper batch is small enough that one job can process all filters. Later this can split into one job per filter or per paper batch.
+6. Generate a concise Daily summary over visible surfaced matches.
+7. Persist summary, citations, `candidate_count`, and `match_count`.
+8. Mark run `completed`.
+9. On failure, mark `failed` and store the error.
 
 ### `generate_idea_map(idea_map_id)`
 
-Flow:
-
 1. Mark idea map `running`.
-2. Load paper metadata and abstract.
-3. Ask the model for core claims, warrants, and evidence.
-4. Persist normalized `claims` JSON.
-5. Mark idea map `completed`.
-6. On failure, mark `failed` and store the error.
+2. Load paper metadata and construct `https://arxiv.org/html/{arxiv_id}`.
+3. Fetch arXiv HTML, or load it from `paper_html` if cached.
+4. If HTML is unavailable, mark idea map `skipped`, store `dropped_reason`, and log the drop.
+5. Cache fetched HTML in `paper_html`.
+6. Parse HTML into addressable blocks, preserving section titles.
+7. Add local DOM anchors for useful blocks if needed.
+8. Ask the model for claims and warrant citations from the block list.
+9. Validate every warrant citation against parsed block text.
+10. Persist validated claims/warrants.
+11. Mark idea map `completed`.
+12. On failure, mark `failed` and store the error.
 
 ## Frontend Data Fetching
 
@@ -639,12 +664,15 @@ api.getOnboardingStatus()
 api.createOnboardingExtraction(input)
 api.getOnboardingExtraction(id)
 api.completeOnboarding(input)
-api.getFilters()
+api.resetOnboardingDev()
+api.getFilters(params)
 api.createFilter(input)
 api.updateFilter(id, input)
-api.deleteFilter(id)
+api.archiveFilter(id)
+api.restoreFilter(id)
+api.getSearchRuns()
 api.getLatestSearchRun()
-api.createSearchRun(input)
+api.createDailySearchRun()
 api.getSearchRun(id)
 api.getSearchRunMatches(id)
 api.getPaper(id)
@@ -658,7 +686,8 @@ Recommended query keys:
 ```ts
 ["onboarding", "status"]
 ["onboarding", "extractions", extractionId]
-["filters"]
+["filters", status]
+["search-runs"]
 ["search-runs", "latest"]
 ["search-runs", runId]
 ["search-runs", runId, "matches"]
@@ -666,40 +695,36 @@ Recommended query keys:
 ["papers", paperId, "idea-map"]
 ```
 
-Polling behavior:
+Polling:
 
-- Poll onboarding extraction status while status is `queued` or `running`.
-- Poll search run status while status is `queued` or `running`.
-- Poll idea map status while status is `queued` or `running`.
-- Use React Query `refetchInterval` for polling, with a default interval around 1000ms while jobs are active.
-- Keep previous Daily results visible while a new run is in progress.
+- Poll onboarding extraction status while `queued` or `running`.
+- Poll search run status while `queued` or `running`.
+- Poll idea map status while `queued` or `running`.
+- Use React Query `refetchInterval`, around 1000ms while jobs are active.
 - Do not implement WebSockets or Server-Sent Events in v1.
 
-Use Zustand only for UI state:
+Zustand should only hold local UI state:
 
 ```ts
 type UiState = {
-  selectedFilterType: "all" | "claim" | "question" | "topic" | "custom"
   selectedRunId?: string
   selectedPaperId?: string
   selectedIdeaClaimId?: string
-  selectedEvidenceId?: string
+  selectedIdeaWarrantId?: string
 }
 ```
 
-## Frontend Pages and Layout
+## Frontend Layout
 
 ### App Shell
 
-Use a shadcn sidebar layout after onboarding with three primary routes:
+After onboarding, use a shadcn sidebar layout with:
 
 - `Daily`
-- `Filters`
 - `Search`
+- `Filters`
 
-`Search` exists in the sidebar but is not fully implemented in v1.
-
-Before onboarding is complete, route the user to `/onboarding` rather than the sidebar app shell.
+Before onboarding is complete, route to `/onboarding`.
 
 ### Onboarding Page
 
@@ -711,50 +736,64 @@ Route:
 
 Layout:
 
-- Full-page focused form, not inside the sidebar shell.
-- Large text area asking the user to describe current research interests, hypotheses, questions, and topics.
-- Submit action starts an onboarding extraction.
-- While extraction is queued/running, show progress using React Query polling.
-- Once extraction completes, show editable proposed filters grouped by `claim`, `question`, and `topic`.
-- The user can edit text, remove weak proposals, add a manual filter, and complete onboarding.
-- Completing onboarding creates filters and routes to `Daily`.
+- Full-page focused form outside the sidebar shell.
+- In local development, include a small reset control.
+- Large text area for research interests, hypotheses, questions, and topics.
+- Submit starts extraction.
+- Poll extraction status.
+- Show editable proposed filters when complete.
+- User can edit, remove, add, then complete onboarding.
+- Completing onboarding routes to `Daily`.
 
 ### Daily Page
 
-This is the default first screen.
+Default post-onboarding page.
 
 Content:
 
-- Header with today's search status.
+- Header with latest daily search status.
 - Primary action: run daily search.
-- Grouped sections by filter.
-- Within each filter, paper cards sorted by rank or relevance.
-- Each paper card shows title, authors, date, stance badge, relevance score, rationale, matched claims, and abstract evidence.
+- Lightweight add-filter box for quickly adding a claim, question, topic, or custom search instruction.
+- Generated Daily summary with citations to surfaced papers.
+- Grouped paper matches by filter.
+- Paper cards with title, authors, date, stance, score, rationale, matched claims, and abstract evidence.
 
-Card interactions:
+Interactions:
 
-- Open paper detail page.
-- Submit feedback.
-- Show enough rationale that the user understands why the paper appeared.
+- Open paper detail.
+- Not Interested on a paper match hides that match by feedback.
+- Not Interested on a filter group archives that filter.
+- Feedback controls on matches.
+
+### Search Page
+
+Search is history-only in v1.
+
+Content:
+
+- List previous daily search runs.
+- Show run date, status, match count, and summary preview.
+- Opening a run shows summary and grouped matches.
+- No controls for starting custom searches.
+- No date-range search.
+- No selected-filter search.
 
 ### Filters Page
 
 Content:
 
-- List all active filters.
-- Show filter type, statement, description, and version.
-- Show judge/rerank instruction previews in an expandable area.
-- Support creating a new filter.
-- Support disabling a filter.
+- Active filters section.
+- Archived filters section.
+- Local-development reset action in a low-prominence menu or footer.
+- Filter name, statement, description.
+- Expand to inspect search instructions.
+- Create, edit, archive, and restore filters.
 
 Creating a filter:
 
-- Choose type.
-- Enter name.
-- Enter statement.
-- Optionally enter description.
-- For built-in types, backend can provide default judge instructions.
-- For custom type, user can provide judge instructions.
+- Start from Claim, Question, Topic, or Blank template.
+- Enter name, statement, optional description.
+- Edit search instructions if needed.
 
 ### Paper Detail Page
 
@@ -767,26 +806,105 @@ Route:
 Layout:
 
 - Left pane: idea map.
-- Right pane: PDF-style viewer placeholder.
+- Right pane: arXiv HTML viewer.
 
-V1 paper viewer behavior:
+Behavior:
 
-- Show paper title and metadata.
-- Show PDF URL if available.
-- Use a stable placeholder panel for the PDF if embedding is not worth the time.
-- Clicking an idea-map claim or warrant updates selected evidence/page state.
+- If the idea map has not been generated, show a generate action.
+- If generation is running, poll status.
+- If skipped, show a concise unavailable state.
+- Claims appear as collapsible rows.
+- Clicking a claim expands or collapses warrants.
+- Clicking a warrant jumps the right pane to the cited HTML anchor and highlights the cited text.
+- Include a small add-filter control so an interesting paper claim can become a new filter.
 
-### Search Page
+## Tests
 
-V1 placeholder.
+Tests should act as executable acceptance criteria for a cloud agent implementing the app.
 
-Content:
+### Backend Unit Tests
 
-- Disabled controls for selecting filters.
-- Disabled date range control.
-- Short note that manual historical search is out of scope for v1.
+- Filter template normalization:
+  - Claim template produces `outputMode = "warrants"`.
+  - Question template produces `outputMode = "answers"`.
+  - Topic template produces `outputMode = "relevance"`.
+  - Persisted filters do not require a top-level `kind`.
+  - Persisted filters are not versioned.
+- Filter lifecycle:
+  - Active filters are run.
+  - Archived filters are not run.
+  - Archived filters can be restored.
+- Mock paper provider:
+  - Returns deterministic records.
+  - Records include stable arXiv ids, abstracts, authors, dates, and HTML URLs.
+- HTML parser:
+  - Parses sample arXiv-like HTML into addressable blocks.
+  - Preserves section titles.
+  - Generates stable anchors for blocks without usable anchors.
+- Citation validation:
+  - Accepts exact quote matches.
+  - Accepts valid prefix/suffix matches.
+  - Rejects missing block ids.
+  - Rejects ambiguous or missing text spans.
+- SQLite setup:
+  - Initializes schema.
+  - Enables WAL mode.
 
-Do not implement actual historical search in v1.
+### Backend API Integration Tests
+
+- Fresh database reports onboarding incomplete.
+- Completing onboarding creates active filters.
+- Dev reset clears onboarding/filter/search state and returns onboarding to incomplete.
+- Dev reset is unavailable outside development mode.
+- Filter CRUD supports create, update, archive, restore, and list.
+- `POST /search-runs/daily` creates a queued daily run using current active filters.
+- Archived filters are not used in daily runs.
+- `not_interested` feedback on a filter archives it.
+- `not_interested` feedback on a paper match hides it from default results.
+- `GET /search-runs` returns daily search history.
+- `POST /papers/{id}/idea-map` is idempotent for queued/running/completed/skipped maps.
+- `POST /feedback` records feedback against paper matches and idea-map claims/warrants.
+
+### Worker Tests
+
+- Run job functions directly against a temporary SQLite database.
+- `extract_onboarding_filters` persists proposed filters.
+- `run_daily_search` persists paper matches and a Daily summary.
+- `run_daily_search` ignores archived filters.
+- `generate_idea_map` uses cached HTML when present.
+- `generate_idea_map` marks unavailable HTML as `skipped`.
+- `generate_idea_map` persists only validated warrant citations.
+
+### OpenRouter Smoke Tests
+
+Run only when both are set:
+
+```txt
+OPENROUTER_API_KEY=...
+RUN_LIVE_LLM_TESTS=1
+```
+
+Use tiny fixtures:
+
+- Onboarding extraction from a short paragraph.
+- Filter search over 2-3 mock abstracts.
+- Daily summary over 2-3 fake matches.
+- Idea-map extraction from a short local arXiv-like HTML fixture.
+
+Assert schema shape and minimal semantic behavior, not exact wording.
+
+### Frontend Tests
+
+- Onboarding form submits and shows running state.
+- Completed extraction renders editable proposed filters.
+- Completing onboarding routes to Daily.
+- Daily shows loading, empty, running, completed, and failed states.
+- Search page lists previous daily runs.
+- Filters page shows active and archived filters.
+- Not Interested archives a filter.
+- Paper detail shows generate, running, skipped, and completed idea-map states.
+- Clicking a claim expands warrants.
+- Clicking a warrant calls HTML jump/highlight behavior.
 
 ## Implementation Order
 
@@ -802,20 +920,22 @@ Do not implement actual historical search in v1.
 
 1. Define SQLAlchemy models.
 2. Add Alembic migrations.
-3. Add database session handling.
-4. Add onboarding status, extraction, and completion endpoints.
-5. Add filter CRUD endpoints.
-6. Add deterministic mock arXiv service.
-7. Add search run creation and status endpoints.
+3. Add SQLite WAL initialization.
+4. Add database session handling.
+5. Add onboarding endpoints.
+6. Add filter CRUD/archive/restore endpoints.
+7. Add deterministic daily mock paper provider.
+8. Add daily search run endpoints.
+9. Add dev reset endpoint.
 
-### Phase 3: Queue and LLM Jobs
+### Phase 3: Jobs and LLM
 
 1. Add Redis/RQ connection setup.
 2. Add worker entrypoint.
 3. Implement `extract_onboarding_filters`.
-4. Implement `run_search`.
-5. Implement OpenAI structured judge call.
-6. Persist matches and run status.
+4. Implement `run_daily_search`.
+5. Implement Daily summary generation.
+6. Implement HTML fetching/caching/parsing.
 7. Implement `generate_idea_map`.
 
 ### Phase 4: Frontend Data Layer
@@ -823,68 +943,80 @@ Do not implement actual historical search in v1.
 1. Add React Query provider.
 2. Add API client.
 3. Add query and mutation hooks.
-4. Connect Onboarding page to extraction and completion endpoints.
-5. Connect Filters page to backend.
-6. Connect Daily page to search runs and matches.
-7. Connect Paper page to idea-map endpoints.
+4. Connect onboarding.
+5. Connect filters.
+6. Connect Daily.
+7. Connect Search history.
+8. Connect paper detail and idea maps.
 
 ### Phase 5: Product Polish
 
-1. Make Daily page dense and readable.
-2. Add stance badges and rationale presentation.
-3. Add loading, empty, queued, running, completed, and failed states.
-4. Add feedback controls.
-5. Polish onboarding proposal review and edit states.
-6. Add Search placeholder route.
-7. Add README instructions for running the prototype.
+1. Make Daily dense and readable.
+2. Add loading, empty, running, skipped, completed, and failed states.
+3. Polish cited summary display.
+4. Polish Search history display.
+5. Polish idea-map expansion and HTML jump behavior.
+6. Add feedback and Not Interested controls.
+7. Add README instructions.
+
+### Phase 6: Tests
+
+1. Add backend unit tests.
+2. Add backend API integration tests.
+3. Add worker tests.
+4. Add opt-in OpenRouter smoke tests.
+5. Add frontend tests.
+6. Document test commands in README.
 
 ## Out of Scope for V1
 
-- Automated tests. User will handle testing separately.
-- Real arXiv ingestion.
-- PDF parsing.
-- Voice transcription, document upload, Google Docs import, paper import, and codebase ingestion during onboarding.
+- Real arXiv ingestion for the daily paper batch.
+- Custom searches from the Search page.
+- Date-range search.
+- Search over selected filter subsets.
+- Non-HTML paper parsing for idea maps.
 - Embeddings or vector search.
 - Auth.
 - Multi-user support.
 - Scheduled daily jobs.
 - Prompt self-rewriting from feedback.
 - Citation graph visualization.
-- Historical search over prior months.
 
 ## Environment Variables
 
 ```txt
 DATABASE_URL=sqlite:///./data/paper_search.db
 REDIS_URL=redis://redis:6379/0
-OPENAI_API_KEY=
-OPENAI_MODEL=
+OPENROUTER_API_KEY=
+OPENROUTER_MODEL=deepseek/deepseek-v4-flash
+OPENROUTER_PROVIDER=novita
 NEXT_PUBLIC_API_URL=http://localhost:8000
+APP_ENV=development
+ENABLE_DEV_RESET=true
+RUN_LIVE_LLM_TESTS=0
 ```
 
-Use a sensible backend default model if `OPENAI_MODEL` is empty, but require `OPENAI_API_KEY` for real LLM jobs.
-
-When running API and worker in Docker, use a shared mounted volume and an absolute SQLite URL such as:
+When API and worker run in Docker, use:
 
 ```txt
 DATABASE_URL=sqlite:////app/data/paper_search.db
 ```
 
-Enable SQLite WAL mode during database initialization so the API and worker can safely share reads and writes for this single-user prototype.
-
 ## Acceptance Criteria
 
 - The repo has a runnable frontend and backend.
 - Docker Compose starts Redis, FastAPI, and the RQ worker.
-- A fresh user starts on the onboarding page.
-- The user can enter research interests and generate proposed filters.
-- The user can edit proposed filters and complete onboarding.
-- After onboarding, the frontend opens to the Daily dashboard.
-- The user can create and view filters.
-- The user can start a search run from the Daily page.
-- The backend enqueues a Redis job for the search run.
-- The worker evaluates mocked abstracts with the active filters and stores matches.
-- The Daily page displays grouped matches with stance, score, rationale, and evidence.
+- A fresh user starts on onboarding.
+- The user can generate, edit, and save proposed filters.
+- Active filters are run; archived filters are not run.
+- In local development, the user can reset onboarding and rerun it.
+- The user can run a daily search.
+- Daily search produces grouped matches and a cited summary.
+- Not Interested on a filter archives it.
+- Not Interested on a paper match hides it from default results.
+- Search page displays previous daily searches.
 - The user can open a paper detail page.
-- The user can generate and view an idea map for that paper.
-- The Search page exists as a v1 placeholder but does not implement historical search.
+- Idea maps use cached arXiv HTML when available.
+- Claims expand into warrants.
+- Clicking a warrant jumps to cited HTML text.
+- Tests cover backend units, API flows, worker jobs, frontend states, and opt-in live LLM smoke paths.
