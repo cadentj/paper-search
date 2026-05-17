@@ -1,0 +1,39 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/data:/app/data
+    environment:
+      - DATABASE_URL=sqlite:////app/data/paper_search.db
+      - REDIS_URL=redis://redis:6379/0
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-deepseek/deepseek-v4-flash}
+      - OPENROUTER_PROVIDER=${OPENROUTER_PROVIDER:-novita}
+      - APP_ENV=development
+      - ENABLE_DEV_RESET=true
+    depends_on:
+      - redis
+
+  worker:
+    build:
+      context: ./backend
+    command: python -m app.worker
+    volumes:
+      - ./backend/data:/app/data
+    environment:
+      - DATABASE_URL=sqlite:////app/data/paper_search.db
+      - REDIS_URL=redis://redis:6379/0
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-deepseek/deepseek-v4-flash}
+      - OPENROUTER_PROVIDER=${OPENROUTER_PROVIDER:-novita}
+      - APP_ENV=development
+    depends_on:
+      - redis
