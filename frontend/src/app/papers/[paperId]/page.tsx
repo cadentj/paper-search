@@ -17,7 +17,9 @@ import {
   usePaperHtml,
   useIdeaMap,
   useGenerateIdeaMap,
+  useCreateFilter,
 } from "@/hooks/use-queries";
+import { Input } from "@/components/ui/input";
 import {
   Loader2,
   Sparkles,
@@ -25,6 +27,7 @@ import {
   ChevronRight,
   ArrowLeft,
   ExternalLink,
+  PlusCircle,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { IdeaMapClaim, IdeaMapWarrant } from "@/lib/api";
@@ -43,7 +46,9 @@ export default function PaperDetailPage({
 
   const [expandedClaims, setExpandedClaims] = useState<Set<string>>(new Set());
   const [highlightedWarrant, setHighlightedWarrant] = useState<string | null>(null);
+  const [claimFilterText, setClaimFilterText] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const createFilter = useCreateFilter();
 
   const isIdeaMapLoading =
     ideaMap?.status === "queued" || ideaMap?.status === "running";
@@ -93,6 +98,22 @@ export default function PaperDetailPage({
 
   const handleGenerate = () => {
     generateIdeaMap.mutate(paperId);
+  };
+
+  const handleAddClaimAsFilter = async (claimText: string) => {
+    const name = claimText.slice(0, 60);
+    await createFilter.mutateAsync({
+      name,
+      definition: {
+        name,
+        statement: claimText,
+        search: {
+          instructions: "Search for evidence supporting or refuting this proposition.",
+          outputMode: "warrants",
+        },
+      },
+    });
+    setClaimFilterText(null);
   };
 
   return (
@@ -212,10 +233,41 @@ export default function PaperDetailPage({
                         ) : (
                           <ChevronRight className="size-4 mt-0.5 shrink-0" />
                         )}
-                        <span className="text-xs font-medium leading-snug">
+                        <span className="text-xs font-medium leading-snug flex-1">
                           {claim.text}
                         </span>
+                        <button
+                          className="shrink-0 p-0.5 rounded hover:bg-muted"
+                          title="Add as filter"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setClaimFilterText(claimFilterText === claim.text ? null : claim.text);
+                          }}
+                        >
+                          <PlusCircle className="size-3 text-muted-foreground" />
+                        </button>
                       </button>
+                      {claimFilterText === claim.text && (
+                        <div className="px-2 pb-1 flex items-center gap-1">
+                          <Input
+                            defaultValue={claim.text}
+                            className="h-7 text-xs"
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleAddClaimAsFilter((e.target as HTMLInputElement).value);
+                              if (e.key === "Escape") setClaimFilterText(null);
+                            }}
+                          />
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs px-2"
+                            onClick={() => handleAddClaimAsFilter(claim.text)}
+                            disabled={createFilter.isPending}
+                          >
+                            Add
+                          </Button>
+                        </div>
+                      )}
                       {expandedClaims.has(claim.id) && (
                         <div className="px-2 pb-2 space-y-1">
                           {claim.warrants.map((warrant: IdeaMapWarrant) => (
