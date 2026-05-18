@@ -73,7 +73,7 @@ def _build_papers_text(papers: list[Paper | PaperPayload]) -> str:
     lines = []
     for p in papers:
         source_type = getattr(p, "source_type", "arxiv") or "arxiv"
-        source_id = getattr(p, "source_id", None) or getattr(p, "arxiv_id", "") or ""
+        source_id = getattr(p, "source_id", None) or ""
         item_id = getattr(p, "item_id", f"{source_type}:{source_id}")
         text = getattr(p, "text", None) or getattr(p, "abstract", "")
         lines.append(
@@ -206,8 +206,6 @@ def _upsert_candidate_papers(db, run: SearchRun, job: Job | None = None) -> list
             Paper.source_type == source_type,
             Paper.source_id == source_id,
         ).first()
-        if not existing and source_type == "arxiv":
-            existing = db.query(Paper).filter(Paper.arxiv_id == item.arxiv_id).first()
         if existing:
             existing.source_type = source_type
             existing.source_id = source_id
@@ -218,15 +216,12 @@ def _upsert_candidate_papers(db, run: SearchRun, job: Job | None = None) -> list
             existing.categories = item.categories
             existing.published_at = item.published_at
             existing.html_url = item.html_url
-            existing.landing_url = item.landing_url
-            existing.source_url = item.source_url or item.landing_url
-            existing.source_metadata = item.metadata
+            existing.source_url = item.source_url
             existing.updated_at = now
             paper = existing
         else:
             paper = Paper(
                 id=str(uuid.uuid4()),
-                arxiv_id=item.arxiv_id if source_type == "arxiv" else None,
                 source_type=source_type,
                 source_id=source_id,
                 title=item.title,
@@ -236,9 +231,7 @@ def _upsert_candidate_papers(db, run: SearchRun, job: Job | None = None) -> list
                 categories=item.categories,
                 published_at=item.published_at,
                 html_url=item.html_url,
-                landing_url=item.landing_url,
-                source_url=item.source_url or item.landing_url,
-                source_metadata=item.metadata,
+                source_url=item.source_url,
                 created_at=now,
                 updated_at=now,
             )
@@ -286,8 +279,8 @@ def _build_paper_payloads(papers: list[Paper]) -> list[PaperPayload]:
             id=paper.id,
             title=paper.title,
             source_type=paper.source_type or "arxiv",
-            source_id=paper.source_id or paper.arxiv_id or "",
-            item_id=_item_id(paper.source_type or "arxiv", paper.source_id or paper.arxiv_id or ""),
+            source_id=paper.source_id or "",
+            item_id=_item_id(paper.source_type or "arxiv", paper.source_id or ""),
             text=paper.search_text or paper.abstract,
             authors=list(paper.authors or []),
         )

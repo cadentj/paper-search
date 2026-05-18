@@ -20,7 +20,7 @@ from app.services.html_parser import (
     citation_validation_diagnostics,
     parse_arxiv_html,
 )
-from app.services.arxiv_provider import arxiv_html_url, read_paper_html
+from app.services.public_r2_index import http_get_text
 from app.llm.client import stream_structured_response
 from app.llm.config import IDEA_MAP_PROFILE
 from app.llm.prompts import (
@@ -106,9 +106,9 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
         db.commit()
 
         paper = db.query(Paper).filter(Paper.id == idea_map.paper_id).first()
-        if not paper or not paper.arxiv_id:
+        if not paper or paper.source_type != "arxiv" or not paper.source_id:
             idea_map.status = "skipped"
-            idea_map.dropped_reason = "Paper not found or missing arxiv_id"
+            idea_map.dropped_reason = "Paper not found or not an arXiv paper with source_id"
             idea_map.updated_at = datetime.now(timezone.utc)
             _set_job_progress(
                 job,
@@ -121,13 +121,13 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
             db.commit()
             return
 
-        html_url = paper.html_url or arxiv_html_url(paper.arxiv_id)
+        html_url = paper.html_url or paper.source_url
         idea_map.source_url = html_url
 
-        paper_html = read_paper_html(paper.arxiv_id, html_url=paper.html_url)
-        if not paper_html:
+        html_content = http_get_text(paper.html_url) if paper.html_url else None
+        if not html_content:
             idea_map.status = "skipped"
-            idea_map.dropped_reason = f"HTML not found for {paper.arxiv_id}"
+            idea_map.dropped_reason = f"HTML not found for {paper.source_id}"
             idea_map.updated_at = datetime.now(timezone.utc)
             _set_job_progress(
                 job,
@@ -139,8 +139,6 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
             )
             db.commit()
             return
-
-        html_content = paper_html.html
 
         blocks = parse_arxiv_html(html_content, exclude_back_matter=True)
         if not blocks:
@@ -211,7 +209,7 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
             "idea_map run=%s paper=%s arxiv=%s streamed_claims=%s final_claims=%s blocks=%s",
             idea_map.id,
             paper.id,
-            paper.arxiv_id,
+            paper.source_id,
             len(idea_map.claims or []),
             len(claims),
             len(blocks),
@@ -356,7 +354,7 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
                         warrant_failures += 1
                         tqdm.write(
                             f"Idea map warrant generation failed for "
-                            f"{paper.arxiv_id} claim={claim.get('id', '')}"
+                            f"{paper.source_id} claim={claim.get('id', '')}"
                         )
                         logger.exception(
                             "idea_map run=%s paper=%s claim=%s warrant_generation_failed",
@@ -419,7 +417,7 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
         if rejected_warrant_count:
             tqdm.write(
                 f"Idea map rejected {rejected_warrant_count} invalid warrant "
-                f"citations for {paper.arxiv_id}"
+                f"citations for {paper.source_id}"
             )
 
         logger.info(

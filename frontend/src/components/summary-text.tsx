@@ -41,10 +41,7 @@ export function SummaryText({
     }
     if (match.paper_source_type && match.paper_source_id) {
       matchesByItemId.set(`${match.paper_source_type}:${match.paper_source_id}`, match);
-    }
-    if (match.paper_arxiv_id) {
-      matchesByItemId.set(match.paper_arxiv_id, match);
-      matchesByItemId.set(`arxiv:${match.paper_arxiv_id}`, match);
+      matchesByItemId.set(match.paper_source_id, match);
     }
   });
 

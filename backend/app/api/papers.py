@@ -35,7 +35,7 @@ def get_paper_html(paper_id: str, db: Session = Depends(get_db)):
 
     provider = provider_for(paper.source_type or "arxiv")
     if not provider:
-        return {"html": None, "source_url": paper.source_url or paper.landing_url}
+        return {"html": None, "source_url": paper.source_url}
     return provider.html_for_paper(paper)
 
 

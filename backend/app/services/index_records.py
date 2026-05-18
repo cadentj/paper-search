@@ -64,7 +64,6 @@ def arxiv_record_from_shard(paper: dict[str, Any]) -> dict[str, Any]:
     return {
         "source_type": "arxiv",
         "source_id": arxiv_id,
-        "arxiv_id": arxiv_id,
         "title": paper.get("title") or arxiv_id,
         "abstract": abstract,
         "search_text": abstract,
@@ -72,9 +71,7 @@ def arxiv_record_from_shard(paper: dict[str, Any]) -> dict[str, Any]:
         "categories": list(paper.get("categories") or []),
         "published_at": _parse_datetime(paper.get("latest_version_date")),
         "html_url": arxiv_public_url(html_key),
-        "landing_url": f"https://arxiv.org/abs/{arxiv_id}",
         "source_url": f"https://arxiv.org/abs/{arxiv_id}",
-        "source_metadata": {},
     }
 
 
@@ -92,12 +89,7 @@ def lesswrong_record_from_shard(post: dict[str, Any]) -> dict[str, Any]:
         "categories": [],
         "published_at": _parse_datetime(post.get("posted_at")),
         "html_url": lesswrong_public_url(html_key),
-        "landing_url": post.get("page_url"),
         "source_url": post.get("page_url"),
-        "source_metadata": {
-            "baseScore": post.get("base_score"),
-            "html_key": html_key,
-        },
     }
 
 

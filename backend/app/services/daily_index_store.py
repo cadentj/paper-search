@@ -65,10 +65,7 @@ def _candidate_from_paper(paper: Paper) -> CandidateItem:
         categories=list(paper.categories or []),
         published_at=paper.published_at,
         html_url=paper.html_url,
-        landing_url=paper.landing_url,
-        source_url=paper.source_url or paper.landing_url,
-        arxiv_id=paper.arxiv_id if paper.source_type == "arxiv" else None,
-        metadata=dict(paper.source_metadata or {}),
+        source_url=paper.source_url,
     )
 
 
@@ -186,9 +183,6 @@ def _upsert_paper(db: Session, *, record: dict[str, Any], now: datetime) -> Pape
         .filter(Paper.source_type == source_type, Paper.source_id == source_id)
         .first()
     )
-    if not existing and source_type == "arxiv":
-        existing = db.query(Paper).filter(Paper.arxiv_id == record.get("arxiv_id")).first()
-
     if existing:
         existing.source_type = source_type
         existing.source_id = source_id
@@ -199,17 +193,12 @@ def _upsert_paper(db: Session, *, record: dict[str, Any], now: datetime) -> Pape
         existing.categories = record.get("categories") or []
         existing.published_at = record.get("published_at")
         existing.html_url = record.get("html_url")
-        existing.landing_url = record.get("landing_url")
-        existing.source_url = record.get("source_url") or record.get("landing_url")
-        existing.source_metadata = record.get("source_metadata") or {}
+        existing.source_url = record.get("source_url")
         existing.updated_at = now
-        if source_type == "arxiv":
-            existing.arxiv_id = record.get("arxiv_id")
         return existing
 
     paper = Paper(
         id=str(uuid.uuid4()),
-        arxiv_id=record.get("arxiv_id") if source_type == "arxiv" else None,
         source_type=source_type,
         source_id=source_id,
         title=record["title"],
@@ -219,9 +208,7 @@ def _upsert_paper(db: Session, *, record: dict[str, Any], now: datetime) -> Pape
         categories=record.get("categories") or [],
         published_at=record.get("published_at"),
         html_url=record.get("html_url"),
-        landing_url=record.get("landing_url"),
-        source_url=record.get("source_url") or record.get("landing_url"),
-        source_metadata=record.get("source_metadata") or {},
+        source_url=record.get("source_url"),
         created_at=now,
         updated_at=now,
     )

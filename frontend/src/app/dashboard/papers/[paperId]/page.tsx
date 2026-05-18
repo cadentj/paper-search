@@ -66,8 +66,11 @@ function PaperHeader({
   paper?: Paper;
   onBack: () => void;
 }) {
-  const sourceUrl = paper?.source_url || paper?.landing_url ||
-    (paper?.arxiv_id ? `https://arxiv.org/abs/${paper.arxiv_id}` : undefined);
+  const sourceUrl =
+    paper?.source_url ||
+    (paper?.source_type === "arxiv" && paper?.source_id
+      ? `https://arxiv.org/abs/${paper.source_id}`
+      : undefined);
   const sourceLabel = paper?.source_type === "lesswrong" ? "LessWrong" : "arXiv";
 
   return (

@@ -13,7 +13,6 @@ class Paper(Base):
     )
 
     id = Column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
-    arxiv_id = Column(Text, unique=True, nullable=True)
     source_type = Column(Text, nullable=False, default="arxiv")
     source_id = Column(Text, nullable=True)
 
@@ -24,9 +23,7 @@ class Paper(Base):
     categories = Column(JSON, nullable=True)
     published_at = Column(DateTime, nullable=True)
     html_url = Column(Text, nullable=True)
-    landing_url = Column(Text, nullable=True)
     source_url = Column(Text, nullable=True)
-    source_metadata = Column(JSON, nullable=False, default=dict)
 
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

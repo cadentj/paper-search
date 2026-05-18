@@ -151,7 +151,6 @@ export interface PaperMatch {
   created_at: string;
   paper_title?: string;
   paper_authors?: string[];
-  paper_arxiv_id?: string;
   paper_source_type?: string;
   paper_source_id?: string;
   paper_source_url?: string;
@@ -162,7 +161,6 @@ export interface PaperMatch {
 
 export interface Paper {
   id: string;
-  arxiv_id?: string;
   source_type: string;
   source_id?: string;
   title: string;
@@ -171,9 +169,7 @@ export interface Paper {
   categories?: string[];
   published_at?: string;
   html_url?: string;
-  landing_url?: string;
   source_url?: string;
-  source_metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }

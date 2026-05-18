@@ -1,11 +1,10 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
 
 
 class PaperResponse(BaseModel):
     id: str
-    arxiv_id: Optional[str] = None
     source_type: str = "arxiv"
     source_id: Optional[str] = None
     title: str
@@ -14,9 +13,7 @@ class PaperResponse(BaseModel):
     categories: Optional[list] = None
     published_at: Optional[datetime] = None
     html_url: Optional[str] = None
-    landing_url: Optional[str] = None
     source_url: Optional[str] = None
-    source_metadata: dict = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 

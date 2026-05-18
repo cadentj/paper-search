@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import SessionLocal, engine
-from app.db.schema import ensure_runtime_schema
 from app.models import Base
 from app.services.daily_dates import DAILY_SEARCH_DATE_SET
 from app.services.daily_index_store import upsert_arxiv_day, upsert_lesswrong_day
@@ -20,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 def sync_public_indexes() -> dict[str, dict[str, tuple[int, int]]]:
     Base.metadata.create_all(bind=engine)
-    ensure_runtime_schema(engine)
 
     summary: dict[str, dict[str, tuple[int, int]]] = {"arxiv": {}, "lesswrong": {}}
     db = SessionLocal()

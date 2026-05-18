@@ -436,12 +436,14 @@ function MatchesSection({
 function PaperMatchCard({ match }: { match: PaperMatch }) {
   const externalUrl =
     match.paper_source_url ||
-    (match.paper_arxiv_id ? `https://arxiv.org/abs/${match.paper_arxiv_id}` : undefined);
+    (match.paper_source_type === "arxiv" && match.paper_source_id
+      ? `https://arxiv.org/abs/${match.paper_source_id}`
+      : undefined);
   const externalLabel =
     match.paper_source_type === "lesswrong"
       ? "Open on LessWrong"
-      : match.paper_arxiv_id
-        ? `Open ${match.paper_arxiv_id} on arXiv`
+      : match.paper_source_type === "arxiv" && match.paper_source_id
+        ? `Open ${match.paper_source_id} on arXiv`
         : "Open source";
 
   return (

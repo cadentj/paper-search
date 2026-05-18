@@ -43,9 +43,6 @@ def db_engine(tmp_path):
     import app.models.source_daily
 
     Base.metadata.create_all(bind=engine)
-    from app.db.schema import ensure_runtime_schema
-
-    ensure_runtime_schema(engine)
     yield engine
     engine.dispose()
 

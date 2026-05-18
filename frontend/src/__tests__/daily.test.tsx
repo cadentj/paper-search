@@ -133,7 +133,8 @@ describe("DailyPage", () => {
         created_at: "2026-05-17T19:00:00Z",
         paper_title: "CoT Paper",
         paper_authors: ["Author A"],
-        paper_arxiv_id: "2401.00001",
+        paper_source_type: "arxiv",
+        paper_source_id: "2401.00001",
         filter_name: "LLM Reasoning",
       },
     ]);

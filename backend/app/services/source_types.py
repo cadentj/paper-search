@@ -19,10 +19,7 @@ class CandidateItem:
     categories: list[str] = field(default_factory=list)
     published_at: object | None = None
     html_url: str | None = None
-    landing_url: str | None = None
     source_url: str | None = None
-    arxiv_id: str | None = None
-    metadata: dict = field(default_factory=dict)
 
     @property
     def item_id(self) -> str:
@@ -33,7 +30,6 @@ class CandidateItem:
 class SourceFetchResult:
     items: list[CandidateItem]
     errors: list[str] = field(default_factory=list)
-    # Items still in the R2 index but with no excerpt — not sent to the LLM.
     skipped_missing_text: dict[str, int] = field(default_factory=dict)
 
 
@@ -52,7 +48,7 @@ class SourceProvider(Protocol):
 
 def candidate_from_record(record: dict) -> CandidateItem:
     source_type = record.get("source_type") or "arxiv"
-    source_id = record.get("source_id") or record.get("arxiv_id") or ""
+    source_id = record.get("source_id") or ""
     return CandidateItem(
         source_type=source_type,
         source_id=source_id,
@@ -62,8 +58,5 @@ def candidate_from_record(record: dict) -> CandidateItem:
         categories=list(record.get("categories") or []),
         published_at=record.get("published_at"),
         html_url=record.get("html_url"),
-        landing_url=record.get("landing_url"),
-        source_url=record.get("source_url") or record.get("landing_url"),
-        arxiv_id=record.get("arxiv_id") if source_type == "arxiv" else None,
-        metadata=record.get("source_metadata") or {},
+        source_url=record.get("source_url"),
     )

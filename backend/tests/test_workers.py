@@ -79,16 +79,16 @@ class TestExtractOnboardingFilters:
         assert len(updated.proposed_filters) > 0
 
 
-def _paper_fixture(arxiv_id: str, title: str) -> dict:
+def _paper_fixture(source_id: str, title: str) -> dict:
     return {
-        "arxiv_id": arxiv_id,
+        "source_id": source_id,
         "title": title,
         "abstract": f"Abstract for {title}.",
         "authors": ["Test Author"],
         "categories": ["cs.AI"],
         "published_at": datetime.now(timezone.utc),
-        "html_url": f"https://arxiv.org/html/{arxiv_id}",
-        "landing_url": f"https://arxiv.org/abs/{arxiv_id}",
+        "html_url": f"https://arxiv.org/html/{source_id}",
+        "source_url": f"https://arxiv.org/abs/{source_id}",
     }
 
 
@@ -98,16 +98,14 @@ def _source_fetch_result_from_paper_dicts(papers: list[dict]):
     items = [
         CandidateItem(
             source_type="arxiv",
-            source_id=p["arxiv_id"],
+            source_id=p["source_id"],
             title=p["title"],
             display_text=p.get("abstract") or "",
             authors=list(p.get("authors") or []),
             categories=list(p.get("categories") or []),
             published_at=p.get("published_at"),
             html_url=p.get("html_url"),
-            landing_url=p.get("landing_url"),
-            source_url=p.get("landing_url"),
-            arxiv_id=p["arxiv_id"],
+            source_url=p.get("source_url"),
         )
         for p in papers
     ]
@@ -342,7 +340,8 @@ class TestRunDailySearch:
 
         excluded = Paper(
             id=str(uuid.uuid4()),
-            arxiv_id="2401.00002",
+            source_type="arxiv",
+            source_id="2401.00002",
             title="Excluded Paper",
             abstract="A cached paper from another run.",
             authors=["Author"],
@@ -383,7 +382,11 @@ class TestRunDailySearch:
         db_session.expire_all()
         updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
         matches = db_session.query(PaperMatch).all()
-        included = db_session.query(Paper).filter(Paper.arxiv_id == "2401.00001").first()
+        included = (
+            db_session.query(Paper)
+            .filter(Paper.source_type == "arxiv", Paper.source_id == "2401.00001")
+            .first()
+        )
 
         assert updated_run.candidate_count == 1
         assert {m.paper_id for m in matches} == {included.id}
@@ -418,7 +421,8 @@ class TestRunDailySearch:
 
         paper = Paper(
             id=str(uuid.uuid4()),
-            arxiv_id="2605.00003",
+            source_type="arxiv",
+            source_id="2605.00003",
             title="Current Paper",
             abstract="A current paper that requires LLM matching.",
             authors=["Author"],

@@ -43,7 +43,6 @@ class PaperMatchResponse(BaseModel):
     # Joined fields
     paper_title: Optional[str] = None
     paper_authors: Optional[list] = None
-    paper_arxiv_id: Optional[str] = None
     paper_source_type: Optional[str] = None
     paper_source_id: Optional[str] = None
     paper_source_url: Optional[str] = None

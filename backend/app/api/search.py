@@ -164,10 +164,9 @@ def get_search_run_matches(
             created_at=m.created_at,
             paper_title=paper.title if paper else None,
             paper_authors=paper.authors if paper else None,
-            paper_arxiv_id=paper.arxiv_id if paper else None,
             paper_source_type=paper.source_type if paper else None,
             paper_source_id=paper.source_id if paper else None,
-            paper_source_url=(paper.source_url or paper.landing_url) if paper else None,
+            paper_source_url=paper.source_url if paper else None,
             paper_item_label=_paper_item_label(paper) if paper else None,
             paper_abstract=paper.abstract if paper else None,
             filter_name=filt.name if filt else None,
@@ -180,7 +179,7 @@ def get_search_run_matches(
 
 def _paper_item_label(paper: Paper) -> str:
     source_type = paper.source_type or "arxiv"
-    source_id = paper.source_id or paper.arxiv_id or paper.id
+    source_id = paper.source_id or paper.id
     return f"{source_type}:{source_id}"
 
 

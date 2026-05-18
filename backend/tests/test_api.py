@@ -216,7 +216,8 @@ class TestPapers:
 
         paper = Paper(
             id="paper-1",
-            arxiv_id="2605.00001",
+            source_type="arxiv",
+            source_id="2605.00001",
             title="Test Paper",
             abstract="Test abstract.",
             authors=["Author"],
