@@ -31,8 +31,6 @@ class IdeaMapResponse(BaseModel):
     source_url: Optional[str] = None
     dropped_reason: Optional[str] = None
     error: Optional[str] = None
-    job_id: Optional[str] = None
-    progress: dict = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 

@@ -22,7 +22,14 @@ URLS = [
 def main() -> None:
     args = parse_args()
     deadline = time.monotonic() + args.seconds
-    headers = {"User-Agent": args.user_agent}
+    headers = {
+        "User-Agent": args.user_agent,
+        "Referer": "https://www.lesswrong.com/graphiql",
+        "Origin": "https://www.lesswrong.com",
+    }
+    cookie = load_cookie(args)
+    if cookie:
+        headers["Cookie"] = cookie
     print("phase,rps,request,status,elapsed_ms,retry_after,url", flush=True)
 
     with httpx.Client(timeout=args.timeout, follow_redirects=True, headers=headers) as client:
@@ -61,8 +68,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--phase-seconds", type=int, default=6)
     parser.add_argument("--rps", type=float, nargs="+", default=[0.5, 1, 2, 4, 8])
     parser.add_argument("--timeout", type=float, default=10.0)
-    parser.add_argument("--user-agent", default="paper-search-rate-probe/0.1 contact: local-research")
+    parser.add_argument("--cookie-file", help="File containing a browser Cookie header value.")
+    parser.add_argument("--cookie", help="Raw browser Cookie header value. Prefer --cookie-file.")
+    parser.add_argument(
+        "--user-agent",
+        default="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    )
     return parser.parse_args()
+
+
+def load_cookie(args: argparse.Namespace) -> str:
+    if args.cookie_file:
+        return open(args.cookie_file, "r", encoding="utf-8").read().strip()
+    return (args.cookie or "").strip()
 
 
 if __name__ == "__main__":

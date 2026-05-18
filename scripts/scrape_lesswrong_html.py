@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import httpx
 from tqdm import tqdm
@@ -28,7 +28,7 @@ SAFE_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 POSTS_QUERY = """
 query LessWrongPosts($after: String!, $before: String!, $limit: Int!) {
-  posts(input: { terms: { view: "new", after: $after, before: $before, limit: $limit } }) {
+  posts(selector: { new: { after: $after, before: $before } }, limit: $limit) {
     results {
       _id
       title
@@ -73,7 +73,7 @@ def main() -> None:
 
     with connect_state(db_path) as conn:
         create_state(conn)
-        scrape_dates(args, conn, dates, output_dir)
+        scrape_windows(args, conn, dates, output_dir)
 
 
 def parse_args() -> argparse.Namespace:
@@ -81,62 +81,92 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--anchor-date", default="2026-05-14")
     parser.add_argument("--days", type=int, default=31)
-    parser.add_argument("--limit-per-day", type=int, default=500)
+    parser.add_argument("--window-days", type=int, default=5)
+    parser.add_argument("--limit-per-window", type=int, default=500)
     parser.add_argument("--graphql-url", default=GRAPHQL_URL)
     parser.add_argument("--sleep", type=float, default=1.0)
     parser.add_argument("--timeout", type=float, default=30.0)
-    parser.add_argument("--user-agent", default="paper-search-lesswrong-cache/0.1 contact: local-research")
+    parser.add_argument("--cookie-file", help="File containing a browser Cookie header value.")
+    parser.add_argument("--cookie", help="Raw browser Cookie header value. Prefer --cookie-file.")
+    parser.add_argument(
+        "--user-agent",
+        default="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    )
     return parser.parse_args()
 
 
-def scrape_dates(
+def scrape_windows(
     args: argparse.Namespace,
     conn: sqlite3.Connection,
     dates: list[date],
     output_dir: Path,
 ) -> None:
-    headers = {"User-Agent": args.user_agent}
+    windows = date_windows(dates, args.window_days)
+    headers = {
+        "User-Agent": args.user_agent,
+        "Referer": "https://www.lesswrong.com/graphiql",
+        "Origin": "https://www.lesswrong.com",
+    }
+    cookie = load_cookie(args)
+    if cookie:
+        headers["Cookie"] = cookie
     with httpx.Client(timeout=args.timeout, follow_redirects=True, headers=headers) as client, tqdm(
-        total=len(dates),
-        desc="lesswrong days",
-        unit="day",
+        total=len(windows),
+        desc="lesswrong windows",
+        unit="window",
         dynamic_ncols=True,
     ) as progress:
-        for day in dates:
-            if date_done(conn, day):
+        for start_day, end_day in windows:
+            if window_done(conn, start_day, end_day):
                 progress.update(1)
                 continue
-            posts = fetch_posts_for_day(client, args, day)
+            posts = fetch_posts_for_window(client, args, start_day, end_day)
             for post in posts:
                 write_post(output_dir, post)
                 record_post(conn, post)
-            record_day(conn, day, len(posts))
-            progress.set_postfix(day=day.isoformat(), posts=len(posts))
+            record_window(conn, start_day, end_day, len(posts))
+            progress.set_postfix(
+                window=f"{start_day.isoformat()}..{end_day.isoformat()}",
+                posts=len(posts),
+            )
             progress.update(1)
             time.sleep(max(args.sleep, 0.0))
 
 
-def fetch_posts_for_day(
+def fetch_posts_for_window(
     client: httpx.Client,
     args: argparse.Namespace,
-    day: date,
+    start_day: date,
+    end_day: date,
 ) -> list[LessWrongPost]:
     response = client.post(
         args.graphql_url,
         json={
             "query": POSTS_QUERY,
             "variables": {
-                "after": day.isoformat(),
-                "before": (day + timedelta(days=1)).isoformat(),
-                "limit": args.limit_per_day,
+                "after": start_iso(start_day),
+                "before": start_iso(end_day + timedelta(days=1)),
+                "limit": args.limit_per_window,
             },
         },
     )
+    if response.status_code == 429 and "Vercel Security Checkpoint" in response.text:
+        raise RuntimeError(
+            "LessWrong returned a Vercel challenge. Put the browser Cookie "
+            "request header in a local file and pass --cookie-file."
+        )
     response.raise_for_status()
     payload = response.json()
     if payload.get("errors"):
-        raise RuntimeError(f"LessWrong GraphQL error for {day}: {payload['errors']}")
+        raise RuntimeError(
+            f"LessWrong GraphQL error for {start_day}..{end_day}: {payload['errors']}"
+        )
     records = (((payload.get("data") or {}).get("posts") or {}).get("results") or [])
+    if len(records) >= args.limit_per_window:
+        raise RuntimeError(
+            f"LessWrong returned {len(records)} posts for {start_day}..{end_day}, "
+            "which reached --limit-per-window. Rerun with a smaller --window-days."
+        )
     return [post_from_record(record) for record in records if record.get("_id")]
 
 
@@ -188,34 +218,41 @@ def create_state(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS lesswrong_day_scrape (
-            day TEXT PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS lesswrong_window_scrape (
+            start_day TEXT NOT NULL,
+            end_day TEXT NOT NULL,
             post_count INTEGER NOT NULL DEFAULT 0,
-            updated_at TEXT NOT NULL
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (start_day, end_day)
         )
         """
     )
     conn.commit()
 
 
-def date_done(conn: sqlite3.Connection, day: date) -> bool:
+def window_done(conn: sqlite3.Connection, start_day: date, end_day: date) -> bool:
     row = conn.execute(
-        "SELECT day FROM lesswrong_day_scrape WHERE day = ?",
-        (day.isoformat(),),
+        "SELECT start_day FROM lesswrong_window_scrape WHERE start_day = ? AND end_day = ?",
+        (start_day.isoformat(), end_day.isoformat()),
     ).fetchone()
     return bool(row)
 
 
-def record_day(conn: sqlite3.Connection, day: date, post_count: int) -> None:
+def record_window(conn: sqlite3.Connection, start_day: date, end_day: date, post_count: int) -> None:
     conn.execute(
         """
-        INSERT INTO lesswrong_day_scrape (day, post_count, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(day) DO UPDATE SET
+        INSERT INTO lesswrong_window_scrape (start_day, end_day, post_count, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(start_day, end_day) DO UPDATE SET
             post_count = excluded.post_count,
             updated_at = excluded.updated_at
         """,
-        (day.isoformat(), post_count, datetime.now(timezone.utc).isoformat()),
+        (
+            start_day.isoformat(),
+            end_day.isoformat(),
+            post_count,
+            datetime.now(timezone.utc).isoformat(),
+        ),
     )
     conn.commit()
 
@@ -259,6 +296,26 @@ def record_post(conn: sqlite3.Connection, post: LessWrongPost) -> None:
 
 def safe_filename(value: str) -> str:
     return SAFE_ID_RE.sub("_", value)
+
+
+def load_cookie(args: argparse.Namespace) -> str:
+    if args.cookie_file:
+        return Path(args.cookie_file).expanduser().read_text(encoding="utf-8").strip()
+    return (args.cookie or "").strip()
+
+
+def date_windows(dates: list[date], window_days: int) -> list[tuple[date, date]]:
+    size = max(window_days, 1)
+    windows = []
+    for index in range(0, len(dates), size):
+        chunk = dates[index : index + size]
+        if chunk:
+            windows.append((chunk[0], chunk[-1]))
+    return windows
+
+
+def start_iso(day: date) -> str:
+    return f"{day.isoformat()}T00:00:00Z"
 
 
 if __name__ == "__main__":

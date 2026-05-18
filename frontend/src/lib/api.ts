@@ -52,6 +52,39 @@ export interface OnboardingExtraction {
   completed_at?: string;
 }
 
+export interface JobProgress {
+  stage?: string;
+  current?: number;
+  total?: number;
+  message?: string;
+  log?: {
+    at: string;
+    stage: string;
+    message: string;
+  }[];
+  [key: string]: unknown;
+}
+
+export interface Job {
+  id: string;
+  kind: string;
+  status: string;
+  subject_type?: string | null;
+  subject_id?: string | null;
+  queue_name?: string | null;
+  queue_job_id?: string | null;
+  progress: JobProgress;
+  error?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JobStartResponse {
+  job_id: string;
+}
+
 export interface SearchRun {
   id: string;
   status: string;
@@ -61,15 +94,6 @@ export interface SearchRun {
   match_count?: number;
   summary?: string;
   summary_citations: SummaryCitation[];
-  stage: string;
-  progress_current: number;
-  progress_total: number;
-  progress_message: string;
-  progress_log: {
-    at: string;
-    stage: string;
-    message: string;
-  }[];
   started_at?: string;
   completed_at?: string;
   error?: string;
@@ -182,10 +206,13 @@ export const api = {
   // Health
   health: () => fetchApi<{ status: string }>("/health"),
 
+  // Jobs
+  getJob: (id: string) => fetchApi<Job>(`/jobs/${id}`),
+
   // Onboarding
   getOnboardingStatus: () => fetchApi<OnboardingStatus>("/onboarding/status"),
   createOnboardingExtraction: (input: { input_text: string }) =>
-    fetchApi<OnboardingExtraction>("/onboarding/extractions", {
+    fetchApi<JobStartResponse>("/onboarding/extractions", {
       method: "POST",
       body: JSON.stringify(input),
     }),
@@ -236,7 +263,7 @@ export const api = {
   getAvailableSearchDates: () =>
     fetchApi<AvailableSearchDates>("/search-runs/available-dates"),
   createDailySearchRun: (input?: { run_date?: string }) =>
-    fetchApi<SearchRun>("/search-runs/daily", {
+    fetchApi<JobStartResponse>("/search-runs/daily", {
       method: "POST",
       body: JSON.stringify(input ?? {}),
     }),
@@ -249,7 +276,7 @@ export const api = {
   getPaperHtml: (id: string) =>
     fetchApi<{ html: string | null; source_url: string | null }>(`/papers/${id}/html`),
   generatePaperIdeaMap: (paperId: string) =>
-    fetchApi<IdeaMap>(`/papers/${paperId}/idea-map`, { method: "POST" }),
+    fetchApi<JobStartResponse>(`/papers/${paperId}/idea-map`, { method: "POST" }),
   getPaperIdeaMap: (paperId: string) =>
     fetchApi<IdeaMap>(`/papers/${paperId}/idea-map`),
 

@@ -17,9 +17,10 @@ from app.schemas.search import (
     SearchRunResponse,
     PaperMatchResponse,
 )
+from app.schemas.jobs import JobStartResponse
 from app.jobs.queue import get_queue
 from app.jobs.daily_search import run_daily_search
-from app.services.jobs import build_progress, create_job, latest_job_for_subject
+from app.services.jobs import build_progress, create_job
 from app.services.daily_dates import fixed_daily_dates, is_valid_daily_date
 from app.services.public_arxiv_cache import fetch_index
 from app.services.public_lesswrong_cache import available_counts as lesswrong_available_counts
@@ -32,15 +33,13 @@ logger = logging.getLogger(__name__)
 @router.get("", response_model=list[SearchRunResponse])
 def list_search_runs(db: Session = Depends(get_db)):
     runs = db.query(SearchRun).order_by(SearchRun.created_at.desc()).all()
-    return [_search_run_response(run, db) for run in runs]
+    return runs
 
 
 @router.get("/latest", response_model=Optional[SearchRunResponse])
 def get_latest_search_run(db: Session = Depends(get_db)):
     run = db.query(SearchRun).order_by(SearchRun.created_at.desc()).first()
-    if not run:
-        return None
-    return _search_run_response(run, db)
+    return run
 
 
 @router.get("/available-dates", response_model=AvailableSearchDatesResponse)
@@ -77,7 +76,7 @@ def get_available_search_dates(db: Session = Depends(get_db)):
     }
 
 
-@router.post("/daily", response_model=SearchRunResponse)
+@router.post("/daily", response_model=JobStartResponse)
 def create_daily_search_run(
     request: CreateDailySearchRequest | None = None,
     db: Session = Depends(get_db),
@@ -141,7 +140,7 @@ def create_daily_search_run(
         db.commit()
         raise HTTPException(status_code=503, detail=run.error) from exc
 
-    return _search_run_response(run, db)
+    return JobStartResponse(job_id=job_record.id)
 
 
 def _parse_index_date(value: str | date | None) -> date | None:
@@ -155,39 +154,7 @@ def get_search_run(search_run_id: str, db: Session = Depends(get_db)):
     run = db.query(SearchRun).filter(SearchRun.id == search_run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Search run not found")
-    return _search_run_response(run, db)
-
-
-def _search_run_response(run: SearchRun, db: Session) -> SearchRunResponse:
-    job = latest_job_for_subject(
-        db,
-        subject_type="search_run",
-        subject_id=run.id,
-        kind="daily_search",
-    )
-    progress = job.progress if job and job.progress else {}
-    stage = progress.get("stage") or run.status
-    return SearchRunResponse(
-        id=run.id,
-        status=run.status,
-        run_date=run.run_date,
-        candidate_count=run.candidate_count,
-        candidate_counts=run.candidate_counts,
-        match_count=run.match_count,
-        summary=run.summary,
-        summary_citations=run.summary_citations,
-        job_id=job.id if job else None,
-        progress=progress,
-        stage=stage,
-        progress_current=progress.get("current", 0),
-        progress_total=progress.get("total", 1),
-        progress_message=progress.get("message", "Queued"),
-        progress_log=progress.get("log", []),
-        started_at=run.started_at,
-        completed_at=run.completed_at,
-        error=run.error,
-        created_at=run.created_at,
-    )
+    return run
 
 
 @router.get("/{search_run_id}/matches", response_model=list[PaperMatchResponse])

@@ -15,9 +15,10 @@ from app.schemas.onboarding import (
     OnboardingCompleteRequest,
 )
 from app.schemas.filters import FilterResponse
+from app.schemas.jobs import JobStartResponse
 from app.jobs.queue import get_queue
 from app.jobs.onboarding import extract_onboarding_filters
-from app.services.jobs import build_progress, create_job, latest_job_for_subject
+from app.services.jobs import build_progress, create_job
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ def get_onboarding_status(db: Session = Depends(get_db)):
     )
 
 
-@router.post("/extractions", response_model=OnboardingExtractionResponse)
+@router.post("/extractions", response_model=JobStartResponse)
 def create_extraction(body: OnboardingExtractionCreate, db: Session = Depends(get_db)):
     extraction = OnboardingExtraction(
         id=str(uuid.uuid4()),
@@ -87,7 +88,7 @@ def create_extraction(body: OnboardingExtractionCreate, db: Session = Depends(ge
         db.commit()
         raise HTTPException(status_code=503, detail=extraction.error) from exc
 
-    return _extraction_response(extraction, db)
+    return JobStartResponse(job_id=job_record.id)
 
 
 @router.get("/extractions/{extraction_id}", response_model=OnboardingExtractionResponse)
@@ -97,31 +98,7 @@ def get_extraction(extraction_id: str, db: Session = Depends(get_db)):
     ).first()
     if not extraction:
         raise HTTPException(status_code=404, detail="Extraction not found")
-    return _extraction_response(extraction, db)
-
-
-def _extraction_response(
-    extraction: OnboardingExtraction,
-    db: Session,
-) -> OnboardingExtractionResponse:
-    job = latest_job_for_subject(
-        db,
-        subject_type="onboarding_extraction",
-        subject_id=extraction.id,
-        kind="onboarding_extraction",
-    )
-    return OnboardingExtractionResponse(
-        id=extraction.id,
-        status=extraction.status,
-        input_text=extraction.input_text,
-        proposed_filters=extraction.proposed_filters,
-        error=extraction.error,
-        job_id=job.id if job else None,
-        progress=job.progress if job and job.progress else {},
-        created_at=extraction.created_at,
-        updated_at=extraction.updated_at,
-        completed_at=extraction.completed_at,
-    )
+    return extraction
 
 
 @router.post("/complete", response_model=list[FilterResponse])

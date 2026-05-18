@@ -29,3 +29,7 @@ class JobResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class JobStartResponse(BaseModel):
+    job_id: str

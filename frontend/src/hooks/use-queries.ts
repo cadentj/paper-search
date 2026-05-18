@@ -3,6 +3,21 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, FilterDefinition } from "@/lib/api";
 
+const ACTIVE_JOB_STATUSES = new Set(["queued", "running"]);
+
+export function useJob(id: string | null) {
+  return useQuery({
+    queryKey: ["jobs", id],
+    queryFn: () => api.getJob(id!),
+    enabled: !!id,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      if (status && ACTIVE_JOB_STATUSES.has(status)) return 1000;
+      return false;
+    },
+  });
+}
+
 // Onboarding
 export function useOnboardingStatus() {
   return useQuery({
@@ -11,16 +26,12 @@ export function useOnboardingStatus() {
   });
 }
 
-export function useOnboardingExtraction(id: string | null) {
+export function useOnboardingExtraction(id: string | null, poll = false) {
   return useQuery({
     queryKey: ["onboarding", "extractions", id],
     queryFn: () => api.getOnboardingExtraction(id!),
     enabled: !!id,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      if (status === "queued" || status === "running") return 1000;
-      return false;
-    },
+    refetchInterval: () => (poll ? 1000 : false),
   });
 }
 
@@ -29,8 +40,8 @@ export function useCreateExtraction() {
   return useMutation({
     mutationFn: (input: { input_text: string }) =>
       api.createOnboardingExtraction(input),
-    onSuccess: (data) => {
-      qc.setQueryData(["onboarding", "extractions", data.id], data);
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
     },
   });
 }
@@ -132,11 +143,6 @@ export function useLatestSearchRun() {
   return useQuery({
     queryKey: ["search-runs", "latest"],
     queryFn: api.getLatestSearchRun,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      if (status === "queued" || status === "running") return 1000;
-      return false;
-    },
   });
 }
 
@@ -148,16 +154,12 @@ export function useAvailableSearchDates() {
   });
 }
 
-export function useSearchRun(id: string | null) {
+export function useSearchRun(id: string | null, poll = false) {
   return useQuery({
     queryKey: ["search-runs", id],
     queryFn: () => api.getSearchRun(id!),
     enabled: !!id,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      if (status === "queued" || status === "running") return 1000;
-      return false;
-    },
+    refetchInterval: () => (poll ? 1000 : false),
   });
 }
 
@@ -181,6 +183,7 @@ export function useCreateDailySearch() {
   return useMutation({
     mutationFn: (input?: { run_date?: string }) => api.createDailySearchRun(input),
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
       qc.invalidateQueries({ queryKey: ["search-runs"] });
       qc.invalidateQueries({ queryKey: ["search-runs", "latest"] });
     },
@@ -204,24 +207,13 @@ export function usePaperHtml(id: string | null) {
   });
 }
 
-export function useIdeaMap(paperId: string | null) {
+export function useIdeaMap(paperId: string | null, poll = false) {
   return useQuery({
     queryKey: ["papers", paperId, "idea-map"],
     queryFn: () => api.getPaperIdeaMap(paperId!),
     enabled: !!paperId,
     retry: false,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      if (
-        status === "queued" ||
-        status === "running" ||
-        status === "claims_running" ||
-        status === "warrants_running"
-      ) {
-        return 1000;
-      }
-      return false;
-    },
+    refetchInterval: () => (poll ? 1000 : false),
   });
 }
 
@@ -229,10 +221,8 @@ export function useGenerateIdeaMap() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (paperId: string) => api.generatePaperIdeaMap(paperId),
-    onSuccess: (data) => {
-      qc.invalidateQueries({
-        queryKey: ["papers", data.paper_id, "idea-map"],
-      });
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
     },
   });
 }

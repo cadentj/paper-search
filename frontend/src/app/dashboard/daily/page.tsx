@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { format, parseISO } from "date-fns";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ import {
   useCreateFilter,
   useArchiveFilter,
   useAvailableSearchDates,
+  useJob,
 } from "@/hooks/use-queries";
 import { Input } from "@/components/ui/input";
 import {
@@ -52,7 +54,7 @@ import {
   PlusCircle,
   CalendarIcon,
 } from "lucide-react";
-import type { AvailableSearchDate, PaperMatch, SearchRun } from "@/lib/api";
+import type { AvailableSearchDate, Job, PaperMatch, SearchRun } from "@/lib/api";
 
 type FilterMode = "claim" | "question" | "topic";
 type MatchGroup = { name: string; matches: PaperMatch[] };
@@ -280,29 +282,34 @@ function QuickAddFilter({
 }
 
 function SearchProgress({
-  run,
+  job,
   progressPercent,
+  isCreating,
 }: {
-  run?: SearchRun | null;
+  job?: Job | null;
   progressPercent: number;
+  isCreating: boolean;
 }) {
-  const progressLog = run?.progress_log ?? [];
+  const progress = job?.progress;
+  const progressLog = progress?.log ?? [];
+  const stage = progress?.stage || job?.status || "creating";
+  const message = progress?.message || "Creating daily search...";
 
   return (
     <Card>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-lg">
-            {run?.stage === "queued" ? "Daily Search Queued" : "Daily Search Running"}
+            {stage === "queued" || isCreating ? "Daily Search Queued" : "Daily Search Running"}
           </CardTitle>
-          <Badge variant="secondary">{run?.stage || "creating"}</Badge>
+          <Badge variant="secondary">{stage}</Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
         <div>
           <div className="mb-2 flex items-center justify-between gap-3 text-sm">
             <span className="text-muted-foreground">
-              {run?.progress_message || "Creating daily search…"}
+              {message}
             </span>
             <span className="font-medium tabular-nums">{progressPercent}%</span>
           </div>
@@ -495,13 +502,20 @@ function PaperMatchCard({ match }: { match: PaperMatch }) {
 }
 
 export default function DailyPage() {
+  const queryClient = useQueryClient();
   const { data: latestRun } = useLatestSearchRun();
   const { data: availableDates } = useAvailableSearchDates();
-  const runId = latestRun?.id || null;
-  const { data: run } = useSearchRun(runId);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const { data: activeJob } = useJob(activeJobId);
+  const activeRunId =
+    activeJob?.subject_type === "search_run" ? activeJob.subject_id || null : null;
+  const runId = activeRunId || latestRun?.id || null;
+  const isJobRunning =
+    activeJob?.status === "queued" || activeJob?.status === "running";
+  const { data: run } = useSearchRun(runId, !!activeRunId && !!isJobRunning);
   const { data: matches = EMPTY_PAPER_MATCHES } = useSearchRunMatches(
     runId,
-    run?.status
+    activeJob?.status ?? run?.status
   );
   const createSearch = useCreateDailySearch();
   const archiveFilter = useArchiveFilter();
@@ -528,22 +542,27 @@ export default function DailyPage() {
   const minDate = indexedDates.length ? indexedDates[indexedDates.length - 1] : undefined;
   const maxDate = indexedDates.length ? indexedDates[0] : undefined;
   const [selectedDate, setSelectedDate] = useState("");
+  const effectiveSelectedDate = selectedDate || availableDates?.default_date || "";
 
-  useEffect(() => {
-    if (!selectedDate && availableDates?.default_date) {
-      setSelectedDate(availableDates.default_date);
-    }
-  }, [availableDates?.default_date, selectedDate]);
-
-  const selectedDateEntry = indexedDateEntries.get(selectedDate);
+  const selectedDateEntry = indexedDateEntries.get(effectiveSelectedDate);
   const selectedDateCount = selectedDateEntry?.total_count ?? selectedDateEntry?.count;
   const selectedDateBreakdown = selectedDateEntry?.counts_by_source;
   const hasSelectedDate = selectedDateEntry !== undefined;
 
-  const isRunning =
-    run?.status === "queued" || run?.status === "running";
-  const progressTotal = Math.max(run?.progress_total ?? 1, 1);
-  const progressCurrent = Math.min(run?.progress_current ?? 0, progressTotal);
+  useEffect(() => {
+    if (!activeJob || activeJob.status === "queued" || activeJob.status === "running") {
+      return;
+    }
+    if (activeRunId) {
+      queryClient.invalidateQueries({ queryKey: ["search-runs", activeRunId] });
+      queryClient.invalidateQueries({ queryKey: ["search-runs", activeRunId, "matches"] });
+      queryClient.invalidateQueries({ queryKey: ["search-runs", "latest"] });
+    }
+  }, [activeJob, activeRunId, queryClient]);
+
+  const isRunning = isJobRunning || createSearch.isPending;
+  const progressTotal = Math.max(activeJob?.progress?.total ?? 1, 1);
+  const progressCurrent = Math.min(activeJob?.progress?.current ?? 0, progressTotal);
   const progressPercent = Math.round((progressCurrent / progressTotal) * 100);
 
   const matchesByFilter = useMemo(
@@ -591,7 +610,7 @@ export default function DailyPage() {
         run={run}
         isRunning={isRunning}
         isCreating={createSearch.isPending}
-        selectedDate={selectedDate}
+        selectedDate={effectiveSelectedDate}
         dateCount={selectedDateCount}
         dateBreakdown={selectedDateBreakdown}
         minDate={minDate}
@@ -599,7 +618,14 @@ export default function DailyPage() {
         hasSelectedDate={hasSelectedDate}
         availableDateSet={availableDateSet}
         onDateChange={setSelectedDate}
-        onRunSearch={() => createSearch.mutate({ run_date: selectedDate })}
+        onRunSearch={() =>
+          createSearch.mutate(
+            { run_date: effectiveSelectedDate },
+            {
+              onSuccess: (data) => setActiveJobId(data.job_id),
+            }
+          )
+        }
       />
       <QuickAddFilter
         filterText={quickFilterText}
@@ -610,7 +636,11 @@ export default function DailyPage() {
         onAddFilter={handleQuickAddFilter}
       />
       {(isRunning || createSearch.isPending) && (
-        <SearchProgress run={run} progressPercent={progressPercent} />
+        <SearchProgress
+          job={activeJob}
+          progressPercent={progressPercent}
+          isCreating={createSearch.isPending}
+        />
       )}
       {run && <DailySummary run={run} matches={matches} />}
       {run?.status === "failed" && (

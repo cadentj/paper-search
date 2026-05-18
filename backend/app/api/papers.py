@@ -9,6 +9,7 @@ from app.db.session import get_db
 from app.models.paper import Paper
 from app.models.idea_map import IdeaMap
 from app.schemas.papers import PaperResponse, IdeaMapResponse
+from app.schemas.jobs import JobStartResponse
 from app.jobs.queue import get_queue
 from app.jobs.idea_map import generate_idea_map
 from app.services.jobs import build_progress, create_job, latest_job_for_subject
@@ -69,7 +70,7 @@ def get_paper_html(paper_id: str, db: Session = Depends(get_db)):
     }
 
 
-@router.post("/{paper_id}/idea-map", response_model=IdeaMapResponse)
+@router.post("/{paper_id}/idea-map", response_model=JobStartResponse)
 def create_or_get_idea_map(paper_id: str, db: Session = Depends(get_db)):
     paper = db.query(Paper).filter(Paper.id == paper_id).first()
     if not paper:
@@ -78,7 +79,29 @@ def create_or_get_idea_map(paper_id: str, db: Session = Depends(get_db)):
     existing = db.query(IdeaMap).filter(IdeaMap.paper_id == paper_id).first()
     if existing:
         if existing.status in {"queued", "running", "claims_running", "warrants_running"}:
-            return _idea_map_response(existing, db)
+            job = latest_job_for_subject(
+                db,
+                subject_type="idea_map",
+                subject_id=existing.id,
+                kind="idea_map",
+            )
+            if not job:
+                job = create_job(
+                    db,
+                    kind="idea_map",
+                    subject_type="idea_map",
+                    subject_id=existing.id,
+                    status=existing.status,
+                    progress=build_progress(
+                        stage=existing.status,
+                        current=0,
+                        total=1,
+                        message=f"Idea map is {existing.status}",
+                    ),
+                )
+                db.commit()
+                db.refresh(job)
+            return JobStartResponse(job_id=job.id)
 
         existing.status = "queued"
         existing.claims = []
@@ -132,7 +155,7 @@ def create_or_get_idea_map(paper_id: str, db: Session = Depends(get_db)):
     return _enqueue_idea_map(idea_map, db, job_record)
 
 
-def _enqueue_idea_map(idea_map: IdeaMap, db: Session, job_record) -> IdeaMapResponse:
+def _enqueue_idea_map(idea_map: IdeaMap, db: Session, job_record) -> JobStartResponse:
     try:
         q = get_queue()
         job = q.enqueue(generate_idea_map, idea_map.id, job_record.id)
@@ -157,7 +180,7 @@ def _enqueue_idea_map(idea_map: IdeaMap, db: Session, job_record) -> IdeaMapResp
         db.commit()
         raise HTTPException(status_code=503, detail=idea_map.error) from exc
 
-    return _idea_map_response(idea_map, db)
+    return JobStartResponse(job_id=job_record.id)
 
 
 @router.get("/{paper_id}/idea-map", response_model=IdeaMapResponse)
@@ -165,26 +188,4 @@ def get_idea_map(paper_id: str, db: Session = Depends(get_db)):
     idea_map = db.query(IdeaMap).filter(IdeaMap.paper_id == paper_id).first()
     if not idea_map:
         raise HTTPException(status_code=404, detail="Idea map not found")
-    return _idea_map_response(idea_map, db)
-
-
-def _idea_map_response(idea_map: IdeaMap, db: Session) -> IdeaMapResponse:
-    job = latest_job_for_subject(
-        db,
-        subject_type="idea_map",
-        subject_id=idea_map.id,
-        kind="idea_map",
-    )
-    return IdeaMapResponse(
-        id=idea_map.id,
-        paper_id=idea_map.paper_id,
-        status=idea_map.status,
-        claims=idea_map.claims,
-        source_url=idea_map.source_url,
-        dropped_reason=idea_map.dropped_reason,
-        error=idea_map.error,
-        job_id=job.id if job else None,
-        progress=job.progress if job and job.progress else {},
-        created_at=idea_map.created_at,
-        updated_at=idea_map.updated_at,
-    )
+    return idea_map

@@ -18,6 +18,7 @@ import {
   useOnboardingExtraction,
   useCompleteOnboarding,
   useResetOnboarding,
+  useJob,
 } from "@/hooks/use-queries";
 import { ProposedFilter } from "@/lib/api";
 import { Loader2, X, RotateCcw, Pencil, Check } from "lucide-react";
@@ -32,19 +33,21 @@ const ONBOARDING_SKELETON_KEYS = [
 export function OnboardingClient() {
   const { push } = useRouter();
   const [inputText, setInputText] = useState("");
-  const [extractionId, setExtractionId] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
   const [editedFilters, setEditedFilters] = useState<ProposedFilter[]>([]);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const seenProposedFilterIds = useRef<Set<string>>(new Set());
 
   const createExtraction = useCreateExtraction();
-  const { data: extraction } = useOnboardingExtraction(extractionId);
+  const { data: job } = useJob(jobId);
+  const isExtracting = job?.status === "queued" || job?.status === "running";
+  const extractionId =
+    job?.subject_type === "onboarding_extraction" ? job.subject_id || null : null;
+  const { data: extraction } = useOnboardingExtraction(extractionId, isExtracting);
   const completeOnboarding = useCompleteOnboarding();
   const resetOnboarding = useResetOnboarding();
 
-  const isExtracting =
-    extraction?.status === "queued" || extraction?.status === "running";
-  const isComplete = extraction?.status === "completed";
+  const isComplete = extraction?.status === "completed" || job?.status === "completed";
   const proposedFilters = extraction?.proposed_filters ?? EMPTY_PROPOSED_FILTERS;
 
   const handleSubmit = async () => {
@@ -52,7 +55,7 @@ export function OnboardingClient() {
     const result = await createExtraction.mutateAsync({
       input_text: inputText,
     });
-    setExtractionId(result.id);
+    setJobId(result.job_id);
   };
 
   useEffect(() => {
@@ -98,7 +101,7 @@ export function OnboardingClient() {
   const handleReset = async () => {
     await resetOnboarding.mutateAsync();
     setInputText("");
-    setExtractionId(null);
+    setJobId(null);
     setEditedFilters([]);
   };
 
@@ -153,9 +156,9 @@ export function OnboardingClient() {
                   )}
                 </Button>
               </div>
-              {extraction?.status === "failed" && (
+              {(extraction?.status === "failed" || job?.status === "failed") && (
                 <p className="text-sm text-destructive">
-                  {extraction.error || "Extraction failed. Please try again."}
+                  {extraction?.error || job?.error || "Extraction failed. Please try again."}
                 </p>
               )}
             </CardContent>

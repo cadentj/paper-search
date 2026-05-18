@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState, use, type RefObject } from "react";
+import { useEffect, useRef, useState, use, type RefObject } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -10,6 +11,7 @@ import {
   usePaperHtml,
   useIdeaMap,
   useGenerateIdeaMap,
+  useJob,
 } from "@/hooks/use-queries";
 import {
   Loader2,
@@ -20,7 +22,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import type { IdeaMap, IdeaMapClaim, IdeaMapWarrant, Paper } from "@/lib/api";
+import type { IdeaMap, IdeaMapClaim, IdeaMapWarrant, Job, Paper } from "@/lib/api";
 
 const BLOCK_SELECTOR = "[data-paper-block-id]";
 const HIGHLIGHT_STYLE_ID = "ps-highlight-style";
@@ -107,6 +109,7 @@ function PaperHeader({
 function IdeaMapPanel({
   supportsIdeaMap,
   ideaMap,
+  job,
   hasIdeaMapError,
   expandedClaims,
   highlightedWarrant,
@@ -117,6 +120,7 @@ function IdeaMapPanel({
 }: {
   supportsIdeaMap: boolean;
   ideaMap?: IdeaMap;
+  job?: Job | null;
   hasIdeaMapError: boolean;
   expandedClaims: Set<string>;
   highlightedWarrant: string | null;
@@ -138,7 +142,10 @@ function IdeaMapPanel({
     );
   }
 
+  const isJobRunning = job?.status === "queued" || job?.status === "running";
   const isLoading =
+    isGenerating ||
+    isJobRunning ||
     ideaMap?.status === "queued" ||
     ideaMap?.status === "running" ||
     ideaMap?.status === "claims_running" ||
@@ -148,19 +155,20 @@ function IdeaMapPanel({
   const isSkipped = ideaMap?.status === "skipped";
   const claims = ideaMap?.claims ?? EMPTY_IDEA_MAP_CLAIMS;
   const hasClaims = claims.length > 0;
+  const progressStage = job?.progress?.stage;
   const loadingLabel =
-    ideaMap?.status === "claims_running"
+    progressStage === "claims_running" || ideaMap?.status === "claims_running"
       ? "Finding core claims…"
-      : ideaMap?.status === "warrants_running"
+      : progressStage === "warrants_running" || ideaMap?.status === "warrants_running"
         ? "Finding warrants…"
-        : "Generating idea map…";
+        : job?.progress?.message || "Generating idea map…";
 
   return (
     <div className="w-96 border-r flex flex-col">
       <div className="p-3 border-b flex items-center justify-between">
         <h2 className="text-sm font-semibold">Idea Map</h2>
-        {!ideaMap && !hasIdeaMapError && (
-        <GenerateButton
+        {!ideaMap && !hasIdeaMapError && !isLoading && (
+          <GenerateButton
             label="Generate"
             isGenerating={isGenerating}
             onGenerate={onGenerate}
@@ -185,9 +193,9 @@ function IdeaMapPanel({
               {ideaMap?.dropped_reason || "Idea map unavailable for this paper."}
             </CenteredMessage>
           )}
-          {ideaMap?.status === "failed" && (
+          {(ideaMap?.status === "failed" || job?.status === "failed") && (
             <IdeaMapRetry
-              message={ideaMap.error || "Failed to generate idea map."}
+              message={ideaMap?.error || job?.error || "Failed to generate idea map."}
               onGenerate={onGenerate}
             />
           )}
@@ -457,15 +465,34 @@ export default function PaperDetailPage({
   params: Promise<{ paperId: string }>;
 }) {
   const { paperId } = use(params);
+  const queryClient = useQueryClient();
   const { back } = useRouter();
   const { data: paper } = usePaper(paperId);
   const { data: htmlData } = usePaperHtml(paperId);
-  const { data: ideaMap, error: ideaMapError } = useIdeaMap(paperId);
+  const [ideaMapJobId, setIdeaMapJobId] = useState<string | null>(null);
+  const { data: ideaMapJob } = useJob(ideaMapJobId);
+  const isIdeaMapJobRunning =
+    ideaMapJob?.status === "queued" || ideaMapJob?.status === "running";
+  const { data: ideaMap, error: ideaMapError } = useIdeaMap(
+    paperId,
+    !!isIdeaMapJobRunning
+  );
   const generateIdeaMap = useGenerateIdeaMap();
 
   const [expandedClaims, setExpandedClaims] = useState<Set<string>>(new Set());
   const [highlightedWarrant, setHighlightedWarrant] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  useEffect(() => {
+    if (
+      !ideaMapJob ||
+      ideaMapJob.status === "queued" ||
+      ideaMapJob.status === "running"
+    ) {
+      return;
+    }
+    queryClient.invalidateQueries({ queryKey: ["papers", paperId, "idea-map"] });
+  }, [ideaMapJob, paperId, queryClient]);
 
   const toggleClaim = (claimId: string) => {
     setExpandedClaims((prev) => {
@@ -527,11 +554,16 @@ export default function PaperDetailPage({
         <IdeaMapPanel
           supportsIdeaMap={paper?.source_type !== "lesswrong"}
           ideaMap={ideaMap}
+          job={ideaMapJob}
           hasIdeaMapError={!!ideaMapError}
           expandedClaims={expandedClaims}
           highlightedWarrant={highlightedWarrant}
           isGenerating={generateIdeaMap.isPending}
-          onGenerate={() => generateIdeaMap.mutate(paperId)}
+          onGenerate={() =>
+            generateIdeaMap.mutate(paperId, {
+              onSuccess: (data) => setIdeaMapJobId(data.job_id),
+            })
+          }
           onToggleClaim={toggleClaim}
           onWarrantClick={handleWarrantClick}
         />
