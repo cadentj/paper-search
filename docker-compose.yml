@@ -14,6 +14,7 @@ services:
       DATABASE_URL: sqlite:////app/data/paper_search.db
       REDIS_URL: redis://redis:6379/0
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      ARXIV_HTML_PUBLIC_BASE_URL: ${ARXIV_HTML_PUBLIC_BASE_URL}
       APP_ENV: ${APP_ENV:-development}
       ENABLE_DEV_RESET: ${ENABLE_DEV_RESET:-true}
     volumes:

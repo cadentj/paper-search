@@ -24,6 +24,20 @@ class SearchRunResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CreateDailySearchRequest(BaseModel):
+    run_date: date | None = None
+
+
+class AvailableSearchDate(BaseModel):
+    date: date
+    count: int
+
+
+class AvailableSearchDatesResponse(BaseModel):
+    default_date: date | None
+    dates: list[AvailableSearchDate]
+
+
 class PaperMatchResponse(BaseModel):
     id: str
     search_run_id: str

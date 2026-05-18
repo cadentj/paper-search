@@ -18,7 +18,7 @@ from app.services.html_parser import (
     citation_validation_diagnostics,
     parse_arxiv_html,
 )
-from app.services.paper_html_source import arxiv_html_url, read_local_paper_html
+from app.services.paper_html_source import arxiv_html_url, read_paper_html
 from app.llm.client import stream_structured_response
 from app.llm.config import IDEA_MAP_PROFILE
 from app.llm.prompts import (
@@ -59,18 +59,18 @@ def generate_idea_map(idea_map_id: str) -> None:
             db.commit()
             return
 
-        html_url = arxiv_html_url(paper.arxiv_id)
+        html_url = paper.html_url or arxiv_html_url(paper.arxiv_id)
         idea_map.source_url = html_url
 
-        local_html = read_local_paper_html(paper.arxiv_id)
-        if not local_html:
+        paper_html = read_paper_html(paper.arxiv_id, html_url=paper.html_url)
+        if not paper_html:
             idea_map.status = "skipped"
-            idea_map.dropped_reason = f"Local HTML not found for {paper.arxiv_id}"
+            idea_map.dropped_reason = f"HTML not found for {paper.arxiv_id}"
             idea_map.updated_at = datetime.now(timezone.utc)
             db.commit()
             return
 
-        html_content = local_html.html
+        html_content = paper_html.html
 
         blocks = parse_arxiv_html(html_content, exclude_back_matter=True)
         if not blocks:

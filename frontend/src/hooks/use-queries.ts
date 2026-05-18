@@ -115,6 +115,14 @@ export function useLatestSearchRun() {
   });
 }
 
+export function useAvailableSearchDates() {
+  return useQuery({
+    queryKey: ["search-runs", "available-dates"],
+    queryFn: api.getAvailableSearchDates,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function useSearchRun(id: string | null) {
   return useQuery({
     queryKey: ["search-runs", id],
@@ -146,7 +154,7 @@ export function useSearchRunMatches(
 export function useCreateDailySearch() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: api.createDailySearchRun,
+    mutationFn: (input?: { run_date?: string }) => api.createDailySearchRun(input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["search-runs"] });
       qc.invalidateQueries({ queryKey: ["search-runs", "latest"] });

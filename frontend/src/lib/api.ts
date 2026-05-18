@@ -75,6 +75,16 @@ export interface SearchRun {
   created_at: string;
 }
 
+export interface AvailableSearchDate {
+  date: string;
+  count: number;
+}
+
+export interface AvailableSearchDates {
+  default_date: string | null;
+  dates: AvailableSearchDate[];
+}
+
 export interface SummaryCitation {
   paperMatchId?: string;
   arxivId: string;
@@ -188,8 +198,13 @@ export const api = {
   // Search runs
   getSearchRuns: () => fetchApi<SearchRun[]>("/search-runs"),
   getLatestSearchRun: () => fetchApi<SearchRun | null>("/search-runs/latest"),
-  createDailySearchRun: () =>
-    fetchApi<SearchRun>("/search-runs/daily", { method: "POST" }),
+  getAvailableSearchDates: () =>
+    fetchApi<AvailableSearchDates>("/search-runs/available-dates"),
+  createDailySearchRun: (input?: { run_date?: string }) =>
+    fetchApi<SearchRun>("/search-runs/daily", {
+      method: "POST",
+      body: JSON.stringify(input ?? {}),
+    }),
   getSearchRun: (id: string) => fetchApi<SearchRun>(`/search-runs/${id}`),
   getSearchRunMatches: (id: string) =>
     fetchApi<PaperMatch[]>(`/search-runs/${id}/matches`),

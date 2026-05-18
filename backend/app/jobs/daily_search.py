@@ -13,7 +13,7 @@ from app.models.paper import Paper
 from app.models.paper_match import PaperMatch
 from app.models.search_run import SearchRun
 from app.models.search_run_paper import SearchRunPaper
-from app.services.local_arxiv_cache import fetch_local_cached_papers
+from app.services.public_arxiv_cache import fetch_public_cached_papers
 from app.llm.client import async_call_llm, call_llm
 from app.llm.config import JUDGE_PROFILE, SUMMARY_PROFILE
 from app.llm.prompts import (
@@ -143,7 +143,7 @@ def _set_pair_progress(
 
 def _upsert_candidate_papers(db, run: SearchRun) -> list[Paper]:
     now = datetime.now(timezone.utc)
-    daily_papers = fetch_local_cached_papers()
+    daily_papers = fetch_public_cached_papers(run_date=run.run_date.isoformat())
     candidate_paper_ids = set()
     papers: list[Paper] = []
 
@@ -368,7 +368,7 @@ def run_daily_search(search_run_id: str) -> None:
             stage="fetching_papers",
             current=0,
             total=1,
-            message="Selecting local cached arXiv papers",
+            message=f"Selecting R2-indexed arXiv papers for {run.run_date.isoformat()}",
             status="running",
         )
 
@@ -379,7 +379,7 @@ def run_daily_search(search_run_id: str) -> None:
             stage="fetching_papers",
             current=1,
             total=1,
-            message=f"Selected {len(papers)} local cached arXiv papers",
+            message=f"Selected {len(papers)} R2-indexed arXiv papers",
             status="running",
         )
 

@@ -1,5 +1,5 @@
-import uuid
 import logging
+import uuid
 from datetime import datetime, date, timezone
 from typing import Optional
 
@@ -11,9 +11,15 @@ from app.models.filter import Filter
 from app.models.paper import Paper
 from app.models.paper_match import PaperMatch
 from app.models.search_run import SearchRun
-from app.schemas.search import SearchRunResponse, PaperMatchResponse
+from app.schemas.search import (
+    AvailableSearchDatesResponse,
+    CreateDailySearchRequest,
+    SearchRunResponse,
+    PaperMatchResponse,
+)
 from app.jobs.queue import get_queue
 from app.jobs.daily_search import run_daily_search
+from app.services.public_arxiv_cache import available_dates
 
 router = APIRouter(prefix="/search-runs", tags=["search"])
 logger = logging.getLogger(__name__)
@@ -31,14 +37,30 @@ def get_latest_search_run(db: Session = Depends(get_db)):
     return run
 
 
+@router.get("/available-dates", response_model=AvailableSearchDatesResponse)
+def get_available_search_dates():
+    return available_dates()
+
+
 @router.post("/daily", response_model=SearchRunResponse)
-def create_daily_search_run(db: Session = Depends(get_db)):
+def create_daily_search_run(
+    request: CreateDailySearchRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    indexed_dates = available_dates()
+    valid_dates = {entry["date"] for entry in indexed_dates["dates"]}
+    requested_date = request.run_date if request and request.run_date else _parse_index_date(indexed_dates["default_date"])
+    if not requested_date:
+        raise HTTPException(status_code=400, detail="No indexed arXiv HTML dates are available")
+    if requested_date.isoformat() not in valid_dates:
+        raise HTTPException(status_code=400, detail=f"No indexed arXiv HTML papers for {requested_date}")
+
     now = datetime.now(timezone.utc)
     run = SearchRun(
         id=str(uuid.uuid4()),
         status="queued",
         stage="queued",
-        run_date=date.today(),
+        run_date=requested_date,
         progress_current=0,
         progress_total=1,
         progress_message="Queued, waiting for worker",
@@ -77,6 +99,12 @@ def create_daily_search_run(db: Session = Depends(get_db)):
         raise HTTPException(status_code=503, detail=run.error) from exc
 
     return run
+
+
+def _parse_index_date(value: str | date | None) -> date | None:
+    if value is None or isinstance(value, date):
+        return value
+    return date.fromisoformat(value)
 
 
 @router.get("/{search_run_id}", response_model=SearchRunResponse)

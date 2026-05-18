@@ -73,16 +73,17 @@ function PaperHeader({
         <h1 className="text-sm font-semibold truncate">
           {paper?.title || "Loading…"}
         </h1>
-        {paper?.authors && (
+        {/* {paper?.authors && (
           <p className="text-xs text-muted-foreground truncate">
             {paper.authors.join(", ")}
           </p>
-        )}
+        )} */}
       </div>
       {paper?.arxiv_id && (
         <Button
           variant="outline"
           size="sm"
+          nativeButton={false}
           render={
             <a
               href={`https://arxiv.org/abs/${paper.arxiv_id}`}
@@ -405,6 +406,7 @@ function PaperHtmlViewer({
           <Button
             variant="outline"
             size="sm"
+            nativeButton={false}
             render={
               <a
                 href={htmlData.source_url}

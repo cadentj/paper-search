@@ -12,7 +12,7 @@ from app.schemas.papers import PaperResponse, IdeaMapResponse
 from app.jobs.queue import get_queue
 from app.jobs.idea_map import generate_idea_map
 from app.services.html_parser import prepare_arxiv_html_for_viewer
-from app.services.paper_html_source import arxiv_html_url, read_local_paper_html
+from app.services.paper_html_source import arxiv_html_url, read_paper_html
 
 router = APIRouter(prefix="/papers", tags=["papers"])
 logger = logging.getLogger(__name__)
@@ -32,14 +32,14 @@ def get_paper_html(paper_id: str, db: Session = Depends(get_db)):
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    local_html = read_local_paper_html(paper.arxiv_id)
-    if local_html:
+    paper_html = read_paper_html(paper.arxiv_id, html_url=paper.html_url)
+    if paper_html:
         return {
             "html": prepare_arxiv_html_for_viewer(
-                local_html.html,
-                local_html.source_url,
+                paper_html.html,
+                paper_html.source_url,
             ),
-            "source_url": local_html.source_url,
+            "source_url": paper_html.source_url,
         }
 
     return {

@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { format, parseISO } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { SummaryText } from "@/components/summary-text";
 import {
@@ -19,6 +20,7 @@ import {
   useCreateDailySearch,
   useCreateFilter,
   useArchiveFilter,
+  useAvailableSearchDates,
 } from "@/hooks/use-queries";
 import { Input } from "@/components/ui/input";
 import {
@@ -28,6 +30,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Loader2,
   Play,
@@ -36,6 +44,7 @@ import {
   ChevronDown,
   ChevronRight,
   PlusCircle,
+  CalendarIcon,
 } from "lucide-react";
 import type { PaperMatch, SearchRun } from "@/lib/api";
 
@@ -55,19 +64,89 @@ const PROGRESS_SKELETON_KEYS = [
 ];
 const EMPTY_PAPER_MATCHES: PaperMatch[] = [];
 
+function parseIndexDate(value: string): Date {
+  return parseISO(`${value}T00:00:00`);
+}
+
+function DatePicker({
+  selectedDate,
+  availableDateSet,
+  minDate,
+  maxDate,
+  onDateChange,
+}: {
+  selectedDate: string;
+  availableDateSet: Set<string>;
+  minDate?: string;
+  maxDate?: string;
+  onDateChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = selectedDate ? parseIndexDate(selectedDate) : undefined;
+  const min = minDate ? parseIndexDate(minDate) : undefined;
+  const max = maxDate ? parseIndexDate(maxDate) : undefined;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <Button
+            variant="outline"
+            className="h-9 w-40 justify-start text-left font-normal"
+          />
+        }
+      >
+        <CalendarIcon className="mr-2 size-4" />
+        {selected ? format(selected, "MMM d, yyyy") : "Select date"}
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-auto p-0">
+        <Calendar
+          mode="single"
+          selected={selected}
+          defaultMonth={selected}
+          startMonth={min}
+          endMonth={max}
+          disabled={(date) => !availableDateSet.has(format(date, "yyyy-MM-dd"))}
+          onSelect={(date) => {
+            if (!date) return;
+            const nextDate = format(date, "yyyy-MM-dd");
+            if (!availableDateSet.has(nextDate)) return;
+            onDateChange(nextDate);
+            setOpen(false);
+          }}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function DailyHeader({
   run,
   isRunning,
   isCreating,
+  selectedDate,
+  dateCount,
+  minDate,
+  maxDate,
+  hasSelectedDate,
+  availableDateSet,
+  onDateChange,
   onRunSearch,
 }: {
   run?: SearchRun | null;
   isRunning: boolean;
   isCreating: boolean;
+  selectedDate: string;
+  dateCount?: number;
+  minDate?: string;
+  maxDate?: string;
+  hasSelectedDate: boolean;
+  availableDateSet: Set<string>;
+  onDateChange: (value: string) => void;
   onRunSearch: () => void;
 }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Daily</h1>
         {run && (
@@ -80,19 +159,36 @@ function DailyHeader({
           </p>
         )}
       </div>
-      <Button onClick={onRunSearch} disabled={isCreating || isRunning}>
-        {isRunning ? (
-          <>
-            <Loader2 className="mr-2 size-4 animate-spin" />
-            Searching…
-          </>
-        ) : (
-          <>
-            <Play className="mr-2 size-4" />
-            Run Daily Search
-          </>
+      <div className="flex flex-wrap items-center gap-2">
+        <DatePicker
+          selectedDate={selectedDate}
+          availableDateSet={availableDateSet}
+          minDate={minDate}
+          maxDate={maxDate}
+          onDateChange={onDateChange}
+        />
+        {dateCount !== undefined && (
+          <Badge variant={hasSelectedDate ? "secondary" : "destructive"}>
+            {hasSelectedDate ? `${dateCount} papers` : "No index"}
+          </Badge>
         )}
-      </Button>
+        <Button
+          onClick={onRunSearch}
+          disabled={isCreating || isRunning || !hasSelectedDate}
+        >
+          {isRunning ? (
+            <>
+              <Loader2 className="mr-2 size-4 animate-spin" />
+              Searching…
+            </>
+          ) : (
+            <>
+              <Play className="mr-2 size-4" />
+              Run Daily Search
+            </>
+          )}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -361,6 +457,7 @@ function PaperMatchCard({ match }: { match: PaperMatch }) {
 
 export default function DailyPage() {
   const { data: latestRun } = useLatestSearchRun();
+  const { data: availableDates } = useAvailableSearchDates();
   const runId = latestRun?.id || null;
   const { data: run } = useSearchRun(runId);
   const { data: matches = EMPTY_PAPER_MATCHES } = useSearchRunMatches(
@@ -376,6 +473,31 @@ export default function DailyPage() {
   );
   const [quickFilterText, setQuickFilterText] = useState("");
   const [quickFilterType, setQuickFilterType] = useState<FilterMode>("claim");
+
+  const indexedDateCounts = useMemo(
+    () =>
+      new Map(
+        (availableDates?.dates ?? []).map((entry) => [entry.date, entry.count])
+      ),
+    [availableDates]
+  );
+  const availableDateSet = useMemo(
+    () => new Set(indexedDateCounts.keys()),
+    [indexedDateCounts]
+  );
+  const indexedDates = availableDates?.dates.map((entry) => entry.date) ?? [];
+  const minDate = indexedDates.length ? indexedDates[indexedDates.length - 1] : undefined;
+  const maxDate = indexedDates.length ? indexedDates[0] : undefined;
+  const [selectedDate, setSelectedDate] = useState("");
+
+  useEffect(() => {
+    if (!selectedDate && availableDates?.default_date) {
+      setSelectedDate(availableDates.default_date);
+    }
+  }, [availableDates?.default_date, selectedDate]);
+
+  const selectedDateCount = indexedDateCounts.get(selectedDate);
+  const hasSelectedDate = selectedDateCount !== undefined;
 
   const isRunning =
     run?.status === "queued" || run?.status === "running";
@@ -428,7 +550,14 @@ export default function DailyPage() {
         run={run}
         isRunning={isRunning}
         isCreating={createSearch.isPending}
-        onRunSearch={() => createSearch.mutate()}
+        selectedDate={selectedDate}
+        dateCount={selectedDateCount}
+        minDate={minDate}
+        maxDate={maxDate}
+        hasSelectedDate={hasSelectedDate}
+        availableDateSet={availableDateSet}
+        onDateChange={setSelectedDate}
+        onRunSearch={() => createSearch.mutate({ run_date: selectedDate })}
       />
       <QuickAddFilter
         filterText={quickFilterText}
