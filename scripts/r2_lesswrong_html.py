@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--secret-access-key", default=os.environ.get("R2_SECRET_ACCESS_KEY"))
     parser.add_argument("--bucket", default=os.environ.get("R2_BUCKET"))
     parser.add_argument("--cache-dir", default=str(DEFAULT_CACHE_DIR))
-    parser.add_argument("--prefix", default="lesswrong-html/posts/")
+    parser.add_argument("--prefix", default="data/")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--workers", type=int, default=16)
@@ -112,7 +112,16 @@ def object_exists(client, bucket: str, key: str) -> bool:
     except ClientError as exc:
         status_code = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
         error_code = exc.response.get("Error", {}).get("Code")
-        if status_code == 404 or error_code in {"404", "NoSuchKey", "NotFound"}:
+        # R2/S3 often returns 403 instead of 404 when HeadObject is unavailable
+        # or the caller lacks ListBucket permission on missing keys.
+        if status_code in {403, 404} or error_code in {
+            "403",
+            "404",
+            "NoSuchKey",
+            "NotFound",
+            "Forbidden",
+            "AccessDenied",
+        }:
             return False
         raise
     return True

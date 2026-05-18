@@ -152,15 +152,9 @@ export default function SearchPage() {
                             <span className="font-medium">
                               {m.paper_title}
                             </span>
-                            <Badge
-                              variant="secondary"
-                              className="text-xs"
-                            >
-                              {m.stance} ({m.relevance_score.toFixed(2)})
-                            </Badge>
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            {m.rationale}
+                            {m.result}
                           </p>
                         </div>
                       ))}

@@ -56,13 +56,11 @@ describe("DailyPage", () => {
     mockApi.getSearchRunMatches.mockResolvedValue([
       {
         id: "m1",
+        search_run_id: "r1",
         filter_id: "f1",
         paper_id: "p1",
-        stance: "supports",
-        relevance_score: 0.85,
-        rationale: "Already found during the run",
-        matched_claims: [],
-        abstract_evidence: [],
+        result: "Already found during the run",
+        created_at: "2026-05-17T19:00:00Z",
         paper_title: "Streaming Match",
         paper_authors: ["Author A"],
         filter_name: "LLM Reasoning",
@@ -98,13 +96,12 @@ describe("DailyPage", () => {
     mockApi.getSearchRunMatches.mockResolvedValue([
       {
         id: "m1",
+        search_run_id: "r1",
         filter_id: "f1",
         paper_id: "p1",
-        stance: "supports",
-        relevance_score: 0.85,
-        rationale: "Directly addresses reasoning",
-        matched_claims: ["Chain-of-thought"],
-        abstract_evidence: [],
+        result:
+          "Directly addresses reasoning; emphasizes chain-of-thought improvements.",
+        created_at: "2026-05-17T19:00:00Z",
         paper_title: "CoT Paper",
         paper_authors: ["Author A"],
         paper_arxiv_id: "2401.00001",

@@ -59,13 +59,6 @@ import type { AvailableSearchDate, Job, PaperMatch, SearchRun } from "@/lib/api"
 type FilterMode = "claim" | "question" | "topic";
 type MatchGroup = { name: string; matches: PaperMatch[] };
 
-const STANCE_COLORS: Record<string, string> = {
-  supports: "bg-green-100 text-green-800",
-  refutes: "bg-red-100 text-red-800",
-  complicates: "bg-amber-100 text-amber-800",
-  relevant: "bg-blue-100 text-blue-800",
-};
-
 const PROGRESS_SKELETON_KEYS = [
   "daily-progress-skeleton-1",
   "daily-progress-skeleton-2",
@@ -456,14 +449,6 @@ function PaperMatchCard({ match }: { match: PaperMatch }) {
             {match.paper_title}
           </Link>
           <div className="flex items-center gap-2 mt-1">
-            <span
-              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STANCE_COLORS[match.stance] || "bg-gray-100 text-gray-800"}`}
-            >
-              {match.stance}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              Score: {match.relevance_score.toFixed(2)}
-            </span>
             {externalUrl && (
               <a
                 href={externalUrl}
@@ -478,24 +463,11 @@ function PaperMatchCard({ match }: { match: PaperMatch }) {
           </div>
         </div>
       </div>
-      <p className="text-sm text-muted-foreground">{match.rationale}</p>
+      <p className="text-sm text-muted-foreground">{match.result}</p>
       {match.paper_authors && match.paper_authors.length > 0 && (
         <p className="text-sm text-muted-foreground">
           {match.paper_authors.join(", ")}
         </p>
-      )}
-      {match.matched_claims.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {match.matched_claims.map((claim) => (
-            <Badge
-              key={`${match.id}-${claim}`}
-              variant="outline"
-              className="text-xs"
-            >
-              {claim}
-            </Badge>
-          ))}
-        </div>
       )}
     </div>
   );

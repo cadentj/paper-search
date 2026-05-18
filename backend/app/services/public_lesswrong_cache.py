@@ -189,4 +189,4 @@ def _parse_datetime(value: str | None) -> datetime | None:
 
 
 def _html_key_for_post_id(post_id: str) -> str:
-    return f"lesswrong-html/posts/{post_id[:2]}/{post_id}.html"
+    return f"data/{post_id[:2]}/{post_id}.html"

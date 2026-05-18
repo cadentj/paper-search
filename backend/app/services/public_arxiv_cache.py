@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -24,7 +23,11 @@ class AvailableDate:
 
 _index_cache: dict[str, Any] | None = None
 _index_cached_at = 0.0
+_date_index_cache: dict[str, dict[str, Any]] = {}
+_date_index_cached_at: dict[str, float] = {}
 _index_lock = threading.Lock()
+_http_client: httpx.Client | None = None
+_http_client_lock = threading.Lock()
 
 
 def available_dates() -> dict[str, Any]:
@@ -53,7 +56,7 @@ def fetch_public_cached_papers(
 
     category_set = set(categories or _settings_categories())
     papers = [
-        paper for paper in date_payload.get("papers", [])
+        paper for paper in papers_for_date(run_date=run_date, date_payload=date_payload)
         if _matches_categories(paper, category_set)
     ]
     max_results = limit if limit is not None else settings.ARXIV_PUBLIC_DAILY_LIMIT
@@ -61,6 +64,22 @@ def fetch_public_cached_papers(
         papers = papers[:max_results]
 
     return _hydrate_paper_records(papers)
+
+
+def papers_for_date(*, run_date: str, date_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    inline_papers = date_payload.get("papers")
+    if isinstance(inline_papers, list):
+        return inline_papers
+
+    index_key = str(date_payload.get("index_key") or "")
+    if not index_key:
+        return []
+
+    date_index = fetch_date_index(index_key=index_key)
+    if str(date_index.get("date") or run_date) != run_date:
+        return []
+    papers = date_index.get("papers") or []
+    return papers if isinstance(papers, list) else []
 
 
 def fetch_public_paper_html(
@@ -76,9 +95,8 @@ def fetch_public_paper_html(
         return None
 
     try:
-        with httpx.Client(timeout=30.0, follow_redirects=True) as client:
-            response = client.get(url)
-            response.raise_for_status()
+        response = _shared_client().get(url)
+        response.raise_for_status()
     except httpx.HTTPError:
         return None
 
@@ -97,14 +115,31 @@ def fetch_index() -> dict[str, Any]:
             return _index_cache
 
     index_url = public_url(settings.ARXIV_HTML_INDEX_PATH)
-    with httpx.Client(timeout=30.0, follow_redirects=True) as client:
-        response = client.get(index_url)
-        response.raise_for_status()
-        payload = response.json()
+    response = _shared_client().get(index_url)
+    response.raise_for_status()
+    payload = response.json()
 
     with _index_lock:
         _index_cache = payload
         _index_cached_at = now
+    return payload
+
+
+def fetch_date_index(*, index_key: str) -> dict[str, Any]:
+    now = time.monotonic()
+    with _index_lock:
+        cached = _date_index_cache.get(index_key)
+        cached_at = _date_index_cached_at.get(index_key, 0.0)
+        if cached is not None and now - cached_at < settings.ARXIV_PUBLIC_INDEX_TTL_SECONDS:
+            return cached
+
+    response = _shared_client().get(public_url(index_key))
+    response.raise_for_status()
+    payload = response.json()
+
+    with _index_lock:
+        _date_index_cache[index_key] = payload
+        _date_index_cached_at[index_key] = now
     return payload
 
 
@@ -114,16 +149,25 @@ def public_url(path_or_key: str) -> str:
     return urljoin(base, quote(path, safe="/:.-_"))
 
 
+def _shared_client() -> httpx.Client:
+    global _http_client
+
+    with _http_client_lock:
+        if _http_client is None:
+            _http_client = httpx.Client(
+                timeout=30.0,
+                follow_redirects=True,
+                limits=httpx.Limits(max_connections=32, max_keepalive_connections=16),
+            )
+        return _http_client
+
+
 def _hydrate_paper_records(index_papers: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    records: list[dict[str, Any] | None] = [None] * len(index_papers)
-    with ThreadPoolExecutor(max_workers=16) as executor:
-        futures = {
-            executor.submit(_paper_record, paper): index
-            for index, paper in enumerate(index_papers)
-        }
-        for future in as_completed(futures):
-            records[futures[future]] = future.result()
-    return [record for record in records if record]
+    return [
+        record
+        for paper in index_papers
+        if (record := _paper_record(paper)) is not None
+    ]
 
 
 def _paper_record(paper: dict[str, Any]) -> dict[str, Any]:
@@ -133,10 +177,10 @@ def _paper_record(paper: dict[str, Any]) -> dict[str, Any]:
     metadata = {
         "title": paper.get("title") or arxiv_id,
         "abstract": paper.get("abstract") or "",
-        "authors": paper.get("authors") or [],
+        "authors": list(paper.get("authors") or []),
     }
 
-    if not metadata["abstract"] or not metadata["authors"]:
+    if not metadata["abstract"]:
         fetched = fetch_public_paper_html(arxiv_id=arxiv_id, html_url=html_url)
         if fetched:
             extracted = _extract_html_metadata(fetched["html"])

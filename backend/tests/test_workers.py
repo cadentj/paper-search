@@ -93,9 +93,10 @@ def _paper_fixture(arxiv_id: str, title: str) -> dict:
 
 
 def _extract_prompt_arxiv_id(user_prompt: str) -> str:
-    marker = "ArXiv ID: "
-    start = user_prompt.index(marker) + len(marker)
-    return user_prompt[start:].split("\n", 1)[0].strip()
+    for line in user_prompt.splitlines():
+        if line.strip().startswith("Source ID:"):
+            return line.split("Source ID:", 1)[1].strip()
+    raise ValueError("Source ID not found in prompt")
 
 
 def _fake_daily_async_llm(*, matched_arxiv_ids: set[str], assert_prompt=None, fail_arxiv_ids=None):
@@ -107,6 +108,7 @@ def _fake_daily_async_llm(*, matched_arxiv_ids: set[str], assert_prompt=None, fa
         if assert_prompt:
             assert_prompt(kwargs["user_prompt"])
         arxiv_id = _extract_prompt_arxiv_id(kwargs["user_prompt"])
+        item_id = f"arxiv:{arxiv_id}"
         if arxiv_id in fail_arxiv_ids:
             raise RuntimeError(f"transient failure for {arxiv_id}")
         is_match = arxiv_id in matched_arxiv_ids
@@ -114,17 +116,14 @@ def _fake_daily_async_llm(*, matched_arxiv_ids: set[str], assert_prompt=None, fa
             "content": {
                 "matches": [
                     {
-                        "arxivId": arxiv_id,
-                        "stance": "supports" if is_match else "irrelevant",
-                        "relevanceScore": 0.82 if is_match else 0.0,
-                        "confidence": 0.9,
-                        "rationale": (
+                        "itemId": item_id,
+                        "sourceType": "arxiv",
+                        "sourceId": arxiv_id,
+                        "result": (
                             "The paper directly addresses the filter."
                             if is_match
-                            else "The paper is unrelated to the filter."
+                            else ""
                         ),
-                        "matchedClaims": ["Relevant claim"] if is_match else [],
-                        "abstractEvidence": ["Relevant abstract evidence"] if is_match else [],
                     }
                 ]
             },

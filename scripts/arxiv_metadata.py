@@ -1,16 +1,13 @@
-"""arXiv API paper provider for daily searches."""
+"""Shared arXiv metadata helpers for standalone scripts."""
 
 from __future__ import annotations
 
 import re
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime
 from typing import Any
 
 import httpx
-
-from app.core.config import settings
 
 ARXIV_API_URL = "https://export.arxiv.org/api/query"
 ATOM_NS = "{http://www.w3.org/2005/Atom}"
@@ -19,19 +16,8 @@ VERSION_RE = re.compile(r"v\d+$")
 
 
 def normalize_arxiv_id(value: str) -> str:
-    """Return a bare arXiv ID without URL prefix or version suffix."""
     arxiv_id = value.rstrip("/").rsplit("/", 1)[-1]
     return VERSION_RE.sub("", arxiv_id)
-
-
-def build_category_query(categories: list[str]) -> str:
-    return " OR ".join(f"cat:{category}" for category in categories)
-
-
-def parse_arxiv_datetime(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def parse_arxiv_feed(xml_text: str) -> list[dict[str, Any]]:
@@ -42,7 +28,6 @@ def parse_arxiv_feed(xml_text: str) -> list[dict[str, Any]]:
         id_el = entry.find(f"{ATOM_NS}id")
         title_el = entry.find(f"{ATOM_NS}title")
         summary_el = entry.find(f"{ATOM_NS}summary")
-        published_el = entry.find(f"{ATOM_NS}published")
 
         if id_el is None or not id_el.text:
             continue
@@ -59,7 +44,6 @@ def parse_arxiv_feed(xml_text: str) -> list[dict[str, Any]]:
             for category_el in entry.findall(f"{ATOM_NS}category")
             if category_el.attrib.get("term")
         ]
-
         primary_category_el = entry.find(f"{ARXIV_NS}primary_category")
         primary_category = (
             primary_category_el.attrib.get("term")
@@ -76,11 +60,6 @@ def parse_arxiv_feed(xml_text: str) -> list[dict[str, Any]]:
                 "abstract": " ".join((summary_el.text or "").split()) if summary_el is not None else "",
                 "authors": authors,
                 "categories": categories,
-                "published_at": parse_arxiv_datetime(
-                    published_el.text if published_el is not None else None
-                ),
-                "html_url": f"https://arxiv.org/html/{arxiv_id}",
-                "landing_url": f"https://arxiv.org/abs/{arxiv_id}",
             }
         )
 
@@ -90,62 +69,23 @@ def parse_arxiv_feed(xml_text: str) -> list[dict[str, Any]]:
 def fetch_metadata_by_ids(
     arxiv_ids: list[str],
     *,
-    client: httpx.Client | None = None,
+    client: httpx.Client,
     batch_size: int = 100,
     batch_delay_seconds: float = 3.0,
 ) -> dict[str, dict[str, Any]]:
-    """Fetch metadata for specific arXiv IDs via the export API."""
     normalized_ids = [normalize_arxiv_id(arxiv_id) for arxiv_id in arxiv_ids if arxiv_id]
     unique_ids = list(dict.fromkeys(normalized_ids))
     if not unique_ids:
         return {}
 
-    owns_client = client is None
-    if client is None:
-        client = httpx.Client(timeout=30.0, follow_redirects=True)
-
     metadata_by_id: dict[str, dict[str, Any]] = {}
-    try:
-        for start in range(0, len(unique_ids), batch_size):
-            batch = unique_ids[start : start + batch_size]
-            response = client.get(
-                ARXIV_API_URL,
-                params={"id_list": ",".join(batch)},
-            )
-            response.raise_for_status()
-            for paper in parse_arxiv_feed(response.text):
-                metadata_by_id[paper["arxiv_id"]] = paper
-            if start + batch_size < len(unique_ids) and batch_delay_seconds > 0:
-                time.sleep(batch_delay_seconds)
-    finally:
-        if owns_client:
-            client.close()
+    for start in range(0, len(unique_ids), batch_size):
+        batch = unique_ids[start : start + batch_size]
+        response = client.get(ARXIV_API_URL, params={"id_list": ",".join(batch)})
+        response.raise_for_status()
+        for paper in parse_arxiv_feed(response.text):
+            metadata_by_id[paper["arxiv_id"]] = paper
+        if start + batch_size < len(unique_ids) and batch_delay_seconds > 0:
+            time.sleep(batch_delay_seconds)
 
     return metadata_by_id
-
-
-def fetch_daily_papers(
-    *,
-    limit: int | None = None,
-    categories: list[str] | None = None,
-) -> list[dict[str, Any]]:
-    category_list = categories or [
-        category.strip()
-        for category in settings.ARXIV_CATEGORIES.split(",")
-        if category.strip()
-    ]
-    max_results = limit or settings.ARXIV_DAILY_LIMIT
-
-    params = {
-        "search_query": build_category_query(category_list),
-        "start": 0,
-        "max_results": max_results,
-        "sortBy": "submittedDate",
-        "sortOrder": "descending",
-    }
-
-    with httpx.Client(timeout=30.0, follow_redirects=True) as client:
-        response = client.get(ARXIV_API_URL, params=params)
-        response.raise_for_status()
-
-    return parse_arxiv_feed(response.text)

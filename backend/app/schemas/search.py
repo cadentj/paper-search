@@ -41,12 +41,7 @@ class PaperMatchResponse(BaseModel):
     search_run_id: str
     filter_id: str
     paper_id: str
-    stance: str
-    relevance_score: float
-    confidence: Optional[float] = None
-    rationale: str
-    matched_claims: list
-    abstract_evidence: list
+    result: str
     llm_model: Optional[str] = None
     created_at: datetime
 

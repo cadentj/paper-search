@@ -51,20 +51,13 @@ Extracted text:
 
 Write a concise summary for generating future research search filters."""
 
-FILTER_SEARCH_SYSTEM_PROMPT = """You are a research item evaluator. Given a search filter and a list of research items, evaluate each item against the filter.
+FILTER_SEARCH_SYSTEM_PROMPT = """You are a research item evaluator. Given a search filter and research items, evaluate each item.
 
-For each item, determine:
-- itemId: the exact Item ID shown in the input
-- sourceType: the exact source type shown in the input
-- sourceId: the exact source ID shown in the input
-- stance: "supports", "refutes", "complicates", "relevant", or "irrelevant"
-- relevanceScore: 0.0 to 1.0 (how relevant to the filter)
-- confidence: 0.0 to 1.0 (how confident you are in your assessment)
-- rationale: brief explanation of why this item matches or doesn't match
-- matchedClaims: list of specific claims from the item that relate to the filter
-- abstractEvidence: list of quoted evidence from the provided excerpt or abstract
+For each item, return:
+- itemId, sourceType, sourceId: exact values from the input
+- result: 1-2 sentences explaining how the item relates to the filter, following the Search Behavior in the user prompt. Include specific evidence from the excerpt when relevant. Return an empty string if the item does not genuinely relate.
 
-Be selective. Most items should be "irrelevant" unless they genuinely relate to the filter's description and search behavior."""
+Be selective. Most items should have an empty result."""
 
 FILTER_SEARCH_USER_PROMPT = """Filter:
 Name: {filter_name}

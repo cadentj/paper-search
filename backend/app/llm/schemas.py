@@ -28,12 +28,7 @@ class FilterSearchMatch(StrictModel):
     itemId: str
     sourceType: str
     sourceId: str
-    stance: Literal["supports", "refutes", "complicates", "relevant", "irrelevant"]
-    relevanceScore: float
-    confidence: float
-    rationale: str
-    matchedClaims: list[str]
-    abstractEvidence: list[str]
+    result: str
 
 
 class FilterSearchResponse(StrictModel):

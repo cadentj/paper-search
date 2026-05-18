@@ -2,7 +2,12 @@
 
 import pytest
 
-from app.services.arxiv import build_category_query, normalize_arxiv_id, parse_arxiv_feed
+from app.services.arxiv import (
+    build_category_query,
+    fetch_metadata_by_ids,
+    normalize_arxiv_id,
+    parse_arxiv_feed,
+)
 from app.services.html_parser import (
     blocks_to_prompt_text,
     parse_arxiv_html,
@@ -49,6 +54,92 @@ class TestArxivProvider:
         assert paper["categories"] == ["cs.AI", "cs.LG"]
         assert paper["html_url"] == "https://arxiv.org/html/2605.01234"
         assert paper["published_at"].year == 2026
+
+    def test_fetch_metadata_by_ids(self, monkeypatch):
+        requested: list[str] = []
+        sample_feed = self.SAMPLE_FEED
+
+        class FakeResponse:
+            text = sample_feed
+
+            def raise_for_status(self):
+                return None
+
+        class FakeClient:
+            def get(self, url, params=None):
+                requested.extend((params or {}).get("id_list", "").split(","))
+                return FakeResponse()
+
+            def close(self):
+                return None
+
+        metadata = fetch_metadata_by_ids(
+            ["2605.01234v2"],
+            client=FakeClient(),
+            batch_delay_seconds=0,
+        )
+        assert requested == ["2605.01234"]
+        assert metadata["2605.01234"]["abstract"] == (
+            "We study modern AI systems and report useful findings."
+        )
+
+
+class TestPublicArxivCache:
+    def test_uses_index_abstract_without_html_fetch(self, monkeypatch):
+        from app.services import public_arxiv_cache as cache
+
+        def fail_fetch(**kwargs):
+            raise AssertionError("HTML fetch should not run when index has abstract")
+
+        monkeypatch.setattr(cache, "fetch_public_paper_html", fail_fetch)
+
+        record = cache._paper_record(
+            {
+                "arxiv_id": "2605.01234",
+                "title": "Indexed Title",
+                "abstract": "Indexed abstract text.",
+                "authors": ["Author One"],
+                "categories": ["cs.AI"],
+                "latest_version_date": "2026-05-16T18:00:00Z",
+                "html_key": "data/2605/2605.01234.html",
+            }
+        )
+
+        assert record["abstract"] == "Indexed abstract text."
+        assert record["authors"] == ["Author One"]
+
+    def test_papers_for_date_reads_inline_papers(self):
+        from app.services.public_arxiv_cache import papers_for_date
+
+        papers = papers_for_date(
+            run_date="2026-05-18",
+            date_payload={
+                "count": 1,
+                "papers": [{"arxiv_id": "2605.01234", "title": "Inline"}],
+            },
+        )
+        assert papers[0]["title"] == "Inline"
+
+    def test_papers_for_date_reads_date_shard(self, monkeypatch):
+        from app.services import public_arxiv_cache as cache
+
+        monkeypatch.setattr(
+            cache,
+            "fetch_date_index",
+            lambda index_key: {
+                "date": "2026-05-18",
+                "papers": [{"arxiv_id": "2605.01234", "title": "Shard"}],
+            },
+        )
+
+        papers = cache.papers_for_date(
+            run_date="2026-05-18",
+            date_payload={
+                "count": 1,
+                "index_key": "data/index/dates/2026-05-18.json",
+            },
+        )
+        assert papers[0]["title"] == "Shard"
 
 
 class TestHtmlParser:

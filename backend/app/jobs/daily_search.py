@@ -98,9 +98,7 @@ def _build_matches_text(matches: list[dict]) -> str:
             f"Item: {m.get('paper_title', 'Unknown')} ({m.get('item_id', '')})\n"
             f"Source: {m.get('source_type', '')} {m.get('source_id', '')}\n"
             f"Filter: {m.get('filter_name', 'Unknown')}\n"
-            f"Stance: {m.get('stance', '')}\n"
-            f"Score: {m.get('relevance_score', 0)}\n"
-            f"Rationale: {m.get('rationale', '')}\n"
+            f"Result: {m.get('result', '')}\n"
             f"Match ID: {m.get('match_id', '')}\n"
         )
     return "\n---\n".join(lines)
@@ -533,20 +531,15 @@ def run_daily_search(search_run_id: str, job_id: str | None = None) -> None:
                 tqdm.write(message)
             else:
                 match_data = evaluation.result or {}
-                stance = match_data.get("stance", "irrelevant")
-                if stance != "irrelevant":
+                result_text = str(match_data.get("result") or "").strip()
+                if result_text:
                     matched_pairs += 1
                     match = PaperMatch(
                         id=str(uuid.uuid4()),
                         search_run_id=search_run_id,
                         filter_id=evaluation.filter_id,
                         paper_id=evaluation.paper_id,
-                        stance=stance,
-                        relevance_score=match_data.get("relevanceScore", 0.0),
-                        confidence=match_data.get("confidence"),
-                        rationale=match_data.get("rationale", ""),
-                        matched_claims=match_data.get("matchedClaims", []),
-                        abstract_evidence=match_data.get("abstractEvidence", []),
+                        result=result_text,
                         llm_model=evaluation.model,
                         llm_response_id=evaluation.response_id,
                     )
@@ -558,9 +551,7 @@ def run_daily_search(search_run_id: str, job_id: str | None = None) -> None:
                         "source_type": evaluation.source_type,
                         "source_id": evaluation.source_id,
                         "filter_name": evaluation.filter_name,
-                        "stance": match.stance,
-                        "relevance_score": match.relevance_score,
-                        "rationale": match.rationale,
+                        "result": match.result,
                     })
                 else:
                     irrelevant_pairs += 1

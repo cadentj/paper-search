@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["boto3>=1.34.0"]
+# dependencies = ["beautifulsoup4>=4.12.0", "boto3>=1.34.0", "lxml>=5.0.0"]
 # ///
-"""Build and upload a date-keyed arXiv HTML scrape index to Cloudflare R2."""
+"""Build and upload a sharded arXiv HTML scrape index to Cloudflare R2."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import sqlite3
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,20 @@ from typing import Any
 
 import boto3
 from botocore.config import Config
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from arxiv_html_metadata import extract_html_metadata
+from arxiv_index import (
+    DEFAULT_DATE_INDEX_PREFIX,
+    DEFAULT_HTML_PREFIX,
+    DEFAULT_INDEX_KEY,
+    build_sharded_index_from_daily_papers,
+    json_body,
+    upload_sharded_index,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -42,34 +57,31 @@ def main() -> None:
     state_db = Path(args.state_db).expanduser().resolve()
     cache_dir = Path(args.cache_dir).expanduser().resolve()
 
-    index = build_index(
+    manifest, date_shards = build_index(
         state_db=state_db,
         cache_dir=cache_dir,
         prefix=args.prefix,
+        date_index_prefix=args.date_index_prefix,
         verify_files=not args.no_verify_files,
     )
 
-    body = serialize_index(index, pretty=args.pretty)
-    if args.output:
-        output_path = Path(args.output).expanduser().resolve()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(body, encoding="utf-8")
-        print(f"Wrote {output_path}")
+    if args.output_dir:
+        write_local_output(Path(args.output_dir).expanduser().resolve(), manifest, date_shards, pretty=args.pretty)
 
-    print_summary(index)
+    print_summary(manifest)
 
     if args.dry_run:
         return
 
     client = r2_client(args)
-    client.put_object(
-        Bucket=args.bucket,
-        Key=args.index_key,
-        Body=body.encode("utf-8"),
-        ContentType="application/json",
-        CacheControl="no-cache",
+    upload_sharded_index(
+        client,
+        bucket=args.bucket,
+        index_key=args.index_key,
+        manifest=manifest,
+        date_shards=date_shards,
+        pretty=args.pretty,
     )
-    print(f"Uploaded s3://{args.bucket}/{args.index_key}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -80,11 +92,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bucket", default=os.environ.get("R2_BUCKET"))
     parser.add_argument("--state-db", default=str(DEFAULT_STATE_DB))
     parser.add_argument("--cache-dir", default=str(DEFAULT_CACHE_DIR))
-    parser.add_argument("--prefix", default="arxiv-html/")
-    parser.add_argument("--index-key", default="arxiv-html/index/papers-by-date.json")
-    parser.add_argument("--output", help="Optional local path to write the generated JSON.")
+    parser.add_argument("--prefix", default=DEFAULT_HTML_PREFIX)
+    parser.add_argument("--index-key", default=os.environ.get("ARXIV_HTML_INDEX_PATH", DEFAULT_INDEX_KEY))
+    parser.add_argument("--date-index-prefix", default=DEFAULT_DATE_INDEX_PREFIX)
+    parser.add_argument("--output-dir", help="Optional local directory to write manifest and date shards.")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--pretty", action="store_true", help="Pretty-print generated JSON.")
+    parser.add_argument("--pretty", action="store_true")
     parser.add_argument(
         "--no-verify-files",
         action="store_true",
@@ -98,15 +111,16 @@ def build_index(
     state_db: Path,
     cache_dir: Path,
     prefix: str,
+    date_index_prefix: str,
     verify_files: bool,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
     if not state_db.exists():
         raise SystemExit(f"State DB not found: {state_db}")
     if verify_files and not cache_dir.exists():
         raise SystemExit(f"Cache dir not found: {cache_dir}")
 
     rows = load_success_rows(state_db)
-    dates: dict[str, dict[str, Any]] = {}
+    daily_papers: dict[str, list[dict[str, Any]]] = {}
     skipped_missing = 0
 
     for row in rows:
@@ -123,12 +137,22 @@ def build_index(
         day = date_part(paper.latest_version_date)
         if not day:
             continue
-        bucket = dates.setdefault(day, {"count": 0, "papers": []})
-        bucket["papers"].append(
+
+        metadata = metadata_from_local_html(
+            html_path=resolve_html_path(
+                arxiv_id=paper.arxiv_id,
+                recorded_path=row["html_path"],
+                cache_dir=cache_dir,
+                verify_files=verify_files,
+            ),
+        )
+        daily_papers.setdefault(day, []).append(
             {
                 "arxiv_id": paper.arxiv_id,
                 "version": paper.version,
-                "title": paper.title,
+                "title": metadata["title"] or paper.title,
+                "abstract": metadata["abstract"],
+                "authors": metadata["authors"],
                 "categories": paper.categories,
                 "latest_version_date": paper.latest_version_date,
                 "source_url": paper.source_url,
@@ -137,19 +161,29 @@ def build_index(
             }
         )
 
-    sorted_dates: dict[str, dict[str, Any]] = {}
-    for day in sorted(dates.keys(), reverse=True):
-        papers = sorted(dates[day]["papers"], key=lambda item: item["arxiv_id"])
-        sorted_dates[day] = {"count": len(papers), "papers": papers}
+    manifest, date_shards = build_sharded_index_from_daily_papers(
+        daily_papers,
+        html_prefix=prefix,
+        date_index_prefix=date_index_prefix,
+        skipped_missing_files=skipped_missing,
+    )
+    return manifest, date_shards
 
-    return {
-        "schema_version": 1,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "html_prefix": normalize_prefix(prefix),
-        "skipped_missing_files": skipped_missing,
-        "total_papers": sum(day["count"] for day in sorted_dates.values()),
-        "dates": sorted_dates,
-    }
+
+def write_local_output(
+    output_dir: Path,
+    manifest: dict[str, Any],
+    date_shards: dict[str, dict[str, Any]],
+    *,
+    pretty: bool,
+) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "papers-by-date.json").write_text(json_body(manifest, pretty=pretty), encoding="utf-8")
+    dates_dir = output_dir / "dates"
+    dates_dir.mkdir(parents=True, exist_ok=True)
+    for day, shard in date_shards.items():
+        (dates_dir / f"{day}.json").write_text(json_body(shard, pretty=pretty), encoding="utf-8")
+    print(f"Wrote manifest and {len(date_shards)} date shards to {output_dir}")
 
 
 def load_success_rows(state_db: Path) -> list[sqlite3.Row]:
@@ -234,7 +268,10 @@ def resolve_html_path(
 
 def object_key_for_path(path: Path, *, cache_dir: Path, prefix: str) -> str:
     relative = path.resolve().relative_to(cache_dir.resolve()).as_posix()
-    return f"{normalize_prefix(prefix)}{relative}"
+    prefix_normalized = prefix.strip("/")
+    if prefix_normalized:
+        return f"{prefix_normalized}/{relative}"
+    return relative
 
 
 def path_tail_after_cache_marker(path: Path) -> Path | None:
@@ -268,11 +305,6 @@ def date_part(value: str) -> str:
         return value[:10]
 
 
-def normalize_prefix(prefix: str) -> str:
-    stripped = prefix.strip("/")
-    return f"{stripped}/" if stripped else ""
-
-
 def safe_filename(arxiv_id: str) -> str:
     return "".join(char if char.isalnum() or char in "_.-" else "_" for char in arxiv_id)
 
@@ -285,18 +317,24 @@ def is_relative_to(path: Path, parent: Path) -> bool:
     return True
 
 
-def serialize_index(index: dict[str, Any], *, pretty: bool) -> str:
-    if pretty:
-        return json.dumps(index, indent=2, sort_keys=False) + "\n"
-    return json.dumps(index, separators=(",", ":"), sort_keys=False) + "\n"
+def metadata_from_local_html(*, html_path: Path | None) -> dict[str, Any]:
+    if html_path is None or not html_path.is_file():
+        return {"title": "", "abstract": "", "authors": []}
+
+    try:
+        html = html_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {"title": "", "abstract": "", "authors": []}
+
+    return extract_html_metadata(html)
 
 
-def print_summary(index: dict[str, Any]) -> None:
-    dates = index["dates"]
+def print_summary(manifest: dict[str, Any]) -> None:
+    dates = manifest["dates"]
     newest = next(iter(dates), None)
     print(
-        f"Indexed {index['total_papers']} papers across {len(dates)} dates; "
-        f"newest={newest or 'none'}; skipped_missing={index['skipped_missing_files']}"
+        f"Indexed {manifest['total_papers']} papers across {len(dates)} dates; "
+        f"newest={newest or 'none'}; skipped_missing={manifest['skipped_missing_files']}"
     )
     for day, payload in list(dates.items())[:5]:
         print(f"  {day}: {payload['count']}")

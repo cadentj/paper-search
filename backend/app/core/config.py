@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     OPENROUTER_API_KEY: str = ""
     ARXIV_DAILY_LIMIT: int = 50
-    ARXIV_CATEGORIES: str = "cs.AI,cs.CL,cs.LG,stat.ML"
+    ARXIV_CATEGORIES: str = "cs.AI,cs.CL,cs.LG"
     ARXIV_HTML_PUBLIC_BASE_URL: str
     ARXIV_HTML_INDEX_PATH: str = "data/index/papers-by-date.json"
     ARXIV_PUBLIC_INDEX_TTL_SECONDS: int = 300
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     LESSWRONG_EXCERPT_WORDS: int = 250
     LESSWRONG_USER_AGENT: str = "paper-search local development"
     LESSWRONG_HTML_PUBLIC_BASE_URL: str = ""
-    LESSWRONG_HTML_INDEX_PATH: str = "lesswrong-html/index/posts-by-date.json"
+    LESSWRONG_HTML_INDEX_PATH: str = "data/index/posts-by-date.json"
     LESSWRONG_PUBLIC_INDEX_TTL_SECONDS: int = 300
     DOCUMENT_STORAGE_DIR: str = "data/documents"
     DOCUMENT_MAX_SIZE_BYTES: int = 1_000_000

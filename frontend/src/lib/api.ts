@@ -149,12 +149,7 @@ export interface PaperMatch {
   search_run_id: string;
   filter_id: string;
   paper_id: string;
-  stance: string;
-  relevance_score: number;
-  confidence?: number;
-  rationale: string;
-  matched_claims: string[];
-  abstract_evidence: string[];
+  result: string;
   llm_model?: string;
   created_at: string;
   paper_title?: string;

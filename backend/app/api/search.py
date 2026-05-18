@@ -162,8 +162,6 @@ def get_search_run_matches(
         PaperMatch.search_run_id == search_run_id
     ).all()
 
-    matches = [m for m in matches if m.stance != "irrelevant"]
-
     result = []
     for m in matches:
         paper = db.query(Paper).filter(Paper.id == m.paper_id).first()
@@ -174,12 +172,7 @@ def get_search_run_matches(
             search_run_id=m.search_run_id,
             filter_id=m.filter_id,
             paper_id=m.paper_id,
-            stance=m.stance,
-            relevance_score=m.relevance_score,
-            confidence=m.confidence,
-            rationale=m.rationale,
-            matched_claims=m.matched_claims,
-            abstract_evidence=m.abstract_evidence,
+            result=m.result,
             llm_model=m.llm_model,
             created_at=m.created_at,
             paper_title=paper.title if paper else None,
@@ -194,7 +187,7 @@ def get_search_run_matches(
         )
         result.append(match_resp)
 
-    result.sort(key=lambda x: x.relevance_score, reverse=True)
+    result.sort(key=lambda x: x.created_at, reverse=True)
     return result
 
 
