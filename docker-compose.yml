@@ -1,0 +1,20 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  worker:
+    build:
+      context: ./backend
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      - redis
+    environment:
+      DATABASE_URL: sqlite:////app/data/paper_search.db
+      REDIS_URL: redis://redis:6379/0
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      APP_ENV: ${APP_ENV:-development}
+      ENABLE_DEV_RESET: ${ENABLE_DEV_RESET:-true}
+    volumes:
+      - ./backend/data:/app/data
