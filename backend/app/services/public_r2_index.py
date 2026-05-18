@@ -1,22 +1,13 @@
-"""Shared HTTP + JSON manifest/date-shard readers for R2 public index layouts (arXiv, LessWrong)."""
+"""Shared HTTP + JSON manifest/date-shard reader for R2 public indexes (arXiv, LessWrong)."""
 
 from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urljoin
 
 import httpx
-
-
-@dataclass(frozen=True)
-class R2SourceConfig:
-    public_base_url: str
-    manifest_path: str
-    ttl_seconds: int
-    items_key: str
 
 
 _http_client: httpx.Client | None = None
@@ -33,7 +24,9 @@ def public_url_for_base(base_url: str, path_or_key: str) -> str:
     return urljoin(base, quote(path, safe="/:.-_"))
 
 
-def has_searchable_text(item: dict[str, Any], *, text_fields: tuple[str, ...]) -> bool:
+def has_searchable_text(
+    item: dict[str, Any], *, text_fields: tuple[str, ...]
+) -> bool:
     return any(str(item.get(f) or "").strip() for f in text_fields)
 
 
@@ -44,7 +37,9 @@ def _shared_client() -> httpx.Client:
             _http_client = httpx.Client(
                 timeout=30.0,
                 follow_redirects=True,
-                limits=httpx.Limits(max_connections=32, max_keepalive_connections=16),
+                limits=httpx.Limits(
+                    max_connections=32, max_keepalive_connections=16
+                ),
             )
         return _http_client
 
@@ -52,22 +47,32 @@ def _shared_client() -> httpx.Client:
 class ShardedPublicIndexReader:
     """Fetches manifest + date shards for one R2 public bucket (namespace disambiguates cache keys)."""
 
-    def __init__(self, config: R2SourceConfig, *, namespace: str) -> None:
-        self._config = config
+    def __init__(
+        self,
+        public_base_url: str,
+        manifest_path: str,
+        ttl_seconds: int,
+        items_key: str,
+        namespace: str,
+    ) -> None:
+        self._public_base_url = public_base_url
+        self._manifest_path = manifest_path
+        self._ttl_seconds = ttl_seconds
+        self._items_key = items_key
         self._ns = namespace
 
     def fetch_manifest(self) -> dict[str, Any]:
-        if not self._config.public_base_url.strip():
+        if not self._public_base_url.strip():
             return {"dates": {}}
 
         cache_key = f"{self._ns}:manifest"
         now = time.monotonic()
         with _cache_lock:
             hit = _manifest_cache.get(cache_key)
-            if hit is not None and now - hit[0] < self._config.ttl_seconds:
+            if hit is not None and now - hit[0] < self._ttl_seconds:
                 return hit[1]
 
-        url = public_url_for_base(self._config.public_base_url, self._config.manifest_path)
+        url = public_url_for_base(self._public_base_url, self._manifest_path)
         response = _shared_client().get(url)
         response.raise_for_status()
         payload = response.json()
@@ -81,10 +86,10 @@ class ShardedPublicIndexReader:
         cache_key = f"{self._ns}:{index_key}"
         with _cache_lock:
             hit = _date_shard_cache.get(cache_key)
-            if hit is not None and now - hit[0] < self._config.ttl_seconds:
+            if hit is not None and now - hit[0] < self._ttl_seconds:
                 return hit[1]
 
-        url = public_url_for_base(self._config.public_base_url, index_key)
+        url = public_url_for_base(self._public_base_url, index_key)
         response = _shared_client().get(url)
         response.raise_for_status()
         payload = response.json()
@@ -93,12 +98,9 @@ class ShardedPublicIndexReader:
             _date_shard_cache[cache_key] = (now, payload)
         return payload
 
-    def items_for_date(self, *, run_date: str, date_payload: dict[str, Any]) -> list[dict[str, Any]]:
-        key = self._config.items_key
-        inline = date_payload.get(key)
-        if isinstance(inline, list):
-            return inline
-
+    def items_for_date(
+        self, *, run_date: str, date_payload: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         index_key = str(date_payload.get("index_key") or "")
         if not index_key:
             return []
@@ -106,7 +108,7 @@ class ShardedPublicIndexReader:
         shard = self.fetch_date_shard(index_key)
         if str(shard.get("date") or run_date) != run_date:
             return []
-        items = shard.get(key) or []
+        items = shard.get(self._items_key) or []
         return items if isinstance(items, list) else []
 
 

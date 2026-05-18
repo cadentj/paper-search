@@ -8,7 +8,6 @@ from typing import Any
 
 from app.core.config import settings
 from app.services.public_r2_index import (
-    R2SourceConfig,
     ShardedPublicIndexReader,
     has_searchable_text,
     http_get_text,
@@ -16,34 +15,13 @@ from app.services.public_r2_index import (
 )
 
 
-@dataclass(frozen=True)
-class AvailableDate:
-    date: str
-    count: int
-
-
 _ARXIV_READER = ShardedPublicIndexReader(
-    R2SourceConfig(
-        public_base_url=settings.ARXIV_HTML_PUBLIC_BASE_URL,
-        manifest_path=settings.ARXIV_HTML_INDEX_PATH,
-        ttl_seconds=settings.ARXIV_PUBLIC_INDEX_TTL_SECONDS,
-        items_key="papers",
-    ),
+    public_base_url=settings.ARXIV_HTML_PUBLIC_BASE_URL,
+    manifest_path=settings.ARXIV_HTML_INDEX_PATH,
+    ttl_seconds=settings.ARXIV_PUBLIC_INDEX_TTL_SECONDS,
+    items_key="papers",
     namespace="arxiv",
 )
-
-
-def available_dates() -> dict[str, Any]:
-    index = fetch_index()
-    dates = [
-        AvailableDate(date=day, count=int(payload.get("count") or 0))
-        for day, payload in index.get("dates", {}).items()
-    ]
-    dates.sort(key=lambda item: item.date, reverse=True)
-    return {
-        "default_date": dates[0].date if dates else None,
-        "dates": [{"date": item.date, "count": item.count} for item in dates],
-    }
 
 
 def fetch_public_cached_papers(
@@ -101,10 +79,6 @@ def fetch_public_paper_html(
 
 def fetch_index() -> dict[str, Any]:
     return _ARXIV_READER.fetch_manifest()
-
-
-def fetch_date_index(*, index_key: str) -> dict[str, Any]:
-    return _ARXIV_READER.fetch_date_shard(index_key)
 
 
 def public_url(path_or_key: str) -> str:

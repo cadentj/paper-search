@@ -12,8 +12,8 @@ from app.models.paper import Paper
 from app.models.paper_match import PaperMatch
 from app.models.search_run import SearchRun
 from app.schemas.search import (
-    AvailableSearchDatesResponse,
     CreateDailySearchRequest,
+    DailyCandidateCountResponse,
     SearchRunResponse,
     PaperMatchResponse,
 )
@@ -21,12 +21,8 @@ from app.schemas.jobs import JobStartResponse
 from app.jobs.queue import get_queue
 from app.jobs.daily_search import run_daily_search
 from app.services.jobs import build_progress, create_job
-from app.services.daily_dates import (
-    DAILY_SEARCH_DATES,
-    DAILY_SEARCH_DATE_SET,
-    DEFAULT_DAILY_SEARCH_DATE,
-)
-from app.services.source_providers import counts_by_source_for_dates
+from app.services.daily_dates import DAILY_SEARCH_DATE_SET, DEFAULT_DAILY_SEARCH_DATE
+from app.services.source_providers import counts_by_source_for_date
 from app.services.source_settings import enabled_source_types, ensure_default_data_sources
 
 router = APIRouter(prefix="/search-runs", tags=["search"])
@@ -45,29 +41,18 @@ def get_latest_search_run(db: Session = Depends(get_db)):
     return run
 
 
-@router.get("/available-dates", response_model=AvailableSearchDatesResponse)
-def get_available_search_dates(db: Session = Depends(get_db)):
-    enabled_sources = enabled_source_types(db)
-    source_counts = counts_by_source_for_dates(enabled_sources, list(DAILY_SEARCH_DATES))
-
-    rows = []
-    for day in reversed(DAILY_SEARCH_DATES):
-        counts_by_source = {}
-        for source_type in sorted(enabled_sources):
-            counts_by_source[source_type] = source_counts.get(source_type, {}).get(day.isoformat(), 0)
-        total = sum(counts_by_source.values())
-        rows.append(
-            {
-                "date": day.isoformat(),
-                "count": total,
-                "total_count": total,
-                "counts_by_source": counts_by_source,
-            }
+@router.get("/daily-candidate-count", response_model=DailyCandidateCountResponse)
+def get_daily_candidate_count(run_date: date, db: Session = Depends(get_db)):
+    if run_date not in DAILY_SEARCH_DATE_SET:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{run_date} is outside the configured daily search window",
         )
-
+    counts_by_source = counts_by_source_for_date(enabled_source_types(db), run_date)
     return {
-        "default_date": DEFAULT_DAILY_SEARCH_DATE.isoformat(),
-        "dates": rows,
+        "date": run_date,
+        "count": sum(counts_by_source.values()),
+        "counts_by_source": counts_by_source,
     }
 
 

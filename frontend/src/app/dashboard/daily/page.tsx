@@ -21,9 +21,16 @@ import {
   useCreateDailySearch,
   useCreateFilter,
   useArchiveFilter,
-  useAvailableSearchDates,
+  useDailyCandidateCount,
   useJob,
 } from "@/hooks/use-queries";
+import {
+  DAILY_SEARCH_DATE_SET,
+  DAILY_SEARCH_END,
+  DAILY_SEARCH_START,
+  DEFAULT_DAILY_SEARCH_DATE,
+  isDailySearchDate,
+} from "@/lib/daily-dates";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -54,7 +61,7 @@ import {
   PlusCircle,
   CalendarIcon,
 } from "lucide-react";
-import type { AvailableSearchDate, Job, PaperMatch, SearchRun } from "@/lib/api";
+import type { Job, PaperMatch, SearchRun } from "@/lib/api";
 
 type FilterMode = "claim" | "question" | "topic";
 type MatchGroup = { name: string; matches: PaperMatch[] };
@@ -476,7 +483,6 @@ function PaperMatchCard({ match }: { match: PaperMatch }) {
 export default function DailyPage() {
   const queryClient = useQueryClient();
   const { data: latestRun } = useLatestSearchRun();
-  const { data: availableDates } = useAvailableSearchDates();
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const { data: activeJob } = useJob(activeJobId);
   const activeRunId =
@@ -499,27 +505,12 @@ export default function DailyPage() {
   const [quickFilterText, setQuickFilterText] = useState("");
   const [quickFilterType, setQuickFilterType] = useState<FilterMode>("claim");
 
-  const indexedDateEntries = useMemo(
-    () =>
-      new Map<string, AvailableSearchDate>(
-        (availableDates?.dates ?? []).map((entry) => [entry.date, entry])
-      ),
-    [availableDates]
-  );
-  const availableDateSet = useMemo(
-    () => new Set(indexedDateEntries.keys()),
-    [indexedDateEntries]
-  );
-  const indexedDates = availableDates?.dates.map((entry) => entry.date) ?? [];
-  const minDate = indexedDates.length ? indexedDates[indexedDates.length - 1] : undefined;
-  const maxDate = indexedDates.length ? indexedDates[0] : undefined;
-  const [selectedDate, setSelectedDate] = useState("");
-  const effectiveSelectedDate = selectedDate || availableDates?.default_date || "";
-
-  const selectedDateEntry = indexedDateEntries.get(effectiveSelectedDate);
-  const selectedDateCount = selectedDateEntry?.total_count ?? selectedDateEntry?.count;
-  const selectedDateBreakdown = selectedDateEntry?.counts_by_source;
-  const hasSelectedDate = selectedDateEntry !== undefined;
+  const [selectedDate, setSelectedDate] = useState(DEFAULT_DAILY_SEARCH_DATE);
+  const effectiveSelectedDate = selectedDate || DEFAULT_DAILY_SEARCH_DATE;
+  const { data: candidateCount } = useDailyCandidateCount(effectiveSelectedDate);
+  const hasSelectedDate = isDailySearchDate(effectiveSelectedDate);
+  const selectedDateCount = candidateCount?.count;
+  const selectedDateBreakdown = candidateCount?.counts_by_source;
 
   useEffect(() => {
     if (!activeJob || activeJob.status === "queued" || activeJob.status === "running") {
@@ -585,10 +576,10 @@ export default function DailyPage() {
         selectedDate={effectiveSelectedDate}
         dateCount={selectedDateCount}
         dateBreakdown={selectedDateBreakdown}
-        minDate={minDate}
-        maxDate={maxDate}
+        minDate={DAILY_SEARCH_START}
+        maxDate={DAILY_SEARCH_END}
         hasSelectedDate={hasSelectedDate}
-        availableDateSet={availableDateSet}
+        availableDateSet={DAILY_SEARCH_DATE_SET}
         onDateChange={setSelectedDate}
         onRunSearch={() =>
           createSearch.mutate(

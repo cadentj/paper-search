@@ -24,16 +24,10 @@ class CreateDailySearchRequest(BaseModel):
     run_date: date | None = None
 
 
-class AvailableSearchDate(BaseModel):
+class DailyCandidateCountResponse(BaseModel):
     date: date
     count: int
-    total_count: int | None = None
     counts_by_source: dict = Field(default_factory=dict)
-
-
-class AvailableSearchDatesResponse(BaseModel):
-    default_date: date | None
-    dates: list[AvailableSearchDate]
 
 
 class PaperMatchResponse(BaseModel):

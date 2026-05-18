@@ -123,16 +123,10 @@ export interface SearchRun {
   created_at: string;
 }
 
-export interface AvailableSearchDate {
+export interface DailyCandidateCount {
   date: string;
   count: number;
-  total_count?: number;
   counts_by_source: Record<string, number>;
-}
-
-export interface AvailableSearchDates {
-  default_date: string | null;
-  dates: AvailableSearchDate[];
 }
 
 export interface SummaryCitation {
@@ -299,8 +293,10 @@ export const api = {
   // Search runs
   getSearchRuns: () => fetchApi<SearchRun[]>("/search-runs"),
   getLatestSearchRun: () => fetchApi<SearchRun | null>("/search-runs/latest"),
-  getAvailableSearchDates: () =>
-    fetchApi<AvailableSearchDates>("/search-runs/available-dates"),
+  getDailyCandidateCount: (runDate: string) =>
+    fetchApi<DailyCandidateCount>(
+      `/search-runs/daily-candidate-count?run_date=${encodeURIComponent(runDate)}`
+    ),
   createDailySearchRun: (input?: { run_date?: string }) =>
     fetchApi<JobStartResponse>("/search-runs/daily", {
       method: "POST",

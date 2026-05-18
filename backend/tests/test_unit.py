@@ -34,18 +34,6 @@ class TestPublicArxivCache:
         assert record["abstract"] == "Indexed abstract text."
         assert record["authors"] == ["Author One"]
 
-    def test_papers_for_date_reads_inline_papers(self):
-        from app.services.public_arxiv_cache import papers_for_date
-
-        papers = papers_for_date(
-            run_date="2026-05-18",
-            date_payload={
-                "count": 1,
-                "papers": [{"arxiv_id": "2605.01234", "title": "Inline"}],
-            },
-        )
-        assert papers[0]["title"] == "Inline"
-
     def test_papers_for_date_reads_date_shard(self, monkeypatch):
         from app.services import public_arxiv_cache as cache
 
@@ -73,6 +61,30 @@ class TestPublicArxivCache:
     def test_fetch_public_cached_papers_skips_empty_abstract(self, monkeypatch):
         from app.services import public_arxiv_cache as cache
 
+        def fake_shard(self, index_key: str) -> dict:
+            return {
+                "date": "2026-05-18",
+                "papers": [
+                    {
+                        "arxiv_id": "2605.01234",
+                        "title": "Has abstract",
+                        "abstract": "A",
+                        "categories": ["cs.AI"],
+                    },
+                    {
+                        "arxiv_id": "2605.09999",
+                        "title": "No abstract",
+                        "abstract": "",
+                        "categories": ["cs.AI"],
+                    },
+                ],
+            }
+
+        monkeypatch.setattr(
+            cache.ShardedPublicIndexReader,
+            "fetch_date_shard",
+            fake_shard,
+        )
         monkeypatch.setattr(
             cache,
             "fetch_index",
@@ -80,20 +92,7 @@ class TestPublicArxivCache:
                 "dates": {
                     "2026-05-18": {
                         "count": 2,
-                        "papers": [
-                            {
-                                "arxiv_id": "2605.01234",
-                                "title": "Has abstract",
-                                "abstract": "A",
-                                "categories": ["cs.AI"],
-                            },
-                            {
-                                "arxiv_id": "2605.09999",
-                                "title": "No abstract",
-                                "abstract": "",
-                                "categories": ["cs.AI"],
-                            },
-                        ],
+                        "index_key": "data/index/dates/2026-05-18.json",
                     }
                 }
             },
@@ -108,6 +107,32 @@ class TestPublicLesswrongCache:
     def test_fetch_skips_posts_without_preview(self, monkeypatch):
         from app.services import public_lesswrong_cache as lw
 
+        def fake_shard(self, index_key: str) -> dict:
+            return {
+                "date": "2026-05-18",
+                "posts": [
+                    {
+                        "post_id": "abc",
+                        "title": "T",
+                        "text_preview": "hello world",
+                        "posted_at": "2026-05-18T12:00:00Z",
+                        "page_url": "https://www.lesswrong.com/posts/abc",
+                    },
+                    {
+                        "post_id": "def",
+                        "title": "No",
+                        "text_preview": "",
+                        "posted_at": "2026-05-18T13:00:00Z",
+                        "page_url": "https://www.lesswrong.com/posts/def",
+                    },
+                ],
+            }
+
+        monkeypatch.setattr(
+            lw.ShardedPublicIndexReader,
+            "fetch_date_shard",
+            fake_shard,
+        )
         monkeypatch.setattr(
             lw,
             "fetch_index",
@@ -115,22 +140,7 @@ class TestPublicLesswrongCache:
                 "dates": {
                     "2026-05-18": {
                         "count": 2,
-                        "posts": [
-                            {
-                                "post_id": "abc",
-                                "title": "T",
-                                "text_preview": "hello world",
-                                "posted_at": "2026-05-18T12:00:00Z",
-                                "page_url": "https://www.lesswrong.com/posts/abc",
-                            },
-                            {
-                                "post_id": "def",
-                                "title": "No",
-                                "text_preview": "",
-                                "posted_at": "2026-05-18T13:00:00Z",
-                                "page_url": "https://www.lesswrong.com/posts/def",
-                            },
-                        ],
+                        "index_key": "data/index/dates/2026-05-18.json",
                     }
                 }
             },

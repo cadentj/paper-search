@@ -12,7 +12,7 @@ from app.services.paper_html_source import arxiv_html_url, read_paper_html
 from app.services.html_parser import prepare_arxiv_html_for_viewer
 from app.services.public_arxiv_cache import fetch_index, fetch_public_cached_papers
 from app.services.public_lesswrong_cache import (
-    available_counts as lesswrong_available_counts,
+    fetch_index as fetch_lesswrong_index,
     fetch_public_cached_posts,
     fetch_public_post_html,
 )
@@ -51,7 +51,7 @@ class SourceFetchResult:
 class SourceProvider(Protocol):
     source_type: str
 
-    def counts_by_date(self, dates: list[date]) -> dict[str, int]:
+    def count_for_date(self, run_date: date) -> int:
         ...
 
     def candidates_for_date(self, run_date: date) -> SourceFetchResult:
@@ -64,18 +64,14 @@ class SourceProvider(Protocol):
 class ArxivProvider:
     source_type = "arxiv"
 
-    def counts_by_date(self, dates: list[date]) -> dict[str, int]:
+    def count_for_date(self, run_date: date) -> int:
         try:
             index = fetch_index()
         except Exception:
-            logger.exception("failed to fetch arXiv index for available dates")
-            return {}
-        valid_dates = {day.isoformat() for day in dates}
-        return {
-            str(day): int(payload.get("count") or 0)
-            for day, payload in (index.get("dates") or {}).items()
-            if str(day) in valid_dates
-        }
+            logger.exception("failed to fetch arXiv index count for %s", run_date)
+            return 0
+        payload = (index.get("dates") or {}).get(run_date.isoformat())
+        return int((payload or {}).get("count") or 0)
 
     def candidates_for_date(self, run_date: date) -> SourceFetchResult:
         try:
@@ -108,14 +104,14 @@ class ArxivProvider:
 class LessWrongProvider:
     source_type = "lesswrong"
 
-    def counts_by_date(self, dates: list[date]) -> dict[str, int]:
+    def count_for_date(self, run_date: date) -> int:
         try:
-            counts = lesswrong_available_counts()
+            index = fetch_lesswrong_index()
         except Exception:
-            logger.exception("failed to fetch LessWrong counts for available dates")
-            return {}
-        valid_dates = {day.isoformat() for day in dates}
-        return {day: count for day, count in counts.items() if day in valid_dates}
+            logger.exception("failed to fetch LessWrong index count for %s", run_date)
+            return 0
+        payload = (index.get("dates") or {}).get(run_date.isoformat())
+        return int((payload or {}).get("count") or 0)
 
     def candidates_for_date(self, run_date: date) -> SourceFetchResult:
         try:
@@ -154,15 +150,13 @@ def provider_for(source_type: str) -> SourceProvider | None:
     return PROVIDERS.get(source_type)
 
 
-def counts_by_source_for_dates(
-    source_types: set[str],
-    dates: list[date],
-) -> dict[str, dict[str, int]]:
-    return {
-        source_type: provider.counts_by_date(dates)
-        for source_type, provider in PROVIDERS.items()
-        if source_type in source_types
-    }
+def counts_by_source_for_date(source_types: set[str], run_date: date) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for source_type in sorted(source_types):
+        provider = provider_for(source_type)
+        if provider:
+            counts[source_type] = provider.count_for_date(run_date)
+    return counts
 
 
 def candidates_for_sources(

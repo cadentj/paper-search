@@ -186,7 +186,7 @@ export function useUpdateDataSource() {
     }) => api.updateDataSource(sourceType, input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["data-sources"] });
-      qc.invalidateQueries({ queryKey: ["search-runs", "available-dates"] });
+      qc.invalidateQueries({ queryKey: ["search-runs", "daily-candidate-count"] });
     },
   });
 }
@@ -206,10 +206,11 @@ export function useLatestSearchRun() {
   });
 }
 
-export function useAvailableSearchDates() {
+export function useDailyCandidateCount(runDate: string) {
   return useQuery({
-    queryKey: ["search-runs", "available-dates"],
-    queryFn: api.getAvailableSearchDates,
+    queryKey: ["search-runs", "daily-candidate-count", runDate],
+    queryFn: () => api.getDailyCandidateCount(runDate),
+    enabled: Boolean(runDate),
     staleTime: 5 * 60 * 1000,
   });
 }

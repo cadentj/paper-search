@@ -7,7 +7,6 @@ from typing import Any
 
 from app.core.config import settings
 from app.services.public_r2_index import (
-    R2SourceConfig,
     ShardedPublicIndexReader,
     has_searchable_text,
     http_get_text,
@@ -15,22 +14,12 @@ from app.services.public_r2_index import (
 )
 
 _LW_READER = ShardedPublicIndexReader(
-    R2SourceConfig(
-        public_base_url=settings.LESSWRONG_HTML_PUBLIC_BASE_URL,
-        manifest_path=settings.LESSWRONG_HTML_INDEX_PATH,
-        ttl_seconds=settings.LESSWRONG_PUBLIC_INDEX_TTL_SECONDS,
-        items_key="posts",
-    ),
+    public_base_url=settings.LESSWRONG_HTML_PUBLIC_BASE_URL,
+    manifest_path=settings.LESSWRONG_HTML_INDEX_PATH,
+    ttl_seconds=settings.LESSWRONG_PUBLIC_INDEX_TTL_SECONDS,
+    items_key="posts",
     namespace="lesswrong",
 )
-
-
-def available_counts() -> dict[str, int]:
-    index = fetch_index()
-    return {
-        day: int(payload.get("count") or 0)
-        for day, payload in (index.get("dates") or {}).items()
-    }
 
 
 def fetch_public_cached_posts(*, run_date: str) -> tuple[list[dict[str, Any]], int]:
@@ -98,10 +87,6 @@ def fetch_index() -> dict[str, Any]:
     if not settings.LESSWRONG_HTML_PUBLIC_BASE_URL.strip():
         return {"dates": {}}
     return _LW_READER.fetch_manifest()
-
-
-def fetch_date_index(*, index_key: str) -> dict[str, Any]:
-    return _LW_READER.fetch_date_shard(index_key)
 
 
 def public_url(path_or_key: str) -> str:
