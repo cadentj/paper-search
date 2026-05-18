@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from typing import Any
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.paper import Paper
-from app.models.source_daily import SourceDailyCandidate, SourceDailyRollup
 from app.services.index_records import (
     arxiv_matches_categories,
     arxiv_record_from_shard,
@@ -22,37 +22,23 @@ from app.services.index_records import (
 from app.services.source_types import CandidateItem, SourceFetchResult
 
 
-def rollup_count(db: Session, *, source_type: str, run_date: date) -> int:
-    row = (
-        db.query(SourceDailyRollup)
-        .filter(
-            SourceDailyRollup.source_type == source_type,
-            SourceDailyRollup.run_date == run_date,
-        )
-        .first()
-    )
-    if row is None:
-        return 0
-    return int(row.searchable_count or 0)
+def count_for_date(db: Session, *, source_type: str, run_date: date) -> int:
+    return _papers_for_date(db, source_type=source_type, run_date=run_date).count()
 
 
 def candidates_for_date(
     db: Session, *, source_type: str, run_date: date
 ) -> SourceFetchResult:
-    rows = (
-        db.query(Paper)
-        .join(
-            SourceDailyCandidate,
-            SourceDailyCandidate.paper_id == Paper.id,
-        )
-        .filter(
-            SourceDailyCandidate.source_type == source_type,
-            SourceDailyCandidate.run_date == run_date,
-        )
-        .all()
-    )
+    rows = _papers_for_date(db, source_type=source_type, run_date=run_date).all()
     items = [_candidate_from_paper(paper) for paper in rows]
     return SourceFetchResult(items=items)
+
+
+def _papers_for_date(db: Session, *, source_type: str, run_date: date):
+    return db.query(Paper).filter(
+        Paper.source_type == source_type,
+        func.date(Paper.published_at) == run_date,
+    )
 
 
 def _candidate_from_paper(paper: Paper) -> CandidateItem:
@@ -75,18 +61,12 @@ def upsert_arxiv_day(
     run_date: date,
     shard_items: list[dict[str, Any]],
 ) -> tuple[int, int, int]:
-    """Upsert papers and daily index rows. Returns (total, searchable, skipped_category)."""
+    """Load papers for one arXiv shard day. Returns (total, searchable, skipped_category)."""
     category_set = set(settings_arxiv_categories())
     now = datetime.now(timezone.utc)
     total = len(shard_items)
-    searchable = 0
     skipped_category = 0
-    candidate_rows: list[SourceDailyCandidate] = []
-
-    db.query(SourceDailyCandidate).filter(
-        SourceDailyCandidate.source_type == "arxiv",
-        SourceDailyCandidate.run_date == run_date,
-    ).delete()
+    records: list[dict[str, Any]] = []
 
     for paper in shard_items:
         arxiv_id = str(paper.get("arxiv_id") or "")
@@ -99,33 +79,17 @@ def upsert_arxiv_day(
             continue
 
         record = arxiv_record_from_shard(paper)
-        paper_row = _upsert_paper(db, record=record, now=now)
-        searchable += 1
-        candidate_rows.append(
-            SourceDailyCandidate(
-                source_type="arxiv",
-                run_date=run_date,
-                source_id=record["source_id"],
-                paper_id=paper_row.id,
-            )
-        )
+        _ensure_published_on_run_date(record, run_date=run_date)
+        records.append(record)
 
     max_results = settings.ARXIV_PUBLIC_DAILY_LIMIT
-    if max_results and max_results > 0 and len(candidate_rows) > max_results:
-        candidate_rows = candidate_rows[:max_results]
-        searchable = len(candidate_rows)
+    if max_results and max_results > 0 and len(records) > max_results:
+        records = records[:max_results]
 
-    for row in candidate_rows:
-        db.add(row)
+    searchable = len(records)
+    for record in records:
+        _upsert_paper(db, record=record, now=now)
 
-    _upsert_rollup(
-        db,
-        source_type="arxiv",
-        run_date=run_date,
-        total_count=total,
-        searchable_count=searchable,
-        synced_at=now,
-    )
     return total, searchable, skipped_category
 
 
@@ -140,11 +104,6 @@ def upsert_lesswrong_day(
     total = len(shard_items)
     searchable = 0
 
-    db.query(SourceDailyCandidate).filter(
-        SourceDailyCandidate.source_type == "lesswrong",
-        SourceDailyCandidate.run_date == run_date,
-    ).delete()
-
     for post in shard_items:
         post_id = str(post.get("post_id") or "")
         if not post_id:
@@ -153,26 +112,19 @@ def upsert_lesswrong_day(
             continue
 
         record = lesswrong_record_from_shard(post)
-        paper_row = _upsert_paper(db, record=record, now=now)
+        _ensure_published_on_run_date(record, run_date=run_date)
+        _upsert_paper(db, record=record, now=now)
         searchable += 1
-        db.add(
-            SourceDailyCandidate(
-                source_type="lesswrong",
-                run_date=run_date,
-                source_id=record["source_id"],
-                paper_id=paper_row.id,
-            )
-        )
 
-    _upsert_rollup(
-        db,
-        source_type="lesswrong",
-        run_date=run_date,
-        total_count=total,
-        searchable_count=searchable,
-        synced_at=now,
-    )
     return total, searchable
+
+
+def _ensure_published_on_run_date(record: dict[str, Any], *, run_date: date) -> None:
+    published_at = record.get("published_at")
+    if published_at is None or published_at.date() != run_date:
+        record["published_at"] = datetime.combine(
+            run_date, time.min, tzinfo=timezone.utc
+        )
 
 
 def _upsert_paper(db: Session, *, record: dict[str, Any], now: datetime) -> Paper:
@@ -214,37 +166,3 @@ def _upsert_paper(db: Session, *, record: dict[str, Any], now: datetime) -> Pape
     )
     db.add(paper)
     return paper
-
-
-def _upsert_rollup(
-    db: Session,
-    *,
-    source_type: str,
-    run_date: date,
-    total_count: int,
-    searchable_count: int,
-    synced_at: datetime,
-) -> None:
-    row = (
-        db.query(SourceDailyRollup)
-        .filter(
-            SourceDailyRollup.source_type == source_type,
-            SourceDailyRollup.run_date == run_date,
-        )
-        .first()
-    )
-    if row:
-        row.total_count = total_count
-        row.searchable_count = searchable_count
-        row.synced_at = synced_at
-        return
-
-    db.add(
-        SourceDailyRollup(
-            source_type=source_type,
-            run_date=run_date,
-            total_count=total_count,
-            searchable_count=searchable_count,
-            synced_at=synced_at,
-        )
-    )

@@ -2,6 +2,7 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import func
 
 from app.api.onboarding import router as onboarding_router
 from app.api.filters import router as filters_router
@@ -13,9 +14,8 @@ from app.api.papers import router as papers_router
 from app.api.dev import router as dev_router
 from app.models import Base
 from app.db.session import SessionLocal, engine
-from app.models.source_daily import SourceDailyRollup
+from app.models.paper import Paper
 from app.services.daily_dates import DEFAULT_DAILY_SEARCH_DATE
-
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +24,8 @@ Base.metadata.create_all(bind=engine)
 _db = SessionLocal()
 try:
     if (
-        _db.query(SourceDailyRollup)
-        .filter(SourceDailyRollup.run_date == DEFAULT_DAILY_SEARCH_DATE)
+        _db.query(Paper)
+        .filter(func.date(Paper.published_at) == DEFAULT_DAILY_SEARCH_DATE)
         .count()
         == 0
     ):

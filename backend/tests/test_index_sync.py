@@ -1,11 +1,10 @@
 """Tests for index record mapping and SQLite daily index store."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 
-from app.models.source_daily import SourceDailyCandidate, SourceDailyRollup
 from app.services.daily_index_store import (
     candidates_for_date,
-    rollup_count,
+    count_for_date,
     upsert_arxiv_day,
     upsert_lesswrong_day,
 )
@@ -48,6 +47,7 @@ class TestDailyIndexStore:
                     "title": "Has abstract",
                     "abstract": "A",
                     "categories": ["cs.AI"],
+                    "latest_version_date": "2026-05-18T12:00:00Z",
                 },
                 {
                     "arxiv_id": "2605.09999",
@@ -61,7 +61,7 @@ class TestDailyIndexStore:
         assert total == 2
         assert searchable == 1
         assert skipped == 0
-        assert rollup_count(db_session, source_type="arxiv", run_date=date(2026, 5, 18)) == 1
+        assert count_for_date(db_session, source_type="arxiv", run_date=date(2026, 5, 18)) == 1
 
     def test_upsert_lesswrong_day_skips_empty_preview(self, db_session):
         total, searchable = upsert_lesswrong_day(
@@ -100,30 +100,13 @@ class TestDailyIndexStore:
                 "title": "Shard",
                 "abstract": "Body",
                 "categories": ["cs.AI"],
+                "latest_version_date": "2026-05-18T12:00:00Z",
             }
         )
         from app.services.daily_index_store import _upsert_paper
-        from datetime import datetime, timezone
 
         now = datetime.now(timezone.utc)
-        paper = _upsert_paper(db_session, record=record, now=now)
-        db_session.add(
-            SourceDailyCandidate(
-                source_type="arxiv",
-                run_date=date(2026, 5, 18),
-                source_id="2605.01234",
-                paper_id=paper.id,
-            )
-        )
-        db_session.add(
-            SourceDailyRollup(
-                source_type="arxiv",
-                run_date=date(2026, 5, 18),
-                total_count=1,
-                searchable_count=1,
-                synced_at=now,
-            )
-        )
+        _upsert_paper(db_session, record=record, now=now)
         db_session.commit()
 
         result = candidates_for_date(

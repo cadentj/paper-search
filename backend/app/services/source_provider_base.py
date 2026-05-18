@@ -7,7 +7,7 @@ from datetime import date
 
 from app.db.session import SessionLocal
 from app.models.paper import Paper
-from app.services.daily_index_store import candidates_for_date, rollup_count
+from app.services.daily_index_store import candidates_for_date, count_for_date
 from app.services.public_r2_index import http_get_text
 from app.services.source_types import SourceFetchResult
 
@@ -20,7 +20,7 @@ class DbBackedSourceProvider:
     def count_for_date(self, run_date: date) -> int:
         db = SessionLocal()
         try:
-            return rollup_count(db, source_type=self.source_type, run_date=run_date)
+            return count_for_date(db, source_type=self.source_type, run_date=run_date)
         except Exception:
             logger.exception(
                 "failed to read %s index count for %s", self.source_type, run_date
