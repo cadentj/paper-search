@@ -57,6 +57,7 @@ export interface SearchRun {
   status: string;
   run_date: string;
   candidate_count?: number;
+  candidate_counts?: Record<string, number>;
   match_count?: number;
   summary?: string;
   summary_citations: SummaryCitation[];
@@ -78,6 +79,8 @@ export interface SearchRun {
 export interface AvailableSearchDate {
   date: string;
   count: number;
+  total_count?: number;
+  counts_by_source: Record<string, number>;
 }
 
 export interface AvailableSearchDates {
@@ -87,7 +90,10 @@ export interface AvailableSearchDates {
 
 export interface SummaryCitation {
   paperMatchId?: string;
-  arxivId: string;
+  arxivId?: string;
+  itemId?: string;
+  sourceType?: string;
+  sourceId?: string;
   citedFor: string;
 }
 
@@ -107,6 +113,10 @@ export interface PaperMatch {
   paper_title?: string;
   paper_authors?: string[];
   paper_arxiv_id?: string;
+  paper_source_type?: string;
+  paper_source_id?: string;
+  paper_source_url?: string;
+  paper_item_label?: string;
   paper_abstract?: string;
   filter_name?: string;
 }
@@ -114,6 +124,8 @@ export interface PaperMatch {
 export interface Paper {
   id: string;
   arxiv_id?: string;
+  source_type: string;
+  source_id?: string;
   title: string;
   abstract: string;
   authors: string[];
@@ -121,6 +133,18 @@ export interface Paper {
   published_at?: string;
   html_url?: string;
   landing_url?: string;
+  source_url?: string;
+  source_metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DataSource {
+  id: string;
+  source_type: string;
+  name: string;
+  enabled: boolean;
+  settings: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
@@ -194,6 +218,17 @@ export const api = {
     fetchApi<FilterResponse>(`/filters/${id}/archive`, { method: "POST" }),
   restoreFilter: (id: string) =>
     fetchApi<FilterResponse>(`/filters/${id}/restore`, { method: "POST" }),
+
+  // Data sources
+  getDataSources: () => fetchApi<DataSource[]>("/data-sources"),
+  updateDataSource: (
+    sourceType: string,
+    input: { enabled?: boolean; settings?: Record<string, unknown> }
+  ) =>
+    fetchApi<DataSource>(`/data-sources/${sourceType}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
 
   // Search runs
   getSearchRuns: () => fetchApi<SearchRun[]>("/search-runs"),

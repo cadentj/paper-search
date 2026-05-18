@@ -147,6 +147,8 @@ def _paper_record(paper: dict[str, Any]) -> dict[str, Any]:
             }
 
     return {
+        "source_type": "arxiv",
+        "source_id": arxiv_id,
         "arxiv_id": arxiv_id,
         "title": metadata["title"] or arxiv_id,
         "abstract": metadata["abstract"] or "No abstract was available in the R2 index or HTML.",
@@ -155,6 +157,8 @@ def _paper_record(paper: dict[str, Any]) -> dict[str, Any]:
         "published_at": _parse_datetime(paper.get("latest_version_date")),
         "html_url": html_url,
         "landing_url": f"https://arxiv.org/abs/{arxiv_id}",
+        "source_url": f"https://arxiv.org/abs/{arxiv_id}",
+        "source_metadata": {},
     }
 
 

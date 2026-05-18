@@ -4,7 +4,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import type { PaperMatch, SummaryCitation } from "@/lib/api";
 
-const CITE_MARKER_RE = /<cite\s+arxivId=(["'])([^"']+)\1\s*\/>/g;
+const CITE_MARKER_RE = /<cite\s+(itemId|arxivId)=(["'])([^"']+)\2\s*\/>/g;
 const EMPTY_CITATIONS: SummaryCitation[] = [];
 const EMPTY_MATCHES: PaperMatch[] = [];
 
@@ -31,50 +31,57 @@ export function SummaryText({
   const nodes: ReactNode[] = [];
   let cursor = 0;
   let citationIndex = 0;
-  const citationsByArxivId = new Map(
-    citations.map((citation) => [citation.arxivId, citation])
+  const citationsByItemId = new Map(
+    citations.map((citation) => [citation.itemId || citation.arxivId || "", citation])
   );
-  const matchesByArxivId = new Map<string, PaperMatch>();
+  const matchesByItemId = new Map<string, PaperMatch>();
   matches.forEach((match) => {
+    if (match.paper_item_label) {
+      matchesByItemId.set(match.paper_item_label, match);
+    }
+    if (match.paper_source_type && match.paper_source_id) {
+      matchesByItemId.set(`${match.paper_source_type}:${match.paper_source_id}`, match);
+    }
     if (match.paper_arxiv_id) {
-      matchesByArxivId.set(match.paper_arxiv_id, match);
+      matchesByItemId.set(match.paper_arxiv_id, match);
+      matchesByItemId.set(`arxiv:${match.paper_arxiv_id}`, match);
     }
   });
 
   for (const match of summary.matchAll(CITE_MARKER_RE)) {
     const marker = match[0];
     const markerIndex = match.index ?? 0;
-    const arxivId = match[2].trim();
+    const itemId = match[3].trim();
 
     if (markerIndex > cursor) {
       nodes.push(summary.slice(cursor, markerIndex));
     }
 
-    const citation = citationsByArxivId.get(arxivId);
-    const paperMatch = matchesByArxivId.get(arxivId);
-    const label = `Open citation ${citationIndex + 1}: ${arxivId}`;
+    const citation = citationsByItemId.get(itemId);
+    const paperMatch = matchesByItemId.get(itemId);
+    const label = `Open citation ${citationIndex + 1}: ${itemId}`;
 
     if (paperMatch) {
       nodes.push(
         <Link
-          key={`${arxivId}-${markerIndex}`}
+          key={`${itemId}-${markerIndex}`}
           href={`/dashboard/papers/${paperMatch.paper_id}`}
           title={citation?.citedFor}
           aria-label={label}
           className={citationClassName(true)}
         >
-          {arxivId}
+          {itemId}
         </Link>
       );
     } else {
       nodes.push(
         <span
-          key={`${arxivId}-${markerIndex}`}
+          key={`${itemId}-${markerIndex}`}
           title={citation?.citedFor}
-          aria-label={`Unlinked citation ${citationIndex + 1}: ${arxivId}`}
+          aria-label={`Unlinked citation ${citationIndex + 1}: ${itemId}`}
           className={citationClassName(false)}
         >
-          {arxivId}
+          {itemId}
         </span>
       );
     }

@@ -95,6 +95,31 @@ export function useRestoreFilter() {
   });
 }
 
+// Data sources
+export function useDataSources() {
+  return useQuery({
+    queryKey: ["data-sources"],
+    queryFn: api.getDataSources,
+  });
+}
+
+export function useUpdateDataSource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sourceType,
+      input,
+    }: {
+      sourceType: string;
+      input: { enabled?: boolean; settings?: Record<string, unknown> };
+    }) => api.updateDataSource(sourceType, input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["data-sources"] });
+      qc.invalidateQueries({ queryKey: ["search-runs", "available-dates"] });
+    },
+  });
+}
+
 // Search runs
 export function useSearchRuns() {
   return useQuery({

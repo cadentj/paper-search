@@ -37,6 +37,12 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Loader2,
   Play,
   EyeOff,
@@ -46,7 +52,7 @@ import {
   PlusCircle,
   CalendarIcon,
 } from "lucide-react";
-import type { PaperMatch, SearchRun } from "@/lib/api";
+import type { AvailableSearchDate, PaperMatch, SearchRun } from "@/lib/api";
 
 type FilterMode = "claim" | "question" | "topic";
 type MatchGroup = { name: string; matches: PaperMatch[] };
@@ -63,6 +69,10 @@ const PROGRESS_SKELETON_KEYS = [
   "daily-progress-skeleton-2",
 ];
 const EMPTY_PAPER_MATCHES: PaperMatch[] = [];
+const SOURCE_LABELS: Record<string, string> = {
+  arxiv: "papers",
+  lesswrong: "posts",
+};
 
 function parseIndexDate(value: string): Date {
   return parseISO(`${value}T00:00:00`);
@@ -126,6 +136,7 @@ function DailyHeader({
   isCreating,
   selectedDate,
   dateCount,
+  dateBreakdown,
   minDate,
   maxDate,
   hasSelectedDate,
@@ -138,6 +149,7 @@ function DailyHeader({
   isCreating: boolean;
   selectedDate: string;
   dateCount?: number;
+  dateBreakdown?: Record<string, number>;
   minDate?: string;
   maxDate?: string;
   hasSelectedDate: boolean;
@@ -152,7 +164,7 @@ function DailyHeader({
         {run && (
           <p className="text-sm text-muted-foreground">
             {run.status === "completed"
-              ? `${run.match_count || 0} matches from ${run.candidate_count || 0} papers`
+              ? `${run.match_count || 0} matches from ${run.candidate_count || 0} items`
               : run.status === "failed"
                 ? "Search failed"
                 : "Search in progress…"}
@@ -168,9 +180,26 @@ function DailyHeader({
           onDateChange={onDateChange}
         />
         {dateCount !== undefined && (
-          <Badge variant={hasSelectedDate ? "secondary" : "destructive"}>
-            {hasSelectedDate ? `${dateCount} papers` : "No index"}
-          </Badge>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger>
+                <Badge variant={hasSelectedDate ? "secondary" : "destructive"}>
+                  {hasSelectedDate ? `${dateCount} items` : "No date"}
+                </Badge>
+              </TooltipTrigger>
+              {hasSelectedDate && dateBreakdown && (
+                <TooltipContent>
+                  <div className="space-y-0.5">
+                    {Object.entries(dateBreakdown).map(([source, count]) => (
+                      <div key={source}>
+                        {count} {SOURCE_LABELS[source] || source}
+                      </div>
+                    ))}
+                  </div>
+                </TooltipContent>
+              )}
+            </Tooltip>
+          </TooltipProvider>
         )}
         <Button
           onClick={onRunSearch}
@@ -354,7 +383,7 @@ function MatchesSection({
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold">Paper Matches</h2>
+      <h2 className="text-lg font-semibold">Item Matches</h2>
       {Object.entries(matchesByFilter).map(([filterId, group]) => (
         <Card key={filterId}>
           <CardHeader className="pb-2">
@@ -399,6 +428,16 @@ function MatchesSection({
 }
 
 function PaperMatchCard({ match }: { match: PaperMatch }) {
+  const externalUrl =
+    match.paper_source_url ||
+    (match.paper_arxiv_id ? `https://arxiv.org/abs/${match.paper_arxiv_id}` : undefined);
+  const externalLabel =
+    match.paper_source_type === "lesswrong"
+      ? "Open on LessWrong"
+      : match.paper_arxiv_id
+        ? `Open ${match.paper_arxiv_id} on arXiv`
+        : "Open source";
+
   return (
     <div className="rounded-lg border p-3 space-y-2">
       <div className="flex items-start justify-between gap-2">
@@ -418,12 +457,12 @@ function PaperMatchCard({ match }: { match: PaperMatch }) {
             <span className="text-xs text-muted-foreground">
               Score: {match.relevance_score.toFixed(2)}
             </span>
-            {match.paper_arxiv_id && (
+            {externalUrl && (
               <a
-                href={`https://arxiv.org/abs/${match.paper_arxiv_id}`}
+                href={externalUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                aria-label={`Open ${match.paper_arxiv_id} on arXiv`}
+                aria-label={externalLabel}
                 className="text-xs text-muted-foreground hover:text-foreground"
               >
                 <ExternalLink className="size-3" />
@@ -474,16 +513,16 @@ export default function DailyPage() {
   const [quickFilterText, setQuickFilterText] = useState("");
   const [quickFilterType, setQuickFilterType] = useState<FilterMode>("claim");
 
-  const indexedDateCounts = useMemo(
+  const indexedDateEntries = useMemo(
     () =>
-      new Map(
-        (availableDates?.dates ?? []).map((entry) => [entry.date, entry.count])
+      new Map<string, AvailableSearchDate>(
+        (availableDates?.dates ?? []).map((entry) => [entry.date, entry])
       ),
     [availableDates]
   );
   const availableDateSet = useMemo(
-    () => new Set(indexedDateCounts.keys()),
-    [indexedDateCounts]
+    () => new Set(indexedDateEntries.keys()),
+    [indexedDateEntries]
   );
   const indexedDates = availableDates?.dates.map((entry) => entry.date) ?? [];
   const minDate = indexedDates.length ? indexedDates[indexedDates.length - 1] : undefined;
@@ -496,8 +535,10 @@ export default function DailyPage() {
     }
   }, [availableDates?.default_date, selectedDate]);
 
-  const selectedDateCount = indexedDateCounts.get(selectedDate);
-  const hasSelectedDate = selectedDateCount !== undefined;
+  const selectedDateEntry = indexedDateEntries.get(selectedDate);
+  const selectedDateCount = selectedDateEntry?.total_count ?? selectedDateEntry?.count;
+  const selectedDateBreakdown = selectedDateEntry?.counts_by_source;
+  const hasSelectedDate = selectedDateEntry !== undefined;
 
   const isRunning =
     run?.status === "queued" || run?.status === "running";
@@ -552,6 +593,7 @@ export default function DailyPage() {
         isCreating={createSearch.isPending}
         selectedDate={selectedDate}
         dateCount={selectedDateCount}
+        dateBreakdown={selectedDateBreakdown}
         minDate={minDate}
         maxDate={maxDate}
         hasSelectedDate={hasSelectedDate}

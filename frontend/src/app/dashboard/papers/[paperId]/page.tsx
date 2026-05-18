@@ -64,6 +64,10 @@ function PaperHeader({
   paper?: Paper;
   onBack: () => void;
 }) {
+  const sourceUrl = paper?.source_url || paper?.landing_url ||
+    (paper?.arxiv_id ? `https://arxiv.org/abs/${paper.arxiv_id}` : undefined);
+  const sourceLabel = paper?.source_type === "lesswrong" ? "LessWrong" : "arXiv";
+
   return (
     <div className="flex items-center gap-3 p-4 border-b">
       <Button variant="ghost" size="sm" aria-label="Go back" onClick={onBack}>
@@ -79,21 +83,21 @@ function PaperHeader({
           </p>
         )} */}
       </div>
-      {paper?.arxiv_id && (
+      {sourceUrl && (
         <Button
           variant="outline"
           size="sm"
           nativeButton={false}
           render={
             <a
-              href={`https://arxiv.org/abs/${paper.arxiv_id}`}
+              href={sourceUrl}
               target="_blank"
               rel="noopener noreferrer"
             />
           }
         >
           <ExternalLink className="mr-1 size-3" />
-          arXiv
+          {sourceLabel}
         </Button>
       )}
     </div>
@@ -101,6 +105,7 @@ function PaperHeader({
 }
 
 function IdeaMapPanel({
+  supportsIdeaMap,
   ideaMap,
   hasIdeaMapError,
   expandedClaims,
@@ -110,6 +115,7 @@ function IdeaMapPanel({
   onToggleClaim,
   onWarrantClick,
 }: {
+  supportsIdeaMap: boolean;
   ideaMap?: IdeaMap;
   hasIdeaMapError: boolean;
   expandedClaims: Set<string>;
@@ -119,6 +125,19 @@ function IdeaMapPanel({
   onToggleClaim: (claimId: string) => void;
   onWarrantClick: (warrant: IdeaMapWarrant) => void;
 }) {
+  if (!supportsIdeaMap) {
+    return (
+      <div className="w-96 border-r flex flex-col">
+        <div className="p-3 border-b">
+          <h2 className="text-sm font-semibold">Idea Map</h2>
+        </div>
+        <CenteredMessage>
+          Idea map unavailable for LessWrong posts.
+        </CenteredMessage>
+      </div>
+    );
+  }
+
   const isLoading =
     ideaMap?.status === "queued" ||
     ideaMap?.status === "running" ||
@@ -141,7 +160,7 @@ function IdeaMapPanel({
       <div className="p-3 border-b flex items-center justify-between">
         <h2 className="text-sm font-semibold">Idea Map</h2>
         {!ideaMap && !hasIdeaMapError && (
-          <GenerateButton
+        <GenerateButton
             label="Generate"
             isGenerating={isGenerating}
             onGenerate={onGenerate}
@@ -402,7 +421,7 @@ function PaperHtmlViewer({
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center space-y-2">
-          <p className="text-sm text-muted-foreground">HTML not cached yet.</p>
+          <p className="text-sm text-muted-foreground">HTML not available yet.</p>
           <Button
             variant="outline"
             size="sm"
@@ -416,7 +435,7 @@ function PaperHtmlViewer({
             }
           >
             <ExternalLink className="mr-1 size-3" />
-            View on arXiv
+            View source
           </Button>
         </div>
       </div>
@@ -506,6 +525,7 @@ export default function PaperDetailPage({
       <PaperHeader paper={paper} onBack={back} />
       <div className="flex-1 flex overflow-hidden">
         <IdeaMapPanel
+          supportsIdeaMap={paper?.source_type !== "lesswrong"}
           ideaMap={ideaMap}
           hasIdeaMapError={!!ideaMapError}
           expandedClaims={expandedClaims}

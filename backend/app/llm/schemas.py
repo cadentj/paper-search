@@ -21,7 +21,9 @@ class OnboardingFiltersResponse(StrictModel):
 
 
 class FilterSearchMatch(StrictModel):
-    arxivId: str
+    itemId: str
+    sourceType: str
+    sourceId: str
     stance: Literal["supports", "refutes", "complicates", "relevant", "irrelevant"]
     relevanceScore: float
     confidence: float
@@ -36,7 +38,9 @@ class FilterSearchResponse(StrictModel):
 
 class SearchSummaryCitation(StrictModel):
     paperMatchId: str
-    arxivId: str
+    itemId: str
+    sourceType: str
+    sourceId: str
     citedFor: str
 
 

@@ -5,7 +5,9 @@ import uuid
 from datetime import datetime, timezone
 
 from app.db.session import SessionLocal
+from app.models.job import Job
 from app.models.onboarding_extraction import OnboardingExtraction
+from app.services.jobs import build_progress, get_or_create_job_for_subject
 from app.llm.client import stream_structured_response
 from app.llm.config import FILTER_GENERATION_PROFILE
 from app.llm.prompts import (
@@ -69,7 +71,20 @@ def _merge_filters(existing: list[dict], incoming: list[dict]) -> list[dict]:
     return merged
 
 
-def extract_onboarding_filters(extraction_id: str) -> None:
+def _resolve_onboarding_job(db, extraction_id: str, job_id: str | None) -> Job:
+    if job_id:
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if job:
+            return job
+    return get_or_create_job_for_subject(
+        db,
+        kind="onboarding_extraction",
+        subject_type="onboarding_extraction",
+        subject_id=extraction_id,
+    )
+
+
+def extract_onboarding_filters(extraction_id: str, job_id: str | None = None) -> None:
     """Worker job: extract proposed filters from onboarding text."""
     db = SessionLocal()
     try:
@@ -79,8 +94,20 @@ def extract_onboarding_filters(extraction_id: str) -> None:
         if not extraction:
             return
 
+        job = _resolve_onboarding_job(db, extraction_id, job_id)
+        now = datetime.now(timezone.utc)
         extraction.status = "running"
-        extraction.updated_at = datetime.now(timezone.utc)
+        extraction.updated_at = now
+        job.status = "running"
+        job.started_at = now
+        job.updated_at = now
+        job.progress = build_progress(
+            stage="extracting_filters",
+            current=0,
+            total=1,
+            message="Extracting proposed filters",
+            log=(job.progress or {}).get("log", []),
+        )
         db.commit()
 
         user_prompt = ONBOARDING_USER_PROMPT.format(input_text=extraction.input_text)
@@ -98,6 +125,16 @@ def extract_onboarding_filters(extraction_id: str) -> None:
             extraction.proposed_filters = _merge_filters(current, parsed_filters)
             extraction.updated_at = datetime.now(timezone.utc)
             last_count = len(parsed_filters)
+            job.progress = build_progress(
+                stage="extracting_filters",
+                current=last_count,
+                total=max(last_count, 1),
+                message=f"Extracted {last_count} proposed filters",
+                log=(job.progress or {}).get("log", []),
+                append_log=False,
+                filters_found=last_count,
+            )
+            job.updated_at = extraction.updated_at
             db.commit()
 
         result = stream_structured_response(
@@ -124,6 +161,18 @@ def extract_onboarding_filters(extraction_id: str) -> None:
         extraction.status = "completed"
         extraction.completed_at = datetime.now(timezone.utc)
         extraction.updated_at = datetime.now(timezone.utc)
+        final_count = len(extraction.proposed_filters or [])
+        job.status = "completed"
+        job.completed_at = extraction.completed_at
+        job.updated_at = extraction.updated_at
+        job.progress = build_progress(
+            stage="completed",
+            current=final_count,
+            total=max(final_count, 1),
+            message=f"Completed onboarding extraction with {final_count} filters",
+            log=(job.progress or {}).get("log", []),
+            filters_found=final_count,
+        )
         db.commit()
 
     except Exception as e:
@@ -132,9 +181,22 @@ def extract_onboarding_filters(extraction_id: str) -> None:
             OnboardingExtraction.id == extraction_id
         ).first()
         if extraction:
+            now = datetime.now(timezone.utc)
             extraction.status = "failed"
             extraction.error = str(e)
-            extraction.updated_at = datetime.now(timezone.utc)
+            extraction.updated_at = now
+            job = _resolve_onboarding_job(db, extraction_id, job_id)
+            job.status = "failed"
+            job.error = extraction.error
+            job.completed_at = now
+            job.updated_at = now
+            job.progress = build_progress(
+                stage="failed",
+                current=(job.progress or {}).get("current", 0),
+                total=(job.progress or {}).get("total", 1),
+                message=f"Onboarding extraction failed: {e}",
+                log=(job.progress or {}).get("log", []),
+            )
             db.commit()
         raise
     finally:

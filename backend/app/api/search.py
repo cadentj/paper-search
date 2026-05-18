@@ -19,7 +19,11 @@ from app.schemas.search import (
 )
 from app.jobs.queue import get_queue
 from app.jobs.daily_search import run_daily_search
-from app.services.public_arxiv_cache import available_dates
+from app.services.jobs import build_progress, create_job, latest_job_for_subject
+from app.services.daily_dates import fixed_daily_dates, is_valid_daily_date
+from app.services.public_arxiv_cache import fetch_index
+from app.services.public_lesswrong_cache import available_counts as lesswrong_available_counts
+from app.services.source_settings import enabled_source_types, ensure_default_data_sources
 
 router = APIRouter(prefix="/search-runs", tags=["search"])
 logger = logging.getLogger(__name__)
@@ -28,18 +32,49 @@ logger = logging.getLogger(__name__)
 @router.get("", response_model=list[SearchRunResponse])
 def list_search_runs(db: Session = Depends(get_db)):
     runs = db.query(SearchRun).order_by(SearchRun.created_at.desc()).all()
-    return runs
+    return [_search_run_response(run, db) for run in runs]
 
 
 @router.get("/latest", response_model=Optional[SearchRunResponse])
 def get_latest_search_run(db: Session = Depends(get_db)):
     run = db.query(SearchRun).order_by(SearchRun.created_at.desc()).first()
-    return run
+    if not run:
+        return None
+    return _search_run_response(run, db)
 
 
 @router.get("/available-dates", response_model=AvailableSearchDatesResponse)
-def get_available_search_dates():
-    return available_dates()
+def get_available_search_dates(db: Session = Depends(get_db)):
+    enabled_sources = enabled_source_types(db)
+    dates = fixed_daily_dates()
+    arxiv_counts = _arxiv_counts_by_date() if "arxiv" in enabled_sources else {}
+    lesswrong_counts = (
+        _lesswrong_counts_by_date(dates)
+        if "lesswrong" in enabled_sources and dates
+        else {}
+    )
+
+    rows = []
+    for day in reversed(dates):
+        counts_by_source = {}
+        if "arxiv" in enabled_sources:
+            counts_by_source["arxiv"] = arxiv_counts.get(day.isoformat(), 0)
+        if "lesswrong" in enabled_sources:
+            counts_by_source["lesswrong"] = lesswrong_counts.get(day.isoformat(), 0)
+        total = sum(counts_by_source.values())
+        rows.append(
+            {
+                "date": day.isoformat(),
+                "count": total,
+                "total_count": total,
+                "counts_by_source": counts_by_source,
+            }
+        )
+
+    return {
+        "default_date": dates[-1].isoformat() if dates else None,
+        "dates": rows,
+    }
 
 
 @router.post("/daily", response_model=SearchRunResponse)
@@ -47,58 +82,66 @@ def create_daily_search_run(
     request: CreateDailySearchRequest | None = None,
     db: Session = Depends(get_db),
 ):
-    indexed_dates = available_dates()
-    valid_dates = {entry["date"] for entry in indexed_dates["dates"]}
-    requested_date = request.run_date if request and request.run_date else _parse_index_date(indexed_dates["default_date"])
+    ensure_default_data_sources(db)
+    dates = fixed_daily_dates()
+    requested_date = request.run_date if request and request.run_date else (dates[-1] if dates else None)
     if not requested_date:
-        raise HTTPException(status_code=400, detail="No indexed arXiv HTML dates are available")
-    if requested_date.isoformat() not in valid_dates:
-        raise HTTPException(status_code=400, detail=f"No indexed arXiv HTML papers for {requested_date}")
+        raise HTTPException(status_code=400, detail="No daily search dates are configured")
+    if not is_valid_daily_date(requested_date):
+        raise HTTPException(status_code=400, detail=f"{requested_date} is outside the configured daily search window")
+    if not enabled_source_types(db):
+        raise HTTPException(status_code=400, detail="No data sources are enabled")
 
     now = datetime.now(timezone.utc)
     run = SearchRun(
         id=str(uuid.uuid4()),
         status="queued",
-        stage="queued",
         run_date=requested_date,
-        progress_current=0,
-        progress_total=1,
-        progress_message="Queued, waiting for worker",
-        progress_log=[
-            {
-                "at": now.isoformat(),
-                "stage": "queued",
-                "message": "Queued, waiting for worker",
-            }
-        ],
         created_at=now,
     )
     db.add(run)
+    job_record = create_job(
+        db,
+        kind="daily_search",
+        subject_type="search_run",
+        subject_id=run.id,
+        status="queued",
+        progress=build_progress(
+            stage="queued",
+            current=0,
+            total=1,
+            message="Queued, waiting for worker",
+        ),
+    )
     db.commit()
     db.refresh(run)
+    db.refresh(job_record)
 
     try:
         q = get_queue()
-        job = q.enqueue(run_daily_search, run.id)
+        job = q.enqueue(run_daily_search, run.id, job_record.id)
+        job_record.queue_job_id = getattr(job, "id", None)
+        db.commit()
         logger.info("enqueued daily search run=%s job=%s", run.id, getattr(job, "id", None))
     except Exception as exc:
         logger.exception("failed to enqueue daily search run=%s", run.id)
         run.status = "failed"
-        run.stage = "failed"
         run.error = f"Could not enqueue daily search: {exc}"
-        run.progress_message = "Could not enqueue daily search. Is Redis running?"
-        run.progress_log = list(run.progress_log or []) + [
-            {
-                "at": datetime.now(timezone.utc).isoformat(),
-                "stage": "failed",
-                "message": run.progress_message,
-            }
-        ]
         run.completed_at = datetime.now(timezone.utc)
+        job_record.status = "failed"
+        job_record.error = run.error
+        job_record.completed_at = run.completed_at
+        job_record.progress = build_progress(
+            stage="failed",
+            current=0,
+            total=1,
+            message="Could not enqueue daily search. Is Redis running?",
+            log=(job_record.progress or {}).get("log", []),
+        )
         db.commit()
         raise HTTPException(status_code=503, detail=run.error) from exc
 
-    return run
+    return _search_run_response(run, db)
 
 
 def _parse_index_date(value: str | date | None) -> date | None:
@@ -112,7 +155,39 @@ def get_search_run(search_run_id: str, db: Session = Depends(get_db)):
     run = db.query(SearchRun).filter(SearchRun.id == search_run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Search run not found")
-    return run
+    return _search_run_response(run, db)
+
+
+def _search_run_response(run: SearchRun, db: Session) -> SearchRunResponse:
+    job = latest_job_for_subject(
+        db,
+        subject_type="search_run",
+        subject_id=run.id,
+        kind="daily_search",
+    )
+    progress = job.progress if job and job.progress else {}
+    stage = progress.get("stage") or run.status
+    return SearchRunResponse(
+        id=run.id,
+        status=run.status,
+        run_date=run.run_date,
+        candidate_count=run.candidate_count,
+        candidate_counts=run.candidate_counts,
+        match_count=run.match_count,
+        summary=run.summary,
+        summary_citations=run.summary_citations,
+        job_id=job.id if job else None,
+        progress=progress,
+        stage=stage,
+        progress_current=progress.get("current", 0),
+        progress_total=progress.get("total", 1),
+        progress_message=progress.get("message", "Queued"),
+        progress_log=progress.get("log", []),
+        started_at=run.started_at,
+        completed_at=run.completed_at,
+        error=run.error,
+        created_at=run.created_at,
+    )
 
 
 @router.get("/{search_run_id}/matches", response_model=list[PaperMatchResponse])
@@ -151,6 +226,10 @@ def get_search_run_matches(
             paper_title=paper.title if paper else None,
             paper_authors=paper.authors if paper else None,
             paper_arxiv_id=paper.arxiv_id if paper else None,
+            paper_source_type=paper.source_type if paper else None,
+            paper_source_id=paper.source_id if paper else None,
+            paper_source_url=(paper.source_url or paper.landing_url) if paper else None,
+            paper_item_label=_paper_item_label(paper) if paper else None,
             paper_abstract=paper.abstract if paper else None,
             filter_name=filt.name if filt else None,
         )
@@ -158,3 +237,31 @@ def get_search_run_matches(
 
     result.sort(key=lambda x: x.relevance_score, reverse=True)
     return result
+
+
+def _arxiv_counts_by_date() -> dict[str, int]:
+    try:
+        index = fetch_index()
+    except Exception:
+        logger.exception("failed to fetch arXiv index for available dates")
+        return {}
+    return {
+        str(day): int(payload.get("count") or 0)
+        for day, payload in (index.get("dates") or {}).items()
+    }
+
+
+def _lesswrong_counts_by_date(dates: list[date]) -> dict[str, int]:
+    try:
+        counts = lesswrong_available_counts()
+        valid_dates = {day.isoformat() for day in dates}
+        return {day: count for day, count in counts.items() if day in valid_dates}
+    except Exception:
+        logger.exception("failed to fetch LessWrong counts for available dates")
+        return {}
+
+
+def _paper_item_label(paper: Paper) -> str:
+    source_type = paper.source_type or "arxiv"
+    source_id = paper.source_id or paper.arxiv_id or paper.id
+    return f"{source_type}:{source_id}"

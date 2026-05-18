@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import date
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
@@ -21,6 +22,16 @@ class Settings(BaseSettings):
     ARXIV_HTML_INDEX_PATH: str = "data/index/papers-by-date.json"
     ARXIV_PUBLIC_INDEX_TTL_SECONDS: int = 300
     ARXIV_PUBLIC_DAILY_LIMIT: int = 0
+    ARXIV_ANCHOR_DATE: date = date(2026, 5, 14)
+    DAILY_DATE_WINDOW_DAYS: int = 31
+    LESSWRONG_GRAPHQL_URL: str = "https://www.lesswrong.com/graphql"
+    LESSWRONG_DAILY_LIMIT: int = 500
+    LESSWRONG_COUNT_LIMIT: int = 1000
+    LESSWRONG_EXCERPT_WORDS: int = 500
+    LESSWRONG_USER_AGENT: str = "paper-search local development"
+    LESSWRONG_HTML_PUBLIC_BASE_URL: str = ""
+    LESSWRONG_HTML_INDEX_PATH: str = "lesswrong-html/index/posts-by-date.json"
+    LESSWRONG_PUBLIC_INDEX_TTL_SECONDS: int = 300
     APP_ENV: str = "development"
     ENABLE_DEV_RESET: bool = True
 

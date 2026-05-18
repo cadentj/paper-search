@@ -24,6 +24,7 @@ def db_engine(tmp_path):
 
     # Import all models so they register with Base
     import app.models.filter
+    import app.models.job
     import app.models.onboarding_extraction
     import app.models.paper
     import app.models.search_run

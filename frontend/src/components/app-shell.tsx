@@ -7,6 +7,7 @@ import {
   Search,
   Filter,
   RotateCcw,
+  Settings,
 } from "lucide-react";
 import {
   Sidebar,
@@ -29,6 +30,7 @@ const NAV_ITEMS = [
   { label: "Daily", href: "/dashboard/daily", icon: Newspaper },
   { label: "Search", href: "/dashboard/search", icon: Search },
   { label: "Filters", href: "/dashboard/filters", icon: Filter },
+  { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {

@@ -17,6 +17,7 @@ from app.schemas.onboarding import (
 from app.schemas.filters import FilterResponse
 from app.jobs.queue import get_queue
 from app.jobs.onboarding import extract_onboarding_filters
+from app.services.jobs import build_progress, create_job, latest_job_for_subject
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
 logger = logging.getLogger(__name__)
@@ -41,12 +42,28 @@ def create_extraction(body: OnboardingExtractionCreate, db: Session = Depends(ge
         updated_at=datetime.now(timezone.utc),
     )
     db.add(extraction)
+    job_record = create_job(
+        db,
+        kind="onboarding_extraction",
+        subject_type="onboarding_extraction",
+        subject_id=extraction.id,
+        status="queued",
+        progress=build_progress(
+            stage="queued",
+            current=0,
+            total=1,
+            message="Queued, waiting for worker",
+        ),
+    )
     db.commit()
     db.refresh(extraction)
+    db.refresh(job_record)
 
     try:
         q = get_queue()
-        job = q.enqueue(extract_onboarding_filters, extraction.id)
+        job = q.enqueue(extract_onboarding_filters, extraction.id, job_record.id)
+        job_record.queue_job_id = getattr(job, "id", None)
+        db.commit()
         logger.info(
             "enqueued onboarding extraction=%s job=%s",
             extraction.id,
@@ -57,10 +74,20 @@ def create_extraction(body: OnboardingExtractionCreate, db: Session = Depends(ge
         extraction.status = "failed"
         extraction.error = f"Could not enqueue onboarding extraction: {exc}"
         extraction.updated_at = datetime.now(timezone.utc)
+        job_record.status = "failed"
+        job_record.error = extraction.error
+        job_record.completed_at = extraction.updated_at
+        job_record.progress = build_progress(
+            stage="failed",
+            current=0,
+            total=1,
+            message="Could not enqueue onboarding extraction. Is Redis running?",
+            log=(job_record.progress or {}).get("log", []),
+        )
         db.commit()
         raise HTTPException(status_code=503, detail=extraction.error) from exc
 
-    return extraction
+    return _extraction_response(extraction, db)
 
 
 @router.get("/extractions/{extraction_id}", response_model=OnboardingExtractionResponse)
@@ -70,7 +97,31 @@ def get_extraction(extraction_id: str, db: Session = Depends(get_db)):
     ).first()
     if not extraction:
         raise HTTPException(status_code=404, detail="Extraction not found")
-    return extraction
+    return _extraction_response(extraction, db)
+
+
+def _extraction_response(
+    extraction: OnboardingExtraction,
+    db: Session,
+) -> OnboardingExtractionResponse:
+    job = latest_job_for_subject(
+        db,
+        subject_type="onboarding_extraction",
+        subject_id=extraction.id,
+        kind="onboarding_extraction",
+    )
+    return OnboardingExtractionResponse(
+        id=extraction.id,
+        status=extraction.status,
+        input_text=extraction.input_text,
+        proposed_filters=extraction.proposed_filters,
+        error=extraction.error,
+        job_id=job.id if job else None,
+        progress=job.progress if job and job.progress else {},
+        created_at=extraction.created_at,
+        updated_at=extraction.updated_at,
+        completed_at=extraction.completed_at,
+    )
 
 
 @router.post("/complete", response_model=list[FilterResponse])

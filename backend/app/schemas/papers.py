@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional
 
@@ -6,6 +6,8 @@ from typing import Optional
 class PaperResponse(BaseModel):
     id: str
     arxiv_id: Optional[str] = None
+    source_type: str = "arxiv"
+    source_id: Optional[str] = None
     title: str
     abstract: str
     authors: list
@@ -13,6 +15,8 @@ class PaperResponse(BaseModel):
     published_at: Optional[datetime] = None
     html_url: Optional[str] = None
     landing_url: Optional[str] = None
+    source_url: Optional[str] = None
+    source_metadata: dict = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 
@@ -27,6 +31,8 @@ class IdeaMapResponse(BaseModel):
     source_url: Optional[str] = None
     dropped_reason: Optional[str] = None
     error: Optional[str] = None
+    job_id: Optional[str] = None
+    progress: dict = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 

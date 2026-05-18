@@ -1,16 +1,21 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Text, DateTime, JSON
+from sqlalchemy import Column, Text, DateTime, JSON, UniqueConstraint
 
 from app.models.base import Base
 
 
 class Paper(Base):
     __tablename__ = "papers"
+    __table_args__ = (
+        UniqueConstraint("source_type", "source_id", name="uq_papers_source"),
+    )
 
     id = Column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
     arxiv_id = Column(Text, unique=True, nullable=True)
+    source_type = Column(Text, nullable=False, default="arxiv")
+    source_id = Column(Text, nullable=True)
 
     title = Column(Text, nullable=False)
     abstract = Column(Text, nullable=False)
@@ -19,6 +24,8 @@ class Paper(Base):
     published_at = Column(DateTime, nullable=True)
     html_url = Column(Text, nullable=True)
     landing_url = Column(Text, nullable=True)
+    source_url = Column(Text, nullable=True)
+    source_metadata = Column(JSON, nullable=False, default=dict)
 
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

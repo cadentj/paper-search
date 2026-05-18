@@ -20,48 +20,51 @@ Generate proposed search filters based on these interests. For each filter provi
 - description: the claim, question, or topic to search for
 - mode: "claim", "question", or "topic"."""
 
-FILTER_SEARCH_SYSTEM_PROMPT = """You are a research paper evaluator. Given a search filter and a list of paper abstracts, evaluate each paper against the filter.
+FILTER_SEARCH_SYSTEM_PROMPT = """You are a research item evaluator. Given a search filter and a list of research items, evaluate each item against the filter.
 
-For each paper, determine:
+For each item, determine:
+- itemId: the exact Item ID shown in the input
+- sourceType: the exact source type shown in the input
+- sourceId: the exact source ID shown in the input
 - stance: "supports", "refutes", "complicates", "relevant", or "irrelevant"
 - relevanceScore: 0.0 to 1.0 (how relevant to the filter)
 - confidence: 0.0 to 1.0 (how confident you are in your assessment)
-- rationale: brief explanation of why this paper matches or doesn't match
-- matchedClaims: list of specific claims from the paper that relate to the filter
-- abstractEvidence: list of quoted evidence from the abstract
+- rationale: brief explanation of why this item matches or doesn't match
+- matchedClaims: list of specific claims from the item that relate to the filter
+- abstractEvidence: list of quoted evidence from the provided excerpt or abstract
 
-Be selective. Most papers should be "irrelevant" unless they genuinely relate to the filter's description and search behavior."""
+Be selective. Most items should be "irrelevant" unless they genuinely relate to the filter's description and search behavior."""
 
 FILTER_SEARCH_USER_PROMPT = """Filter:
 Name: {filter_name}
 Description: {filter_description}
 Search Behavior: {filter_behavior}
 
-Papers to evaluate:
+Items to evaluate:
 {papers_text}
 
-Evaluate each paper against this filter."""
+Evaluate each item against this filter."""
 
-SUMMARY_SYSTEM_PROMPT = """You are a research digest writer. Given a set of paper matches from a daily search, write a concise cited summary highlighting the most interesting findings.
+SUMMARY_SYSTEM_PROMPT = """You are a research digest writer. Given a set of item matches from a daily search, write a concise cited summary highlighting the most interesting findings.
 
 The summary should:
 - Be 2-4 paragraphs
-- Cite specific papers inline using exactly <cite arxivId="ARXIV_ID"/> immediately after the sentence or clause being cited
-- Only cite arXiv IDs present in the provided matches
-- Never use markdown links, footnotes, parenthetical raw arXiv IDs, or a trailing citation list
+- Cite specific items inline using exactly <cite itemId="ITEM_ID"/> immediately after the sentence or clause being cited
+- Only cite item IDs present in the provided matches
+- Never use markdown links, footnotes, parenthetical raw IDs, or a trailing citation list
 - Focus on what a researcher would find most actionable or surprising
 - Group related findings when possible
 
 Example citation style:
-Sparse autoencoder work looks especially actionable for circuit discovery <cite arxivId="2605.00001"/>, while another result complicates simple scaling assumptions <cite arxivId="2605.00002"/>.
+Sparse autoencoder work looks especially actionable for circuit discovery <cite itemId="arxiv:2605.00001"/>, while a LessWrong post raises a practical caveat <cite itemId="lesswrong:abc123"/>.
 
 The citations array should include one metadata object for each cited marker in the summary."""
 
-SUMMARY_USER_PROMPT = """Here are the paper matches from today's search:
+SUMMARY_USER_PROMPT = """Here are the item matches from today's search:
 
 {matches_text}
 
-Write a concise Daily summary with inline <cite arxivId="..."/> markers."""
+Write a concise Daily summary with inline <cite itemId="..."/> markers."""
 
 IDEA_MAP_CLAIMS_SYSTEM_PROMPT = """You are a paper analyst. Given addressable HTML blocks from the main body of an academic paper, extract the paper's core claims.
 

@@ -8,9 +8,12 @@ class SearchRunResponse(BaseModel):
     status: str
     run_date: date
     candidate_count: Optional[int] = None
+    candidate_counts: dict | None = None
     match_count: Optional[int] = None
     summary: Optional[str] = None
     summary_citations: list
+    job_id: Optional[str] = None
+    progress: dict = Field(default_factory=dict)
     stage: str = "queued"
     progress_current: int = 0
     progress_total: int = 1
@@ -31,6 +34,8 @@ class CreateDailySearchRequest(BaseModel):
 class AvailableSearchDate(BaseModel):
     date: date
     count: int
+    total_count: int | None = None
+    counts_by_source: dict = Field(default_factory=dict)
 
 
 class AvailableSearchDatesResponse(BaseModel):
@@ -56,6 +61,10 @@ class PaperMatchResponse(BaseModel):
     paper_title: Optional[str] = None
     paper_authors: Optional[list] = None
     paper_arxiv_id: Optional[str] = None
+    paper_source_type: Optional[str] = None
+    paper_source_id: Optional[str] = None
+    paper_source_url: Optional[str] = None
+    paper_item_label: Optional[str] = None
     paper_abstract: Optional[str] = None
     filter_name: Optional[str] = None
 
