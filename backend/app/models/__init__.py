@@ -1,6 +1,7 @@
 from app.models.base import Base
 from app.models.filter import Filter
 from app.models.data_source import DataSource
+from app.models.document import Document
 from app.models.job import Job
 from app.models.onboarding_extraction import OnboardingExtraction
 from app.models.paper import Paper
@@ -13,6 +14,7 @@ __all__ = [
     "Base",
     "Filter",
     "DataSource",
+    "Document",
     "Job",
     "OnboardingExtraction",
     "Paper",

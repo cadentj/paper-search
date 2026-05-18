@@ -46,6 +46,29 @@ export function useCreateExtraction() {
   });
 }
 
+export function useCreateOnboardingGeneration() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { input_text: string; document_ids: string[] }) =>
+      api.createOnboardingGeneration(input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["filters", "draft"] });
+    },
+  });
+}
+
+export function usePromoteDraftFilters() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (filterIds: string[]) => api.promoteDraftFilters(filterIds),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["onboarding", "status"] });
+      qc.invalidateQueries({ queryKey: ["filters"] });
+    },
+  });
+}
+
 export function useCompleteOnboarding() {
   const qc = useQueryClient();
   return useMutation({
@@ -67,6 +90,27 @@ export function useResetOnboarding() {
   });
 }
 
+// Documents
+export function useDocument(id: string | null, poll = false) {
+  return useQuery({
+    queryKey: ["documents", id],
+    queryFn: () => api.getDocument(id!),
+    enabled: !!id,
+    refetchInterval: () => (poll ? 1000 : false),
+  });
+}
+
+export function useUploadDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => api.uploadDocument(file),
+    onSuccess: (document) => {
+      qc.setQueryData(["documents", document.id], document);
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+    },
+  });
+}
+
 // Filters
 export function useFilters(status?: string) {
   return useQuery({
@@ -80,6 +124,22 @@ export function useCreateFilter() {
   return useMutation({
     mutationFn: (input: { name: string; definition: FilterDefinition }) =>
       api.createFilter(input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["filters"] });
+    },
+  });
+}
+
+export function useUpdateFilter() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: { name?: string; definition?: FilterDefinition };
+    }) => api.updateFilter(id, input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["filters"] });
     },

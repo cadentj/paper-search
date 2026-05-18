@@ -8,6 +8,7 @@ import {
   Filter,
   RotateCcw,
   Settings,
+  ClipboardList,
 } from "lucide-react";
 import {
   Sidebar,
@@ -28,6 +29,7 @@ import { type ReactNode } from "react";
 
 const NAV_ITEMS = [
   { label: "Daily", href: "/dashboard/daily", icon: Newspaper },
+  { label: "Onboarding", href: "/dashboard/onboarding", icon: ClipboardList },
   { label: "Search", href: "/dashboard/search", icon: Search },
   { label: "Filters", href: "/dashboard/filters", icon: Filter },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
@@ -41,7 +43,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const handleReset = async () => {
     if (!confirm("Reset all onboarding, filters, and search data?")) return;
     await resetMutation.mutateAsync();
-    push("/onboarding");
+    push("/dashboard/onboarding");
   };
 
   return (

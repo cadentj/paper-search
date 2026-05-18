@@ -15,8 +15,7 @@ from app.models.search_run import SearchRun
 from app.models.search_run_paper import SearchRunPaper
 from app.models.job import Job
 from app.services.jobs import build_progress, get_or_create_job_for_subject
-from app.services.public_arxiv_cache import fetch_public_cached_papers
-from app.services.public_lesswrong_cache import fetch_public_cached_posts
+from app.services.source_providers import CandidateItem, candidates_for_sources
 from app.services.source_settings import enabled_source_types
 from app.llm.client import async_call_llm, call_llm
 from app.llm.config import JUDGE_PROFILE, SUMMARY_PROFILE
@@ -179,67 +178,66 @@ def _set_pair_progress(
     )
 
 
-def _upsert_candidate_papers(db, run: SearchRun) -> list[Paper]:
+def _upsert_candidate_papers(db, run: SearchRun, job: Job | None = None) -> list[Paper]:
     now = datetime.now(timezone.utc)
     active_sources = enabled_source_types(db)
-    daily_papers = []
-    if "arxiv" in active_sources:
-        daily_papers.extend(fetch_public_cached_papers(run_date=run.run_date.isoformat()))
-    if "lesswrong" in active_sources:
-        try:
-            daily_papers.extend(fetch_public_cached_posts(run_date=run.run_date.isoformat()))
-        except Exception:
-            logger.exception("failed to fetch cached LessWrong posts for %s", run.run_date)
+    fetch_result = candidates_for_sources(active_sources, run.run_date)
+    if job:
+        for error in fetch_result.errors:
+            _append_progress_log(job, "fetching_items", error)
+    if active_sources and fetch_result.errors and not fetch_result.items:
+        raise RuntimeError("; ".join(fetch_result.errors))
+    daily_items = fetch_result.items
     candidate_paper_ids = set()
     papers: list[Paper] = []
     counts: dict[str, int] = {}
 
     db.query(SearchRunPaper).filter(SearchRunPaper.search_run_id == run.id).delete()
 
-    for p_data in daily_papers:
-        source_type = p_data.get("source_type") or "arxiv"
-        source_id = p_data.get("source_id") or p_data.get("arxiv_id")
+    for item in daily_items:
+        source_type = item.source_type
+        source_id = item.source_id
         existing = db.query(Paper).filter(
             Paper.source_type == source_type,
             Paper.source_id == source_id,
         ).first()
         if not existing and source_type == "arxiv":
-            existing = db.query(Paper).filter(Paper.arxiv_id == p_data["arxiv_id"]).first()
+            existing = db.query(Paper).filter(Paper.arxiv_id == item.arxiv_id).first()
         if existing:
             existing.source_type = source_type
             existing.source_id = source_id
-            existing.title = p_data["title"]
-            existing.abstract = _stored_abstract(p_data, source_type)
-            existing.authors = p_data["authors"]
-            existing.categories = p_data.get("categories")
-            existing.published_at = p_data.get("published_at")
-            existing.html_url = p_data.get("html_url")
-            existing.landing_url = p_data.get("landing_url")
-            existing.source_url = p_data.get("source_url") or p_data.get("landing_url")
-            existing.source_metadata = p_data.get("source_metadata") or {}
+            existing.title = item.title
+            existing.abstract = _stored_abstract(item)
+            existing.authors = item.authors
+            existing.categories = item.categories
+            existing.published_at = item.published_at
+            existing.html_url = item.html_url
+            existing.landing_url = item.landing_url
+            existing.source_url = item.source_url or item.landing_url
+            existing.source_metadata = item.metadata
             existing.updated_at = now
             paper = existing
         else:
             paper = Paper(
                 id=str(uuid.uuid4()),
-                arxiv_id=p_data.get("arxiv_id") if source_type == "arxiv" else None,
+                arxiv_id=item.arxiv_id if source_type == "arxiv" else None,
                 source_type=source_type,
                 source_id=source_id,
-                title=p_data["title"],
-                abstract=_stored_abstract(p_data, source_type),
-                authors=p_data["authors"],
-                categories=p_data.get("categories"),
-                published_at=p_data.get("published_at"),
-                html_url=p_data.get("html_url"),
-                landing_url=p_data.get("landing_url"),
-                source_url=p_data.get("source_url") or p_data.get("landing_url"),
-                source_metadata=p_data.get("source_metadata") or {},
+                title=item.title,
+                abstract=_stored_abstract(item),
+                authors=item.authors,
+                categories=item.categories,
+                published_at=item.published_at,
+                html_url=item.html_url,
+                landing_url=item.landing_url,
+                source_url=item.source_url or item.landing_url,
+                source_metadata=item.metadata,
                 created_at=now,
                 updated_at=now,
             )
             db.add(paper)
 
-        setattr(paper, "_transient_text", p_data.get("transient_text") or paper.abstract)
+        setattr(paper, "_transient_text", item.display_text or paper.abstract)
 
         if paper.id in candidate_paper_ids:
             continue
@@ -271,10 +269,10 @@ def _build_filter_payloads(filters: list[Filter]) -> list[FilterPayload]:
     ]
 
 
-def _stored_abstract(p_data: dict, source_type: str) -> str:
-    if source_type == "lesswrong":
+def _stored_abstract(item: CandidateItem) -> str:
+    if item.source_type == "lesswrong":
         return "LessWrong post content is fetched on demand."
-    return p_data.get("abstract") or ""
+    return item.display_text or ""
 
 
 def _build_paper_payloads(papers: list[Paper]) -> list[PaperPayload]:
@@ -454,19 +452,19 @@ def run_daily_search(search_run_id: str, job_id: str | None = None) -> None:
             db,
             run,
             job,
-            stage="fetching_papers",
+            stage="fetching_items",
             current=0,
             total=1,
             message=f"Selecting items for {run.run_date.isoformat()}",
             status="running",
         )
 
-        papers = _upsert_candidate_papers(db, run)
+        papers = _upsert_candidate_papers(db, run, job)
         _set_progress(
             db,
             run,
             job,
-            stage="fetching_papers",
+            stage="fetching_items",
             current=1,
             total=1,
             message=f"Selected {len(papers)} items",

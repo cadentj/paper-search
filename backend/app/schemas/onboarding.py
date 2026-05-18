@@ -34,3 +34,12 @@ class OnboardingExtractionResponse(BaseModel):
 
 class OnboardingCompleteRequest(BaseModel):
     filters: list[dict]
+
+
+class OnboardingGenerationCreate(BaseModel):
+    input_text: str
+    document_ids: list[str] = []
+
+
+class DraftFilterPromoteRequest(BaseModel):
+    filter_ids: list[str]

@@ -20,6 +20,10 @@ class OnboardingFiltersResponse(StrictModel):
     proposedFilters: list[StreamedFilter]
 
 
+class DocumentSummaryResponse(StrictModel):
+    summary: str
+
+
 class FilterSearchMatch(StrictModel):
     itemId: str
     sourceType: str

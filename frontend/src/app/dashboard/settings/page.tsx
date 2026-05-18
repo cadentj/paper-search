@@ -14,7 +14,7 @@ import type { DataSource } from "@/lib/api";
 
 const SOURCE_DESCRIPTIONS: Record<string, string> = {
   arxiv: "R2-indexed arXiv papers in the configured research categories.",
-  lesswrong: "LessWrong posts fetched through GraphQL for the selected day.",
+  lesswrong: "R2-indexed LessWrong posts from the configured cache.",
 };
 
 function SourceRow({
@@ -47,7 +47,7 @@ function SourceRow({
       <CardContent className="flex items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground">
           {source.source_type === "lesswrong"
-            ? "When enabled, Daily searches include LessWrong posts. Post text is fetched only during matching and is not saved."
+            ? "When enabled, Daily searches include cached LessWrong posts. HTML is fetched from R2 during matching and when opened."
             : "When enabled, Daily searches include arXiv papers. Paper HTML stays in R2 and is fetched only when opened."}
         </p>
         <Button

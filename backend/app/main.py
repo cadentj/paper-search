@@ -1,10 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.health import router as health_router
 from app.api.onboarding import router as onboarding_router
 from app.api.filters import router as filters_router
 from app.api.data_sources import router as data_sources_router
+from app.api.documents import router as documents_router
 from app.api.jobs import router as jobs_router
 from app.api.search import router as search_router
 from app.api.papers import router as papers_router
@@ -27,10 +27,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(health_router)
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
 app.include_router(onboarding_router)
 app.include_router(filters_router)
 app.include_router(data_sources_router)
+app.include_router(documents_router)
 app.include_router(jobs_router)
 app.include_router(search_router)
 app.include_router(papers_router)

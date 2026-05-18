@@ -20,6 +20,37 @@ Generate proposed search filters based on these interests. For each filter provi
 - description: the claim, question, or topic to search for
 - mode: "claim", "question", or "topic"."""
 
+ONBOARDING_WITH_DOCUMENTS_USER_PROMPT = """Here are the researcher's current notes:
+
+{input_text}
+
+Here are summaries of uploaded context documents:
+
+{document_summaries}
+
+Generate proposed search filters based on these notes and document summaries. For each filter provide:
+- id: a unique string identifier
+- name: short descriptive name
+- description: the claim, question, or topic to search for
+- mode: "claim", "question", or "topic"."""
+
+DOCUMENT_SUMMARY_SYSTEM_PROMPT = """You summarize research documents for a researcher configuring search filters.
+
+Write a compact summary focused on:
+- research questions, hypotheses, claims, methods, and topics the user may want to follow
+- distinctive terminology that should influence future search filters
+- what kind of papers or research items would be relevant next
+
+Do not critique the document. Do not include markdown."""
+
+DOCUMENT_SUMMARY_USER_PROMPT = """Document title: {filename}
+
+Extracted text:
+
+{document_text}
+
+Write a concise summary for generating future research search filters."""
+
 FILTER_SEARCH_SYSTEM_PROMPT = """You are a research item evaluator. Given a search filter and a list of research items, evaluate each item against the filter.
 
 For each item, determine:

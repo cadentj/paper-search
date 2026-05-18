@@ -16,6 +16,8 @@ from app.core.config import settings
 
 _index_cache: dict[str, Any] | None = None
 _index_cached_at = 0.0
+_date_index_cache: dict[str, dict[str, Any]] = {}
+_date_index_cached_at: dict[str, float] = {}
 _index_lock = threading.Lock()
 
 
@@ -28,25 +30,26 @@ def available_counts() -> dict[str, int]:
 
 
 def fetch_public_cached_posts(*, run_date: str) -> list[dict[str, Any]]:
-    date_payload = (fetch_index().get("dates") or {}).get(run_date)
+    index = fetch_index()
+    date_payload = (index.get("dates") or {}).get(run_date)
     if not date_payload:
         return []
 
     posts = []
-    for post in date_payload.get("posts", []):
+    for post in posts_for_date(run_date=run_date, date_payload=date_payload):
         post_id = str(post.get("post_id") or "")
         if not post_id:
             continue
         html_key = str(post.get("html_key") or _html_key_for_post_id(post_id))
         html_url = public_url(html_key)
-        plaintext = _extract_plaintext(fetch_public_post_html(html_url=html_url) or "")
+        transient_text = text_preview_for_post(post=post, html_url=html_url)
         posts.append(
             {
                 "source_type": "lesswrong",
                 "source_id": post_id,
                 "title": post.get("title") or "Untitled LessWrong post",
                 "abstract": "",
-                "transient_text": _first_words(plaintext, settings.LESSWRONG_EXCERPT_WORDS),
+                "transient_text": transient_text,
                 "authors": [author for author in [post.get("author")] if author],
                 "categories": [],
                 "published_at": _parse_datetime(post.get("posted_at")),
@@ -60,6 +63,33 @@ def fetch_public_cached_posts(*, run_date: str) -> list[dict[str, Any]]:
             }
         )
     return posts
+
+
+def posts_for_date(*, run_date: str, date_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    inline_posts = date_payload.get("posts")
+    if isinstance(inline_posts, list):
+        return inline_posts
+
+    index_key = str(date_payload.get("index_key") or "")
+    if not index_key:
+        return []
+
+    date_index = fetch_date_index(index_key=index_key)
+    if str(date_index.get("date") or run_date) != run_date:
+        return []
+    posts = date_index.get("posts") or []
+    return posts if isinstance(posts, list) else []
+
+
+def text_preview_for_post(*, post: dict[str, Any], html_url: str) -> str:
+    text_preview = post.get("text_preview")
+    if text_preview is None:
+        text_preview = post.get("excerpt")
+    if text_preview is not None:
+        return _first_words(str(text_preview), settings.LESSWRONG_EXCERPT_WORDS)
+
+    plaintext = _extract_plaintext(fetch_public_post_html(html_url=html_url) or "")
+    return _first_words(plaintext, settings.LESSWRONG_EXCERPT_WORDS)
 
 
 def fetch_public_post_html(*, html_url: str | None = None, html_key: str | None = None) -> str | None:
@@ -97,6 +127,25 @@ def fetch_index() -> dict[str, Any]:
     with _index_lock:
         _index_cache = payload
         _index_cached_at = now
+    return payload
+
+
+def fetch_date_index(*, index_key: str) -> dict[str, Any]:
+    now = time.monotonic()
+    with _index_lock:
+        cached = _date_index_cache.get(index_key)
+        cached_at = _date_index_cached_at.get(index_key, 0.0)
+        if cached is not None and now - cached_at < settings.LESSWRONG_PUBLIC_INDEX_TTL_SECONDS:
+            return cached
+
+    with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+        response = client.get(public_url(index_key))
+        response.raise_for_status()
+        payload = response.json()
+
+    with _index_lock:
+        _date_index_cache[index_key] = payload
+        _date_index_cached_at[index_key] = now
     return payload
 
 

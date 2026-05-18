@@ -13,9 +13,7 @@ from app.schemas.jobs import JobStartResponse
 from app.jobs.queue import get_queue
 from app.jobs.idea_map import generate_idea_map
 from app.services.jobs import build_progress, create_job, latest_job_for_subject
-from app.services.html_parser import prepare_arxiv_html_for_viewer
-from app.services.paper_html_source import arxiv_html_url, read_paper_html
-from app.services.public_lesswrong_cache import fetch_public_post_html
+from app.services.source_providers import provider_for
 
 router = APIRouter(prefix="/papers", tags=["papers"])
 logger = logging.getLogger(__name__)
@@ -35,39 +33,10 @@ def get_paper_html(paper_id: str, db: Session = Depends(get_db)):
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    if paper.source_type == "lesswrong":
-        try:
-            post_html = fetch_public_post_html(
-                html_url=paper.html_url,
-                html_key=(paper.source_metadata or {}).get("html_key"),
-            )
-        except Exception:
-            logger.exception("failed to fetch LessWrong HTML for paper=%s", paper.id)
-            post_html = None
-        if post_html:
-            return {
-                "html": post_html,
-                "source_url": paper.source_url or paper.landing_url,
-            }
-        return {
-            "html": None,
-            "source_url": paper.source_url or paper.landing_url,
-        }
-
-    paper_html = read_paper_html(paper.arxiv_id, html_url=paper.html_url)
-    if paper_html:
-        return {
-            "html": prepare_arxiv_html_for_viewer(
-                paper_html.html,
-                paper_html.source_url,
-            ),
-            "source_url": paper_html.source_url,
-        }
-
-    return {
-        "html": None,
-        "source_url": arxiv_html_url(paper.arxiv_id) if paper.arxiv_id else None,
-    }
+    provider = provider_for(paper.source_type or "arxiv")
+    if not provider:
+        return {"html": None, "source_url": paper.source_url or paper.landing_url}
+    return provider.html_for_paper(paper)
 
 
 @router.post("/{paper_id}/idea-map", response_model=JobStartResponse)

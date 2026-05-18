@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.session import get_db
 from app.models.filter import Filter
 from app.models.onboarding_extraction import OnboardingExtraction
@@ -13,11 +14,13 @@ from app.schemas.onboarding import (
     OnboardingExtractionCreate,
     OnboardingExtractionResponse,
     OnboardingCompleteRequest,
+    OnboardingGenerationCreate,
+    DraftFilterPromoteRequest,
 )
 from app.schemas.filters import FilterResponse
 from app.schemas.jobs import JobStartResponse
 from app.jobs.queue import get_queue
-from app.jobs.onboarding import extract_onboarding_filters
+from app.jobs.onboarding import extract_onboarding_filters, generate_onboarding_draft_filters
 from app.services.jobs import build_progress, create_job
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
@@ -31,6 +34,93 @@ def get_onboarding_status(db: Session = Depends(get_db)):
         completed=active_count > 0,
         active_filter_count=active_count,
     )
+
+
+@router.post("/generations", response_model=JobStartResponse)
+def create_generation(body: OnboardingGenerationCreate, db: Session = Depends(get_db)):
+    input_text = body.input_text.strip()
+    if len(input_text) > settings.ONBOARDING_INPUT_MAX_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Input text must be {settings.ONBOARDING_INPUT_MAX_CHARS} characters or fewer",
+        )
+    if not input_text and not body.document_ids:
+        raise HTTPException(status_code=400, detail="Add text or at least one document")
+
+    job_record = create_job(
+        db,
+        kind="onboarding_generation",
+        subject_type="onboarding_generation",
+        status="queued",
+        progress=build_progress(
+            stage="queued",
+            current=0,
+            total=1,
+            message="Queued onboarding generation",
+            requested_documents=len(body.document_ids),
+        ),
+    )
+    db.flush()
+    job_record.subject_id = job_record.id
+    db.commit()
+    db.refresh(job_record)
+
+    try:
+        q = get_queue()
+        job = q.enqueue(
+            generate_onboarding_draft_filters,
+            input_text,
+            body.document_ids,
+            job_record.id,
+        )
+        job_record.queue_job_id = getattr(job, "id", None)
+        db.commit()
+    except Exception as exc:
+        logger.exception("failed to enqueue onboarding generation=%s", job_record.id)
+        now = datetime.now(timezone.utc)
+        job_record.status = "failed"
+        job_record.error = f"Could not enqueue onboarding generation: {exc}"
+        job_record.completed_at = now
+        job_record.updated_at = now
+        job_record.progress = build_progress(
+            stage="failed",
+            current=0,
+            total=1,
+            message="Could not enqueue onboarding generation. Is Redis running?",
+            log=(job_record.progress or {}).get("log", []),
+        )
+        db.commit()
+        raise HTTPException(status_code=503, detail=job_record.error) from exc
+
+    return JobStartResponse(job_id=job_record.id)
+
+
+@router.post("/draft-filters/promote", response_model=list[FilterResponse])
+def promote_draft_filters(
+    body: DraftFilterPromoteRequest,
+    db: Session = Depends(get_db),
+):
+    if not body.filter_ids:
+        return []
+
+    now = datetime.now(timezone.utc)
+    filters = db.query(Filter).filter(Filter.id.in_(body.filter_ids)).all()
+    by_id = {f.id: f for f in filters}
+    ordered_filters = [by_id[fid] for fid in body.filter_ids if fid in by_id]
+    missing = [fid for fid in body.filter_ids if fid not in by_id]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Draft filter not found: {missing[0]}")
+
+    for filt in ordered_filters:
+        if filt.status != "draft":
+            raise HTTPException(status_code=400, detail=f"Filter is not a draft: {filt.id}")
+        filt.status = "active"
+        filt.updated_at = now
+
+    db.commit()
+    for filt in ordered_filters:
+        db.refresh(filt)
+    return ordered_filters
 
 
 @router.post("/extractions", response_model=JobStartResponse)

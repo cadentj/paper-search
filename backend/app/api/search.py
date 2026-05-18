@@ -22,8 +22,7 @@ from app.jobs.queue import get_queue
 from app.jobs.daily_search import run_daily_search
 from app.services.jobs import build_progress, create_job
 from app.services.daily_dates import fixed_daily_dates, is_valid_daily_date
-from app.services.public_arxiv_cache import fetch_index
-from app.services.public_lesswrong_cache import available_counts as lesswrong_available_counts
+from app.services.source_providers import counts_by_source_for_dates
 from app.services.source_settings import enabled_source_types, ensure_default_data_sources
 
 router = APIRouter(prefix="/search-runs", tags=["search"])
@@ -46,20 +45,13 @@ def get_latest_search_run(db: Session = Depends(get_db)):
 def get_available_search_dates(db: Session = Depends(get_db)):
     enabled_sources = enabled_source_types(db)
     dates = fixed_daily_dates()
-    arxiv_counts = _arxiv_counts_by_date() if "arxiv" in enabled_sources else {}
-    lesswrong_counts = (
-        _lesswrong_counts_by_date(dates)
-        if "lesswrong" in enabled_sources and dates
-        else {}
-    )
+    source_counts = counts_by_source_for_dates(enabled_sources, dates)
 
     rows = []
     for day in reversed(dates):
         counts_by_source = {}
-        if "arxiv" in enabled_sources:
-            counts_by_source["arxiv"] = arxiv_counts.get(day.isoformat(), 0)
-        if "lesswrong" in enabled_sources:
-            counts_by_source["lesswrong"] = lesswrong_counts.get(day.isoformat(), 0)
+        for source_type in sorted(enabled_sources):
+            counts_by_source[source_type] = source_counts.get(source_type, {}).get(day.isoformat(), 0)
         total = sum(counts_by_source.values())
         rows.append(
             {
@@ -204,28 +196,6 @@ def get_search_run_matches(
 
     result.sort(key=lambda x: x.relevance_score, reverse=True)
     return result
-
-
-def _arxiv_counts_by_date() -> dict[str, int]:
-    try:
-        index = fetch_index()
-    except Exception:
-        logger.exception("failed to fetch arXiv index for available dates")
-        return {}
-    return {
-        str(day): int(payload.get("count") or 0)
-        for day, payload in (index.get("dates") or {}).items()
-    }
-
-
-def _lesswrong_counts_by_date(dates: list[date]) -> dict[str, int]:
-    try:
-        counts = lesswrong_available_counts()
-        valid_dates = {day.isoformat() for day in dates}
-        return {day: count for day, count in counts.items() if day in valid_dates}
-    except Exception:
-        logger.exception("failed to fetch LessWrong counts for available dates")
-        return {}
 
 
 def _paper_item_label(paper: Paper) -> str:

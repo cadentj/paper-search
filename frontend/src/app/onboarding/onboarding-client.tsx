@@ -1,296 +1,445 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
-  useCreateExtraction,
-  useOnboardingExtraction,
-  useCompleteOnboarding,
-  useResetOnboarding,
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupText,
+  InputGroupTextarea,
+} from "@/components/ui/input-group";
+import {
+  useArchiveFilter,
+  useCreateOnboardingGeneration,
+  useDocument,
+  useFilters,
   useJob,
+  usePromoteDraftFilters,
+  useUpdateFilter,
+  useUploadDocument,
 } from "@/hooks/use-queries";
-import { ProposedFilter } from "@/lib/api";
-import { Loader2, X, RotateCcw, Pencil, Check } from "lucide-react";
+import { DocumentUploadResponse, FilterResponse } from "@/lib/api";
+import {
+  Archive,
+  Check,
+  FileText,
+  Loader2,
+  Pencil,
+  Plus,
+  Send,
+  X,
+} from "lucide-react";
 
-const EMPTY_PROPOSED_FILTERS: ProposedFilter[] = [];
-const ONBOARDING_SKELETON_KEYS = [
-  "onboarding-skeleton-1",
-  "onboarding-skeleton-2",
-  "onboarding-skeleton-3",
-];
+const MAX_INPUT_CHARS = 2000;
+const BLOCKING_DOCUMENT_STATUSES = new Set(["queued", "processing"]);
 
-export function OnboardingClient() {
-  const { push } = useRouter();
-  const [inputText, setInputText] = useState("");
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [editedFilters, setEditedFilters] = useState<ProposedFilter[]>([]);
-  const [editingIdx, setEditingIdx] = useState<number | null>(null);
-  const seenProposedFilterIds = useRef<Set<string>>(new Set());
+type UploadedDocument = DocumentUploadResponse;
 
-  const createExtraction = useCreateExtraction();
-  const { data: job } = useJob(jobId);
-  const isExtracting = job?.status === "queued" || job?.status === "running";
-  const extractionId =
-    job?.subject_type === "onboarding_extraction" ? job.subject_id || null : null;
-  const { data: extraction } = useOnboardingExtraction(extractionId, isExtracting);
-  const completeOnboarding = useCompleteOnboarding();
-  const resetOnboarding = useResetOnboarding();
+function documentStatusLabel(status: string) {
+  switch (status) {
+    case "queued":
+      return "Queued";
+    case "processing":
+      return "Processing";
+    case "ready":
+      return "Ready";
+    case "needs_ocr":
+      return "Needs OCR";
+    case "failed":
+      return "Failed";
+    default:
+      return status;
+  }
+}
 
-  const isComplete = extraction?.status === "completed" || job?.status === "completed";
-  const proposedFilters = extraction?.proposed_filters ?? EMPTY_PROPOSED_FILTERS;
-
-  const handleSubmit = async () => {
-    if (!inputText.trim()) return;
-    const result = await createExtraction.mutateAsync({
-      input_text: inputText,
-    });
-    setJobId(result.job_id);
-  };
+function DocumentChip({
+  document,
+  onRemove,
+  onUpdate,
+}: {
+  document: UploadedDocument;
+  onRemove: (id: string) => void;
+  onUpdate: (document: UploadedDocument) => void;
+}) {
+  const isActive = BLOCKING_DOCUMENT_STATUSES.has(document.status);
+  const { data: latestDocument } = useDocument(document.id, isActive);
+  const { data: job } = useJob(document.job_id);
+  const displayDocument = latestDocument
+    ? { ...document, ...latestDocument, job_id: document.job_id }
+    : document;
 
   useEffect(() => {
-    if (!extractionId) {
-      seenProposedFilterIds.current.clear();
-      return;
+    if (
+      latestDocument &&
+      (latestDocument.status !== document.status ||
+        latestDocument.updated_at !== document.updated_at)
+    ) {
+      onUpdate({ ...document, ...latestDocument, job_id: document.job_id });
     }
+  }, [
+    document,
+    document.job_id,
+    document.status,
+    document.updated_at,
+    latestDocument,
+    onUpdate,
+  ]);
 
-    const additions = proposedFilters.filter(
-      (filter) => !seenProposedFilterIds.current.has(filter.id)
-    );
-    proposedFilters.forEach((filter) =>
-      seenProposedFilterIds.current.add(filter.id)
-    );
+  const isRunning =
+    displayDocument.status === "queued" || displayDocument.status === "processing";
 
-    if (additions.length === 0) return;
-    setEditedFilters((prev) => {
-      const existingIds = new Set(prev.map((f) => f.id));
-      const unseenAdditions = additions.filter((f) => !existingIds.has(f.id));
-      return unseenAdditions.length ? [...prev, ...unseenAdditions] : prev;
-    });
-  }, [extractionId, proposedFilters]);
+  return (
+    <div className="flex min-w-0 items-center gap-2 rounded-md border bg-background px-2 py-1 text-sm">
+      {isRunning ? (
+        <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+      ) : (
+        <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+      )}
+      <span className="min-w-0 flex-1 truncate">{displayDocument.original_filename}</span>
+      <Badge
+        variant={
+          displayDocument.status === "failed"
+            ? "destructive"
+            : displayDocument.status === "ready"
+              ? "secondary"
+              : "outline"
+        }
+      >
+        {documentStatusLabel(displayDocument.status)}
+      </Badge>
+      {job?.progress?.message && isRunning ? (
+        <span className="hidden max-w-36 truncate text-xs text-muted-foreground sm:inline">
+          {job.progress.message}
+        </span>
+      ) : null}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-6 shrink-0"
+        aria-label={`Remove ${displayDocument.original_filename}`}
+        onClick={() => onRemove(document.id)}
+      >
+        <X className="size-3" />
+      </Button>
+    </div>
+  );
+}
 
-  const handleRemoveFilter = (idx: number) => {
-    setEditedFilters((prev) => prev.filter((_, i) => i !== idx));
-  };
+function DraftFilterCard({
+  filter,
+}: {
+  filter: FilterResponse;
+}) {
+  const updateFilter = useUpdateFilter();
+  const archiveFilter = useArchiveFilter();
+  const [isEditing, setIsEditing] = useState(false);
+  const [name, setName] = useState(filter.name);
+  const [description, setDescription] = useState(filter.definition.description || "");
 
-  const handleComplete = async () => {
-    if (editedFilters.length === 0) return;
-    await completeOnboarding.mutateAsync(
-      editedFilters.map((f) => ({
-        name: f.name,
+  const save = async () => {
+    const nextName = name.trim();
+    const nextDescription = description.trim();
+    if (!nextName || !nextDescription) return;
+    await updateFilter.mutateAsync({
+      id: filter.id,
+      input: {
         definition: {
-          name: f.name,
-          description: f.description,
-          mode: f.mode || "topic",
+          ...filter.definition,
+          name: nextName,
+          description: nextDescription,
+          mode: filter.definition.mode || "topic",
         },
-      }))
-    );
-    push("/dashboard/daily");
-  };
-
-  const handleReset = async () => {
-    await resetOnboarding.mutateAsync();
-    setInputText("");
-    setJobId(null);
-    setEditedFilters([]);
+      },
+    });
+    setIsEditing(false);
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
-      <div className="w-full max-w-2xl space-y-6">
-        <div className="text-center space-y-2">
-          <h1 className="text-3xl font-semibold tracking-tight">Paper Search</h1>
-          <p className="text-muted-foreground">
-            Tell us about your research interests and we&apos;ll create
-            personalized search filters.
+    <Card>
+      <CardContent className="pt-4">
+        {isEditing ? (
+          <div className="space-y-3">
+            <Input
+              aria-label="Filter name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+            <Input
+              aria-label="Filter description"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+            />
+            <div className="flex gap-2">
+              <Button size="sm" onClick={save} disabled={updateFilter.isPending}>
+                <Check className="mr-1 size-3" />
+                Save
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setIsEditing(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              <p className="font-medium">{filter.name}</p>
+              <p className="text-sm text-muted-foreground">
+                {filter.definition.description}
+              </p>
+            </div>
+            <div className="flex shrink-0 gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7"
+                aria-label={`Edit ${filter.name}`}
+                onClick={() => {
+                  setName(filter.name);
+                  setDescription(filter.definition.description || "");
+                  setIsEditing(true);
+                }}
+              >
+                <Pencil className="size-3" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7"
+                aria-label={`Remove ${filter.name}`}
+                onClick={() => archiveFilter.mutate(filter.id)}
+              >
+                <Archive className="size-3" />
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+export function OnboardingClient() {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [inputText, setInputText] = useState("");
+  const [documents, setDocuments] = useState<UploadedDocument[]>([]);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [generationJobId, setGenerationJobId] = useState<string | null>(null);
+
+  const uploadDocument = useUploadDocument();
+  const createGeneration = useCreateOnboardingGeneration();
+  const promoteDraftFilters = usePromoteDraftFilters();
+  const { data: generationJob } = useJob(generationJobId);
+  const { data: draftFilters = [] } = useFilters("draft");
+
+  const readyDocuments = documents.filter((document) => document.status === "ready");
+  const blockingDocuments = documents.filter((document) =>
+    BLOCKING_DOCUMENT_STATUSES.has(document.status)
+  );
+  const processedCount = documents.filter(
+    (document) => !BLOCKING_DOCUMENT_STATUSES.has(document.status)
+  ).length;
+  const isGenerating =
+    generationJob?.status === "queued" || generationJob?.status === "running";
+  const canSend =
+    !isGenerating &&
+    !uploadDocument.isPending &&
+    !createGeneration.isPending &&
+    blockingDocuments.length === 0 &&
+    inputText.length <= MAX_INPUT_CHARS &&
+    (inputText.trim().length > 0 || readyDocuments.length > 0);
+
+  const progressText = useMemo(() => {
+    if (documents.length === 0) return null;
+    return `${processedCount}/${documents.length} PDFs processed`;
+  }, [documents.length, processedCount]);
+
+  const handleFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setUploadError(null);
+    try {
+      const uploads = await Promise.all(
+        Array.from(files).map((file) => uploadDocument.mutateAsync(file))
+      );
+      setDocuments((current) => [...current, ...uploads]);
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Upload failed");
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleSend = async () => {
+    if (!canSend) return;
+    const result = await createGeneration.mutateAsync({
+      input_text: inputText,
+      document_ids: readyDocuments.map((document) => document.id),
+    });
+    setGenerationJobId(result.job_id);
+    setInputText("");
+  };
+
+  const handleAcceptDrafts = async () => {
+    if (draftFilters.length === 0) return;
+    await promoteDraftFilters.mutateAsync(draftFilters.map((filter) => filter.id));
+  };
+
+  const updateDocument = (nextDocument: UploadedDocument) => {
+    setDocuments((current) =>
+      current.map((document) =>
+        document.id === nextDocument.id ? nextDocument : document
+      )
+    );
+  };
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4 md:p-8">
+      <div className="w-full max-w-3xl space-y-6">
+        <div className="space-y-2 text-center">
+          <h1 className="text-3xl font-semibold tracking-tight">Onboarding</h1>
+          <p className="text-sm text-muted-foreground">
+            Add research context to generate draft filters you can review and activate.
           </p>
         </div>
 
-        {!isComplete && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Your Research Interests</CardTitle>
-              <CardDescription>
-                Describe your current research interests, hypotheses, open
-                questions, and topics you want to follow.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Textarea
-                aria-label="Research interests"
-                name="research-interests"
-                autoComplete="off"
-                placeholder="I'm interested in mechanistic interpretability of language models, particularly circuit discovery and sparse autoencoders. I'm tracking hypotheses about whether…"
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="onboarding-context">Research context</FieldLabel>
+            <InputGroup>
+              <InputGroupTextarea
+                id="onboarding-context"
                 value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                rows={8}
-                disabled={isExtracting || createExtraction.isPending}
+                maxLength={MAX_INPUT_CHARS}
+                rows={7}
+                placeholder="Add a research direction, question, claim, or context from your current work..."
+                onChange={(event) => setInputText(event.target.value)}
+                disabled={isGenerating}
               />
-              <div className="flex gap-2">
-                <Button
-                  onClick={handleSubmit}
-                  disabled={
-                    !inputText.trim() ||
-                    isExtracting ||
-                    createExtraction.isPending
-                  }
-                  className="flex-1"
+              <InputGroupAddon align="block-end" className="gap-2">
+                <InputGroupButton
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Upload PDF"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadDocument.isPending}
                 >
-                  {isExtracting ? (
-                    <>
-                      <Loader2 className="mr-2 size-4 animate-spin" />
-                      Generating filters…
-                    </>
+                  {uploadDocument.isPending ? (
+                    <Loader2 className="size-4 animate-spin" />
                   ) : (
-                    "Generate Search Filters"
+                    <Plus className="size-4" />
                   )}
-                </Button>
-              </div>
-              {(extraction?.status === "failed" || job?.status === "failed") && (
-                <p className="text-sm text-destructive">
-                  {extraction?.error || job?.error || "Extraction failed. Please try again."}
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        )}
+                </InputGroupButton>
+                <InputGroupText>{inputText.length}/{MAX_INPUT_CHARS}</InputGroupText>
+                {progressText ? <InputGroupText>{progressText}</InputGroupText> : null}
+                <InputGroupButton
+                  variant="default"
+                  size="sm"
+                  className="ml-auto"
+                  onClick={handleSend}
+                  disabled={!canSend}
+                >
+                  {isGenerating || createGeneration.isPending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Send className="size-4" />
+                  )}
+                  Send
+                </InputGroupButton>
+              </InputGroupAddon>
+            </InputGroup>
+            <FieldDescription>
+              PDFs must be 1 MB or smaller and 10 pages or fewer. OCR-only work is skipped until it is ready.
+            </FieldDescription>
+          </Field>
+        </FieldGroup>
 
-        {isExtracting && editedFilters.length === 0 && (
-          <div className="space-y-3">
-            {ONBOARDING_SKELETON_KEYS.map((key) => (
-              <Skeleton key={key} className="h-24 w-full rounded-lg" />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/pdf"
+          multiple
+          className="hidden"
+          onChange={(event) => handleFiles(event.target.files)}
+        />
+
+        {uploadError ? (
+          <p className="text-sm text-destructive">{uploadError}</p>
+        ) : null}
+
+        {documents.length > 0 ? (
+          <div className="flex flex-col gap-2">
+            {documents.map((document) => (
+              <DocumentChip
+                key={document.id}
+                document={document}
+                onUpdate={updateDocument}
+                onRemove={(id) =>
+                  setDocuments((current) =>
+                    current.filter((document) => document.id !== id)
+                  )
+                }
+              />
             ))}
           </div>
-        )}
+        ) : null}
 
-        {(isComplete || editedFilters.length > 0) && (
-          <>
-            <div className="space-y-2">
-              <h2 className="text-lg font-semibold">
-                Proposed Filters ({editedFilters.length})
-              </h2>
+        {generationJob ? (
+          <Card>
+            <CardContent className="flex items-center gap-2 pt-6 text-sm text-muted-foreground">
+              {isGenerating ? <Loader2 className="size-4 animate-spin" /> : null}
+              <span>{generationJob.progress?.message || generationJob.status}</span>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">Draft Filters</h2>
               <p className="text-sm text-muted-foreground">
-                {isExtracting
-                  ? "Filters will appear here as they are generated."
-                  : "Review, edit, or remove filters before completing setup."}
+                Drafts are ignored by daily search until accepted.
               </p>
             </div>
+            <Button
+              onClick={handleAcceptDrafts}
+              disabled={draftFilters.length === 0 || promoteDraftFilters.isPending}
+            >
+              {promoteDraftFilters.isPending ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : (
+                <Check className="mr-2 size-4" />
+              )}
+              Accept Drafts ({draftFilters.length})
+            </Button>
+          </div>
 
+          {draftFilters.length > 0 ? (
             <div className="space-y-3">
-              {editedFilters.map((f, idx) => (
-                <Card key={f.id}>
-                  <CardContent className="pt-4">
-                    {editingIdx === idx ? (
-                      <div className="space-y-3">
-                        <Input
-                          aria-label="Filter name"
-                          name={`filter-${f.id}-name`}
-                          autoComplete="off"
-                          value={f.name}
-                          onChange={(e) => {
-                            const updated = [...editedFilters];
-                            updated[idx] = {
-                              ...f,
-                              name: e.target.value,
-                            };
-                            setEditedFilters(updated);
-                          }}
-                          placeholder="Filter name…"
-                        />
-                        <Textarea
-                          aria-label="Filter description"
-                          name={`filter-${f.id}-description`}
-                          autoComplete="off"
-                          value={f.description}
-                          onChange={(e) => {
-                            const updated = [...editedFilters];
-                            updated[idx] = {
-                              ...f,
-                              description: e.target.value,
-                            };
-                            setEditedFilters(updated);
-                          }}
-                          placeholder="Description…"
-                          rows={3}
-                        />
-                        <Button
-                          size="sm"
-                          onClick={() => setEditingIdx(null)}
-                        >
-                          <Check className="mr-1 size-3" /> Done
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 space-y-1">
-                          <p className="font-medium">{f.name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {f.description}
-                          </p>
-                        </div>
-                        <div className="flex gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-7"
-                            aria-label={`Edit ${f.name}`}
-                            onClick={() => setEditingIdx(idx)}
-                          >
-                            <Pencil className="size-3" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-7"
-                            aria-label={`Remove ${f.name}`}
-                            onClick={() => handleRemoveFilter(idx)}
-                          >
-                            <X className="size-3" />
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+              {draftFilters.map((filter) => (
+                <DraftFilterCard key={filter.id} filter={filter} />
               ))}
             </div>
-
-            <div className="flex gap-2">
-              <Button
-                onClick={handleComplete}
-                disabled={isExtracting || completeOnboarding.isPending}
-                className="flex-1"
-              >
-                {completeOnboarding.isPending ? (
-                  <Loader2 className="mr-2 size-4 animate-spin" />
-                ) : null}
-                Complete Setup ({editedFilters.length} filters)
-              </Button>
-            </div>
-          </>
-        )}
-
-        <div className="flex justify-center">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-muted-foreground"
-            onClick={handleReset}
-            disabled={resetOnboarding.isPending}
-          >
-            <RotateCcw className="mr-1 size-3" />
-            Reset
-          </Button>
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">No draft filters</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-muted-foreground">
+                Send context to create draft filters for review.
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </div>

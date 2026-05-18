@@ -6,6 +6,7 @@ from app.db.session import get_db
 from app.models.onboarding_extraction import OnboardingExtraction
 from app.models.idea_map import IdeaMap
 from app.models.job import Job
+from app.models.document import Document
 from app.models.paper_match import PaperMatch
 from app.models.search_run import SearchRun
 from app.models.search_run_paper import SearchRunPaper
@@ -23,6 +24,7 @@ def reset_onboarding(db: Session = Depends(get_db)):
     counts = {}
 
     counts["jobs"] = db.query(Job).delete()
+    counts["documents"] = db.query(Document).delete()
     counts["onboarding_extractions"] = db.query(OnboardingExtraction).delete()
     counts["idea_maps"] = db.query(IdeaMap).delete()
     counts["paper_matches"] = db.query(PaperMatch).delete()

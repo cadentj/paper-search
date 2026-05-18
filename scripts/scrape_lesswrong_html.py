@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["httpx>=0.27.0", "tqdm>=4.66.0"]
+# dependencies = ["beautifulsoup4>=4.12.0", "httpx>=0.27.0", "lxml>=5.0.0", "tqdm>=4.66.0"]
 # ///
 """Build a local LessWrong HTML cache for the daily-search date window."""
 
@@ -18,12 +18,14 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from bs4 import BeautifulSoup
 from tqdm import tqdm
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "data" / "lesswrong_html_cache"
 GRAPHQL_URL = "https://www.lesswrong.com/graphql"
+DEFAULT_PREVIEW_WORDS = 250
 SAFE_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 POSTS_QUERY = """
@@ -83,6 +85,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--days", type=int, default=31)
     parser.add_argument("--window-days", type=int, default=5)
     parser.add_argument("--limit-per-window", type=int, default=500)
+    parser.add_argument("--preview-words", type=int, default=DEFAULT_PREVIEW_WORDS)
     parser.add_argument("--graphql-url", default=GRAPHQL_URL)
     parser.add_argument("--sleep", type=float, default=1.0)
     parser.add_argument("--timeout", type=float, default=30.0)
@@ -123,7 +126,7 @@ def scrape_windows(
             posts = fetch_posts_for_window(client, args, start_day, end_day)
             for post in posts:
                 write_post(output_dir, post)
-                record_post(conn, post)
+                record_post(conn, post, preview_words=args.preview_words)
             record_window(conn, start_day, end_day, len(posts))
             progress.set_postfix(
                 window=f"{start_day.isoformat()}..{end_day.isoformat()}",
@@ -210,6 +213,7 @@ def create_state(conn: sqlite3.Connection) -> None:
             author TEXT NOT NULL DEFAULT '',
             base_score REAL,
             html_path TEXT,
+            text_preview TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'success',
             bytes INTEGER NOT NULL DEFAULT 0,
             updated_at TEXT NOT NULL
@@ -227,7 +231,25 @@ def create_state(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    add_column_if_missing(
+        conn,
+        table="lesswrong_html_scrape",
+        column="text_preview",
+        definition="TEXT NOT NULL DEFAULT ''",
+    )
     conn.commit()
+
+
+def add_column_if_missing(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    column: str,
+    definition: str,
+) -> None:
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def window_done(conn: sqlite3.Connection, start_day: date, end_day: date) -> bool:
@@ -257,15 +279,16 @@ def record_window(conn: sqlite3.Connection, start_day: date, end_day: date, post
     conn.commit()
 
 
-def record_post(conn: sqlite3.Connection, post: LessWrongPost) -> None:
+def record_post(conn: sqlite3.Connection, post: LessWrongPost, *, preview_words: int) -> None:
     html_path = f"{post.post_id[:2]}/{safe_filename(post.post_id)}.html"
+    text_preview = first_words(extract_plaintext(post.html), preview_words)
     conn.execute(
         """
         INSERT INTO lesswrong_html_scrape (
             post_id, title, slug, page_url, posted_at, author, base_score,
-            html_path, status, bytes, updated_at
+            html_path, text_preview, status, bytes, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'success', ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'success', ?, ?)
         ON CONFLICT(post_id) DO UPDATE SET
             title = excluded.title,
             slug = excluded.slug,
@@ -274,6 +297,7 @@ def record_post(conn: sqlite3.Connection, post: LessWrongPost) -> None:
             author = excluded.author,
             base_score = excluded.base_score,
             html_path = excluded.html_path,
+            text_preview = excluded.text_preview,
             status = excluded.status,
             bytes = excluded.bytes,
             updated_at = excluded.updated_at
@@ -287,6 +311,7 @@ def record_post(conn: sqlite3.Connection, post: LessWrongPost) -> None:
             post.author,
             post.base_score,
             html_path,
+            text_preview,
             len(post.html.encode("utf-8")),
             datetime.now(timezone.utc).isoformat(),
         ),
@@ -296,6 +321,22 @@ def record_post(conn: sqlite3.Connection, post: LessWrongPost) -> None:
 
 def safe_filename(value: str) -> str:
     return SAFE_ID_RE.sub("_", value)
+
+
+def extract_plaintext(html: str) -> str:
+    if not html:
+        return ""
+    soup = BeautifulSoup(html, "lxml")
+    for element in soup(["script", "style", "noscript"]):
+        element.decompose()
+    return " ".join(soup.get_text(" ", strip=True).split())
+
+
+def first_words(value: str, count: int) -> str:
+    words = value.split()
+    if len(words) <= count:
+        return " ".join(words)
+    return " ".join(words[:count])
 
 
 def load_cookie(args: argparse.Namespace) -> str:

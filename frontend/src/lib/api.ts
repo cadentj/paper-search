@@ -1,8 +1,12 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
+  const isFormData = options?.body instanceof FormData;
   const res = await fetch(`${API_URL}${path}`, {
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
+      ...options?.headers,
+    },
     ...options,
   });
   if (!res.ok) {
@@ -82,6 +86,25 @@ export interface Job {
 }
 
 export interface JobStartResponse {
+  job_id: string;
+}
+
+export interface DocumentResponse {
+  id: string;
+  original_filename: string;
+  content_type: string;
+  size_bytes: number;
+  page_count: number;
+  storage_path: string;
+  extracted_text_path?: string | null;
+  summary?: string | null;
+  status: string;
+  error?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentUploadResponse extends DocumentResponse {
   job_id: string;
 }
 
@@ -211,6 +234,16 @@ export const api = {
 
   // Onboarding
   getOnboardingStatus: () => fetchApi<OnboardingStatus>("/onboarding/status"),
+  createOnboardingGeneration: (input: { input_text: string; document_ids: string[] }) =>
+    fetchApi<JobStartResponse>("/onboarding/generations", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  promoteDraftFilters: (filter_ids: string[]) =>
+    fetchApi<FilterResponse[]>("/onboarding/draft-filters/promote", {
+      method: "POST",
+      body: JSON.stringify({ filter_ids }),
+    }),
   createOnboardingExtraction: (input: { input_text: string }) =>
     fetchApi<JobStartResponse>("/onboarding/extractions", {
       method: "POST",
@@ -227,6 +260,17 @@ export const api = {
     fetchApi<{ status: string; deleted: Record<string, number> }>("/dev/reset-onboarding", {
       method: "POST",
     }),
+
+  // Documents
+  uploadDocument: (file: File) => {
+    const body = new FormData();
+    body.append("file", file);
+    return fetchApi<DocumentUploadResponse>("/documents", {
+      method: "POST",
+      body,
+    });
+  },
+  getDocument: (id: string) => fetchApi<DocumentResponse>(`/documents/${id}`),
 
   // Filters
   getFilters: (status?: string) =>
