@@ -1,5 +1,5 @@
 import uuid
-import threading
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,6 +19,7 @@ from app.jobs.queue import get_queue
 from app.jobs.onboarding import extract_onboarding_filters
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/status", response_model=OnboardingStatusResponse)
@@ -45,13 +46,19 @@ def create_extraction(body: OnboardingExtractionCreate, db: Session = Depends(ge
 
     try:
         q = get_queue()
-        q.enqueue(extract_onboarding_filters, extraction.id)
-    except Exception:
-        threading.Thread(
-            target=extract_onboarding_filters,
-            args=(extraction.id,),
-            daemon=True,
-        ).start()
+        job = q.enqueue(extract_onboarding_filters, extraction.id)
+        logger.info(
+            "enqueued onboarding extraction=%s job=%s",
+            extraction.id,
+            getattr(job, "id", None),
+        )
+    except Exception as exc:
+        logger.exception("failed to enqueue onboarding extraction=%s", extraction.id)
+        extraction.status = "failed"
+        extraction.error = f"Could not enqueue onboarding extraction: {exc}"
+        extraction.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        raise HTTPException(status_code=503, detail=extraction.error) from exc
 
     return extraction
 
@@ -74,6 +81,11 @@ def complete_onboarding(body: OnboardingCompleteRequest, db: Session = Depends(g
     for f_data in body.filters:
         definition = f_data.get("definition", f_data)
         name = definition.get("name", f_data.get("name", "Unnamed Filter"))
+        definition = {
+            "name": name,
+            "description": definition.get("description", ""),
+            "mode": definition.get("mode", "relevance"),
+        }
 
         filt = Filter(
             id=str(uuid.uuid4()),

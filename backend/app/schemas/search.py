@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime, date
 from typing import Optional
 
@@ -11,6 +11,11 @@ class SearchRunResponse(BaseModel):
     match_count: Optional[int] = None
     summary: Optional[str] = None
     summary_citations: list
+    stage: str = "queued"
+    progress_current: int = 0
+    progress_total: int = 1
+    progress_message: str = "Queued"
+    progress_log: list = Field(default_factory=list)
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error: Optional[str] = None

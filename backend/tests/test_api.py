@@ -1,9 +1,20 @@
 """Backend API integration tests."""
 
-import uuid
+from datetime import datetime, timezone
+
+import pytest
+
+
+class NoopQueue:
+    def enqueue(self, *args, **kwargs):
+        return None
 
 
 class TestOnboarding:
+    @pytest.fixture(autouse=True)
+    def _mock_queue(self, monkeypatch):
+        monkeypatch.setattr("app.api.onboarding.get_queue", lambda: NoopQueue())
+
     def test_fresh_db_reports_incomplete(self, client):
         resp = client.get("/onboarding/status")
         assert resp.status_code == 200
@@ -41,8 +52,8 @@ class TestOnboarding:
                 "name": "Test Filter",
                 "definition": {
                     "name": "Test Filter",
-                    "statement": "Test statement",
-                    "search": {"instructions": "Search for tests", "outputMode": "warrants"},
+                    "description": "Test statement",
+                    "mode": "warrants",
                 },
             }
         ]
@@ -57,6 +68,18 @@ class TestOnboarding:
         assert status["completed"] is True
         assert status["active_filter_count"] == 1
 
+    def test_create_extraction_fails_fast_when_queue_unavailable(self, client, monkeypatch):
+        def broken_queue():
+            raise RuntimeError("redis unavailable")
+
+        monkeypatch.setattr("app.api.onboarding.get_queue", broken_queue)
+        resp = client.post(
+            "/onboarding/extractions",
+            json={"input_text": "I study mechanistic interpretability"},
+        )
+        assert resp.status_code == 503
+        assert "Could not enqueue onboarding extraction" in resp.text
+
 
 class TestFilters:
     def _create_filter(self, client, name="My Filter"):
@@ -66,8 +89,8 @@ class TestFilters:
                 "name": name,
                 "definition": {
                     "name": name,
-                    "statement": "Test",
-                    "search": {"instructions": "Search", "outputMode": "warrants"},
+                    "description": "Test",
+                    "mode": "warrants",
                 },
             },
         )
@@ -119,6 +142,10 @@ class TestFilters:
 
 
 class TestSearchRuns:
+    @pytest.fixture(autouse=True)
+    def _mock_queue(self, monkeypatch):
+        monkeypatch.setattr("app.api.search.get_queue", lambda: NoopQueue())
+
     def _setup_filters(self, client):
         client.post(
             "/onboarding/complete",
@@ -128,8 +155,8 @@ class TestSearchRuns:
                         "name": "Test",
                         "definition": {
                             "name": "Test",
-                            "statement": "Test",
-                            "search": {"instructions": "Test", "outputMode": "warrants"},
+                            "description": "Test",
+                            "mode": "warrants",
                         },
                     }
                 ]
@@ -141,8 +168,28 @@ class TestSearchRuns:
         resp = client.post("/search-runs/daily")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] in ("queued", "running", "completed")
+        assert data["status"] == "queued"
+        assert data["stage"] == "queued"
+        assert data["progress_current"] == 0
+        assert data["progress_total"] == 1
+        assert "worker" in data["progress_message"]
         assert data["run_date"] is not None
+        assert data["candidate_count"] is None
+
+    def test_create_daily_run_fails_fast_when_queue_unavailable(self, client, monkeypatch):
+        self._setup_filters(client)
+
+        def broken_queue():
+            raise RuntimeError("redis unavailable")
+
+        monkeypatch.setattr("app.api.search.get_queue", broken_queue)
+        resp = client.post("/search-runs/daily")
+        assert resp.status_code == 503
+
+        latest = client.get("/search-runs/latest").json()
+        assert latest["status"] == "failed"
+        assert latest["stage"] == "failed"
+        assert "Could not enqueue daily search" in latest["error"]
 
     def test_list_search_runs(self, client):
         self._setup_filters(client)
@@ -185,8 +232,8 @@ class TestPapers:
                         "name": "Test",
                         "definition": {
                             "name": "Test",
-                            "statement": "Test",
-                            "search": {"instructions": "Test", "outputMode": "warrants"},
+                            "description": "Test",
+                            "mode": "warrants",
                         },
                     }
                 ]
@@ -204,47 +251,33 @@ class TestPapers:
         resp = client.get("/papers/nonexistent-id/idea-map")
         assert resp.status_code == 404
 
+    def test_create_idea_map_fails_fast_when_queue_unavailable(
+        self, client, db_session, monkeypatch
+    ):
+        from app.models.paper import Paper
 
-class TestFeedback:
-    def test_submit_feedback(self, client):
-        resp = client.post(
-            "/feedback",
-            json={
-                "target_type": "paper_match",
-                "target_id": str(uuid.uuid4()),
-                "value": "upvote",
-            },
+        paper = Paper(
+            id="paper-1",
+            arxiv_id="2605.00001",
+            title="Test Paper",
+            abstract="Test abstract.",
+            authors=["Author"],
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
         )
-        assert resp.status_code == 200
+        db_session.add(paper)
+        db_session.commit()
 
-    def test_not_interested_archives_filter(self, client):
-        create_resp = client.post(
-            "/filters",
-            json={
-                "name": "To Archive",
-                "definition": {
-                    "name": "To Archive",
-                    "statement": "Test",
-                    "search": {"instructions": "Test", "outputMode": "warrants"},
-                },
-            },
-        )
-        fid = create_resp.json()["id"]
-        resp = client.post(
-            "/feedback",
-            json={
-                "target_type": "filter",
-                "target_id": fid,
-                "value": "not_interested",
-            },
-        )
-        assert resp.status_code == 200
+        def broken_queue():
+            raise RuntimeError("redis unavailable")
 
-        filter_resp = client.get("/filters")
-        filters = filter_resp.json()
-        archived = [f for f in filters if f["id"] == fid]
-        assert len(archived) == 1
-        assert archived[0]["status"] == "archived"
+        monkeypatch.setattr("app.api.papers.get_queue", broken_queue)
+        resp = client.post("/papers/paper-1/idea-map")
+        assert resp.status_code == 503
+
+        idea_map = client.get("/papers/paper-1/idea-map").json()
+        assert idea_map["status"] == "failed"
+        assert "Could not enqueue idea map" in idea_map["error"]
 
 
 class TestDevReset:
@@ -258,8 +291,8 @@ class TestDevReset:
                         "name": "Test",
                         "definition": {
                             "name": "Test",
-                            "statement": "Test",
-                            "search": {"instructions": "Test", "outputMode": "warrants"},
+                            "description": "Test",
+                            "mode": "warrants",
                         },
                     }
                 ]

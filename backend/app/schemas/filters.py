@@ -1,18 +1,12 @@
 from pydantic import BaseModel
 from datetime import datetime
-from typing import Optional
-
-
-class FilterSearchConfig(BaseModel):
-    instructions: str
-    outputMode: str  # "warrants" | "answers" | "relevance"
+from typing import Literal, Optional
 
 
 class FilterDefinition(BaseModel):
     name: str
-    statement: str
-    description: Optional[str] = None
-    search: FilterSearchConfig
+    description: str
+    mode: Literal["warrants", "answers", "relevance"] = "relevance"
 
 
 class FilterCreate(BaseModel):

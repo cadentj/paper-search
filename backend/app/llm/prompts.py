@@ -3,9 +3,9 @@
 ONBOARDING_SYSTEM_PROMPT = """You are an expert research assistant. Given a researcher's description of their interests, hypotheses, and questions, you will generate targeted search filters.
 
 Each filter should be one of three types:
-- Claim filter (outputMode: "warrants"): Search for evidence supporting or refuting a specific proposition.
-- Question filter (outputMode: "answers"): Search for papers that answer or partially answer a research question.
-- Topic filter (outputMode: "relevance"): Search for papers relevant to a broad research topic.
+- Claim filter (mode: "warrants"): Search for evidence supporting or refuting a specific proposition.
+- Question filter (mode: "answers"): Search for papers that answer or partially answer a research question.
+- Topic filter (mode: "relevance"): Search for papers relevant to a broad research topic.
 
 Generate 2-4 warrant-search filters, 2-3 answer-search filters, and 1-3 relevance-search filters.
 Prefer fewer high-quality filters over a long list. Each filter should be specific enough to surface genuinely useful papers."""
@@ -17,8 +17,8 @@ ONBOARDING_USER_PROMPT = """Here are the researcher's interests and notes:
 Generate proposed search filters based on these interests. For each filter provide:
 - id: a unique string identifier
 - name: short descriptive name
-- rationale: why this filter would help the researcher
-- definition: object with name, statement, optional description, and search config (instructions + outputMode)"""
+- description: the claim, question, or topic to search for
+- mode: "warrants", "answers", or "relevance"."""
 
 ONBOARDING_SCHEMA = {
     "type": "object",
@@ -30,31 +30,13 @@ ONBOARDING_SCHEMA = {
                 "properties": {
                     "id": {"type": "string"},
                     "name": {"type": "string"},
-                    "rationale": {"type": "string"},
-                    "definition": {
-                        "type": "object",
-                        "properties": {
-                            "name": {"type": "string"},
-                            "statement": {"type": "string"},
-                            "description": {"type": "string"},
-                            "search": {
-                                "type": "object",
-                                "properties": {
-                                    "instructions": {"type": "string"},
-                                    "outputMode": {
-                                        "type": "string",
-                                        "enum": ["warrants", "answers", "relevance"],
-                                    },
-                                },
-                                "required": ["instructions", "outputMode"],
-                                "additionalProperties": False,
-                            },
-                        },
-                        "required": ["name", "statement", "description", "search"],
-                        "additionalProperties": False,
+                    "description": {"type": "string"},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["warrants", "answers", "relevance"],
                     },
                 },
-                "required": ["id", "name", "rationale", "definition"],
+                "required": ["id", "name", "description", "mode"],
                 "additionalProperties": False,
             },
         }
@@ -73,13 +55,12 @@ For each paper, determine:
 - matchedClaims: list of specific claims from the paper that relate to the filter
 - abstractEvidence: list of quoted evidence from the abstract
 
-Be selective. Most papers should be "irrelevant" unless they genuinely relate to the filter's statement and search instructions."""
+Be selective. Most papers should be "irrelevant" unless they genuinely relate to the filter's description and search behavior."""
 
 FILTER_SEARCH_USER_PROMPT = """Filter:
 Name: {filter_name}
-Statement: {filter_statement}
-Search Instructions: {filter_instructions}
-Output Mode: {output_mode}
+Description: {filter_description}
+Search Behavior: {filter_behavior}
 
 Papers to evaluate:
 {papers_text}

@@ -28,9 +28,9 @@ def db_engine(tmp_path):
     import app.models.paper
     import app.models.paper_html
     import app.models.search_run
+    import app.models.search_run_paper
     import app.models.paper_match
     import app.models.idea_map
-    import app.models.feedback
 
     Base.metadata.create_all(bind=engine)
     yield engine

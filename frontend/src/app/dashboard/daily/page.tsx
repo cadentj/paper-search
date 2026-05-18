@@ -2,25 +2,22 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Separator } from "@/components/ui/separator";
 import {
   useLatestSearchRun,
   useSearchRun,
   useSearchRunMatches,
   useCreateDailySearch,
-  useSubmitFeedback,
   useCreateFilter,
+  useArchiveFilter,
 } from "@/hooks/use-queries";
 import { Input } from "@/components/ui/input";
 import {
@@ -33,8 +30,6 @@ import {
 import {
   Loader2,
   Play,
-  ThumbsUp,
-  ThumbsDown,
   EyeOff,
   ExternalLink,
   ChevronDown,
@@ -55,11 +50,9 @@ export default function DailyPage() {
   const { data: latestRun } = useLatestSearchRun();
   const runId = latestRun?.id || null;
   const { data: run } = useSearchRun(runId);
-  const { data: matches, refetch: refetchMatches } = useSearchRunMatches(
-    run?.status === "completed" ? runId : null
-  );
+  const { data: matches } = useSearchRunMatches(runId, run?.status);
   const createSearch = useCreateDailySearch();
-  const feedback = useSubmitFeedback();
+  const archiveFilter = useArchiveFilter();
 
   const [expandedFilters, setExpandedFilters] = useState<Set<string>>(
     new Set()
@@ -70,26 +63,17 @@ export default function DailyPage() {
 
   const isRunning =
     run?.status === "queued" || run?.status === "running";
+  const progressTotal = Math.max(run?.progress_total ?? 1, 1);
+  const progressCurrent = Math.min(run?.progress_current ?? 0, progressTotal);
+  const progressPercent = Math.round((progressCurrent / progressTotal) * 100);
+  const progressLog = run?.progress_log ?? [];
 
   const handleRunSearch = async () => {
     await createSearch.mutateAsync();
   };
 
-  const handleNotInterested = async (matchId: string) => {
-    await feedback.mutateAsync({
-      target_type: "paper_match",
-      target_id: matchId,
-      value: "not_interested",
-    });
-    refetchMatches();
-  };
-
   const handleFilterNotInterested = async (filterId: string) => {
-    await feedback.mutateAsync({
-      target_type: "filter",
-      target_id: filterId,
-      value: "not_interested",
-    });
+    await archiveFilter.mutateAsync(filterId);
   };
 
   const matchesByFilter = (matches || []).reduce(
@@ -105,18 +89,13 @@ export default function DailyPage() {
   const handleQuickAddFilter = async () => {
     const text = quickFilterText.trim();
     if (!text) return;
-    const outputMode = quickFilterType === "claim" ? "warrants" as const : quickFilterType === "question" ? "answers" as const : "relevance" as const;
-    const instructions = quickFilterType === "claim"
-      ? "Search for evidence supporting or refuting this proposition."
-      : quickFilterType === "question"
-        ? "Search for papers that answer or partially answer this question."
-        : "Search for papers relevant to this topic.";
+    const mode = quickFilterType === "claim" ? "warrants" as const : quickFilterType === "question" ? "answers" as const : "relevance" as const;
     await createFilter.mutateAsync({
       name: text.slice(0, 60),
       definition: {
         name: text.slice(0, 60),
-        statement: text,
-        search: { instructions, outputMode },
+        description: text,
+        mode,
       },
     });
     setQuickFilterText("");
@@ -132,8 +111,7 @@ export default function DailyPage() {
   };
 
   return (
-    <AppShell>
-      <div className="flex-1 p-6 space-y-6 max-w-4xl">
+    <div className="flex-1 p-6 space-y-6 max-w-5xl">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Daily</h1>
@@ -194,12 +172,58 @@ export default function DailyPage() {
           </Button>
         </div>
 
-        {isRunning && (
-          <div className="space-y-3">
-            <Skeleton className="h-32 w-full" />
-            <Skeleton className="h-24 w-full" />
-            <Skeleton className="h-24 w-full" />
-          </div>
+        {(isRunning || createSearch.isPending) && (
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle className="text-lg">
+                  {run?.stage === "queued" ? "Daily Search Queued" : "Daily Search Running"}
+                </CardTitle>
+                <Badge variant="secondary">
+                  {run?.stage || "creating"}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+                  <span className="text-muted-foreground">
+                    {run?.progress_message || "Creating daily search..."}
+                  </span>
+                  <span className="font-medium tabular-nums">
+                    {progressPercent}%
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-primary transition-all"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+              </div>
+
+              {progressLog.length > 0 ? (
+                <div className="rounded-md border bg-muted/30 p-3">
+                  <div className="space-y-1.5">
+                    {progressLog.slice(-6).map((entry, i) => (
+                      <div
+                        key={`${entry.at}-${i}`}
+                        className="flex items-start gap-2 text-xs text-muted-foreground"
+                      >
+                        <span className="mt-1 size-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
+                        <span>{entry.message}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-2/3" />
+                  <Skeleton className="h-4 w-1/2" />
+                </div>
+              )}
+            </CardContent>
+          </Card>
         )}
 
         {run?.status === "completed" && run.summary && (
@@ -208,27 +232,36 @@ export default function DailyPage() {
               <CardTitle className="text-lg">Daily Summary</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="prose prose-sm max-w-none text-sm leading-relaxed whitespace-pre-line">
+              <div className="max-w-none text-base leading-7 text-foreground whitespace-pre-line">
                 {run.summary}
+                {run.summary_citations && run.summary_citations.length > 0 && (
+                  <span className="ml-2 inline-flex flex-wrap items-center gap-1.5 align-baseline">
+                    {run.summary_citations.map((c, i) => {
+                      const citationMatch = (matches || []).find(
+                        (match) =>
+                          match.id === c.paperMatchId ||
+                          match.paper_arxiv_id === c.arxivId
+                      );
+                      return (
+                        <button
+                          key={`${c.arxivId}-${i}`}
+                          type="button"
+                          onClick={() =>
+                            citationMatch &&
+                            router.push(`/dashboard/papers/${citationMatch.paper_id}`)
+                          }
+                          disabled={!citationMatch}
+                          title={c.citedFor}
+                          aria-label={`Open citation ${i + 1}: ${c.arxivId}`}
+                          className="inline-flex h-6 items-center rounded-md border border-border px-2 text-xs font-medium leading-none text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-default disabled:opacity-60"
+                        >
+                          [{i + 1}] {c.arxivId}
+                        </button>
+                      );
+                    })}
+                  </span>
+                )}
               </div>
-              {run.summary_citations && run.summary_citations.length > 0 && (
-                <div className="mt-4 pt-3 border-t">
-                  <p className="text-xs font-medium text-muted-foreground mb-2">
-                    Citations
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {run.summary_citations.map((c, i) => (
-                      <Badge
-                        key={i}
-                        variant="outline"
-                        className="text-xs cursor-pointer hover:bg-accent"
-                      >
-                        {c.arxivId}: {c.citedFor}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
             </CardContent>
           </Card>
         )}
@@ -243,7 +276,7 @@ export default function DailyPage() {
           </Card>
         )}
 
-        {run?.status === "completed" && Object.keys(matchesByFilter).length > 0 && (
+        {Object.keys(matchesByFilter).length > 0 && (
           <div className="space-y-4">
             <h2 className="text-lg font-semibold">Paper Matches</h2>
             {Object.entries(matchesByFilter).map(([filterId, group]) => (
@@ -253,6 +286,7 @@ export default function DailyPage() {
                     <button
                       className="flex items-center gap-2 text-left"
                       onClick={() => toggleFilter(filterId)}
+                      aria-expanded={expandedFilters.has(filterId)}
                     >
                       {expandedFilters.has(filterId) ? (
                         <ChevronDown className="size-4" />
@@ -271,13 +305,14 @@ export default function DailyPage() {
                       size="sm"
                       className="text-xs text-muted-foreground"
                       onClick={() => handleFilterNotInterested(filterId)}
+                      disabled={archiveFilter.isPending}
                     >
                       <EyeOff className="mr-1 size-3" />
                       Not Interested
                     </Button>
                   </div>
                 </CardHeader>
-                {(expandedFilters.has(filterId) || expandedFilters.size === 0) && (
+                {expandedFilters.has(filterId) && (
                   <CardContent className="space-y-3">
                     {group.matches.map((match) => (
                       <div
@@ -287,9 +322,9 @@ export default function DailyPage() {
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1">
                             <button
-                              className="text-sm font-medium hover:underline text-left"
+                              className="text-base font-medium hover:underline text-left"
                               onClick={() =>
-                                router.push(`/papers/${match.paper_id}`)
+                                router.push(`/dashboard/papers/${match.paper_id}`)
                               }
                             >
                               {match.paper_title}
@@ -315,51 +350,13 @@ export default function DailyPage() {
                               )}
                             </div>
                           </div>
-                          <div className="flex gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="size-7"
-                              onClick={() =>
-                                feedback.mutate({
-                                  target_type: "paper_match",
-                                  target_id: match.id,
-                                  value: "upvote",
-                                })
-                              }
-                            >
-                              <ThumbsUp className="size-3" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="size-7"
-                              onClick={() =>
-                                feedback.mutate({
-                                  target_type: "paper_match",
-                                  target_id: match.id,
-                                  value: "downvote",
-                                })
-                              }
-                            >
-                              <ThumbsDown className="size-3" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="size-7"
-                              onClick={() => handleNotInterested(match.id)}
-                            >
-                              <EyeOff className="size-3" />
-                            </Button>
-                          </div>
                         </div>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-sm text-muted-foreground">
                           {match.rationale}
                         </p>
                         {match.paper_authors &&
                           match.paper_authors.length > 0 && (
-                            <p className="text-xs text-muted-foreground">
+                            <p className="text-sm text-muted-foreground">
                               {match.paper_authors.join(", ")}
                             </p>
                           )}
@@ -407,7 +404,6 @@ export default function DailyPage() {
             </CardContent>
           </Card>
         )}
-      </div>
-    </AppShell>
+    </div>
   );
 }

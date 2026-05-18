@@ -1,14 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef, use } from "react";
-import { AppShell } from "@/components/app-shell";
+import { useState, useRef, use } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -53,6 +46,8 @@ export default function PaperDetailPage({
   const isIdeaMapLoading =
     ideaMap?.status === "queued" || ideaMap?.status === "running";
   const isIdeaMapComplete = ideaMap?.status === "completed";
+  const isIdeaMapEmpty =
+    isIdeaMapComplete && (!ideaMap.claims || ideaMap.claims.length === 0);
   const isIdeaMapSkipped = ideaMap?.status === "skipped";
 
   const toggleClaim = (claimId: string) => {
@@ -106,19 +101,15 @@ export default function PaperDetailPage({
       name,
       definition: {
         name,
-        statement: claimText,
-        search: {
-          instructions: "Search for evidence supporting or refuting this proposition.",
-          outputMode: "warrants",
-        },
+        description: claimText,
+        mode: "warrants",
       },
     });
     setClaimFilterText(null);
   };
 
   return (
-    <AppShell>
-      <div className="flex-1 flex flex-col h-screen">
+    <div className="flex-1 flex flex-col h-screen">
         <div className="flex items-center gap-3 p-4 border-b">
           <Button variant="ghost" size="sm" onClick={() => router.back()}>
             <ArrowLeft className="size-4" />
@@ -203,6 +194,24 @@ export default function PaperDetailPage({
                   </div>
                 )}
 
+                {isIdeaMapEmpty && (
+                  <div className="text-center py-8">
+                    <p className="text-sm text-muted-foreground">
+                      No valid cited claims were generated.
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="mt-2"
+                      onClick={handleGenerate}
+                      disabled={generateIdeaMap.isPending}
+                    >
+                      <Sparkles className="mr-1 size-3" />
+                      Regenerate
+                    </Button>
+                  </div>
+                )}
+
                 {!ideaMap && ideaMapError && (
                   <div className="text-center py-8">
                     <p className="text-sm text-muted-foreground">
@@ -222,6 +231,7 @@ export default function PaperDetailPage({
                 )}
 
                 {isIdeaMapComplete &&
+                  !isIdeaMapEmpty &&
                   ideaMap?.claims?.map((claim: IdeaMapClaim) => (
                     <div key={claim.id} className="border rounded-lg">
                       <button
@@ -335,7 +345,6 @@ export default function PaperDetailPage({
             )}
           </div>
         </div>
-      </div>
-    </AppShell>
+    </div>
   );
 }

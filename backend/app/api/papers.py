@@ -1,5 +1,5 @@
 import uuid
-import threading
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,6 +14,7 @@ from app.jobs.queue import get_queue
 from app.jobs.idea_map import generate_idea_map
 
 router = APIRouter(prefix="/papers", tags=["papers"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/{paper_id}", response_model=PaperResponse)
@@ -45,7 +46,19 @@ def create_or_get_idea_map(paper_id: str, db: Session = Depends(get_db)):
 
     existing = db.query(IdeaMap).filter(IdeaMap.paper_id == paper_id).first()
     if existing:
-        return existing
+        if existing.status in {"queued", "running"}:
+            return existing
+        if existing.status == "completed" and existing.claims:
+            return existing
+
+        existing.status = "queued"
+        existing.claims = []
+        existing.dropped_reason = None
+        existing.error = None
+        existing.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(existing)
+        return _enqueue_idea_map(existing, db)
 
     now = datetime.now(timezone.utc)
     idea_map = IdeaMap(
@@ -59,15 +72,21 @@ def create_or_get_idea_map(paper_id: str, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(idea_map)
 
+    return _enqueue_idea_map(idea_map, db)
+
+
+def _enqueue_idea_map(idea_map: IdeaMap, db: Session) -> IdeaMap:
     try:
         q = get_queue()
-        q.enqueue(generate_idea_map, idea_map.id)
-    except Exception:
-        threading.Thread(
-            target=generate_idea_map,
-            args=(idea_map.id,),
-            daemon=True,
-        ).start()
+        job = q.enqueue(generate_idea_map, idea_map.id)
+        logger.info("enqueued idea map=%s job=%s", idea_map.id, getattr(job, "id", None))
+    except Exception as exc:
+        logger.exception("failed to enqueue idea map=%s", idea_map.id)
+        idea_map.status = "failed"
+        idea_map.error = f"Could not enqueue idea map generation: {exc}"
+        idea_map.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        raise HTTPException(status_code=503, detail=idea_map.error) from exc
 
     return idea_map
 

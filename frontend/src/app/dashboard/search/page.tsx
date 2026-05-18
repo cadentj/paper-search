@@ -1,8 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { AppShell } from "@/components/app-shell";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -36,8 +34,7 @@ export default function SearchPage() {
   };
 
   return (
-    <AppShell>
-      <div className="flex-1 p-6 space-y-6 max-w-4xl">
+    <div className="flex-1 p-6 space-y-6 max-w-4xl">
         <h1 className="text-2xl font-bold tracking-tight">Search History</h1>
 
         {isLoading && (
@@ -171,7 +168,6 @@ export default function SearchPage() {
             </Card>
           ))}
         </div>
-      </div>
-    </AppShell>
+    </div>
   );
 }

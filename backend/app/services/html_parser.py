@@ -1,7 +1,6 @@
 """Parse arXiv HTML into addressable blocks for idea map generation."""
 
-import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from bs4 import BeautifulSoup, Tag
 
@@ -62,6 +61,11 @@ def parse_arxiv_html(html: str) -> list[HtmlBlock]:
 
 def validate_citation(blocks: list[HtmlBlock], citation: dict) -> bool:
     """Validate a warrant citation against parsed blocks."""
+    return citation_validation_diagnostics(blocks, citation)["valid"]
+
+
+def citation_validation_diagnostics(blocks: list[HtmlBlock], citation: dict) -> dict:
+    """Return validation status plus concise diagnostics for logging."""
     block_id = citation.get("blockId", "")
     quote = citation.get("quote", "")
     prefix = citation.get("prefix", "")
@@ -70,19 +74,72 @@ def validate_citation(blocks: list[HtmlBlock], citation: dict) -> bool:
     block_map = {b.block_id: b for b in blocks}
     block = block_map.get(block_id)
     if not block:
-        return False
+        return {
+            "valid": False,
+            "reason": "block_id_not_found" if block_id else "missing_block_id",
+            "blockId": block_id,
+            "quote": _preview(quote),
+            "prefix": _preview(prefix),
+            "suffix": _preview(suffix),
+            "htmlAnchor": citation.get("htmlAnchor", ""),
+            "availableBlockCount": len(blocks),
+        }
 
     if quote and quote in block.text:
-        return True
+        return {
+            "valid": True,
+            "reason": "quote_exact_match",
+            "blockId": block_id,
+        }
 
     if prefix and suffix:
         if prefix in block.text and suffix in block.text:
             p_idx = block.text.find(prefix)
             s_idx = block.text.find(suffix)
             if p_idx < s_idx:
-                return True
+                return {
+                    "valid": True,
+                    "reason": "prefix_suffix_ordered_match",
+                    "blockId": block_id,
+                }
 
-    return False
+    return {
+        "valid": False,
+        "reason": _citation_failure_reason(block.text, quote, prefix, suffix),
+        "blockId": block_id,
+        "quote": _preview(quote),
+        "prefix": _preview(prefix),
+        "suffix": _preview(suffix),
+        "htmlAnchor": citation.get("htmlAnchor", ""),
+        "blockTag": block.tag,
+        "blockSectionTitle": _preview(block.section_title),
+        "blockTextPreview": _preview(block.text),
+    }
+
+
+def _citation_failure_reason(block_text: str, quote: str, prefix: str, suffix: str) -> str:
+    if quote:
+        return "quote_not_found_in_block"
+    if prefix or suffix:
+        if not prefix:
+            return "missing_prefix"
+        if not suffix:
+            return "missing_suffix"
+        if prefix not in block_text and suffix not in block_text:
+            return "prefix_and_suffix_not_found_in_block"
+        if prefix not in block_text:
+            return "prefix_not_found_in_block"
+        if suffix not in block_text:
+            return "suffix_not_found_in_block"
+        return "prefix_not_before_suffix"
+    return "missing_quote_or_prefix_suffix"
+
+
+def _preview(value: object, limit: int = 400) -> str:
+    text = str(value or "")
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}..."
 
 
 def blocks_to_prompt_text(blocks: list[HtmlBlock], max_blocks: int = 200) -> str:

@@ -83,15 +83,8 @@ describe("OnboardingPage", () => {
       {
         id: "f1",
         name: "LLM Reasoning",
-        rationale: "Tracks reasoning research",
-        definition: {
-          name: "LLM Reasoning",
-          statement: "LLMs can reason",
-          search: {
-            instructions: "Search for reasoning evidence",
-            outputMode: "warrants" as const,
-          },
-        },
+        description: "LLMs can reason",
+        mode: "warrants" as const,
       },
     ];
 
@@ -116,6 +109,41 @@ describe("OnboardingPage", () => {
 
     await waitFor(() => {
       expect(screen.getByText("LLM Reasoning")).toBeInTheDocument();
+    });
+  });
+
+  it("renders proposed filters while extraction is still running", async () => {
+    const proposedFilters = [
+      {
+        id: "f1",
+        name: "Streaming Filter",
+        description: "A filter that arrived before completion",
+        mode: "relevance" as const,
+      },
+    ];
+
+    mockApi.createOnboardingExtraction.mockResolvedValue({
+      id: "ext-1",
+      status: "running",
+      input_text: "test",
+      proposed_filters: proposedFilters,
+    });
+    mockApi.getOnboardingExtraction.mockResolvedValue({
+      id: "ext-1",
+      status: "running",
+      input_text: "test",
+      proposed_filters: proposedFilters,
+    });
+
+    renderWithProviders(<OnboardingPage />);
+
+    const textarea = screen.getByPlaceholderText(/mechanistic interpretability/i);
+    fireEvent.change(textarea, { target: { value: "test" } });
+    fireEvent.click(screen.getByRole("button", { name: /generate search filters/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Streaming Filter")).toBeInTheDocument();
+      expect(screen.getByText(/filters will appear here/i)).toBeInTheDocument();
     });
   });
 });

@@ -164,9 +164,8 @@ Keep local data persistently unless the user uses the dev reset control.
 - Daily search runs persist as history.
 - Paper matches persist as historical results.
 - Idea maps persist and are reused.
-- Feedback persists and controls hiding/archiving behavior.
 
-Paper matches are not deleted when the user clicks Not Interested. A feedback row hides them from default Daily views.
+Paper matches are historical results and are not hidden by per-match controls in v1.
 
 ### Idea Maps
 
@@ -308,6 +307,11 @@ search_runs (
   match_count integer,
   summary text,
   summary_citations json not null default '[]',
+  stage text not null default 'queued',
+  progress_current integer not null default 0,
+  progress_total integer not null default 1,
+  progress_message text not null default 'Queued',
+  progress_log json not null default '[]',
 
   started_at datetime,
   completed_at datetime,
@@ -356,7 +360,7 @@ Expected stance values:
 - `relevant`
 - `irrelevant`
 
-The API should usually hide irrelevant matches and matches with `not_interested` feedback.
+The API should hide irrelevant matches by default.
 
 ### `idea_maps`
 
@@ -423,39 +427,6 @@ Citation validation:
 - Verify the quote exists in the block text, or prefix/suffix identify a valid span.
 - Drop invalid warrants or run one repair pass.
 - Store only validated citations.
-
-### `feedback`
-
-```sql
-feedback (
-  id text primary key,
-  target_type text not null,
-  target_id text not null,
-
-  value text not null,
-  note text,
-  created_at datetime not null
-)
-```
-
-Allowed `target_type` values:
-
-- `filter`
-- `paper_match`
-- `idea_map_claim`
-- `idea_map_warrant`
-
-Allowed `value` values:
-
-- `upvote`
-- `downvote`
-- `not_interested`
-
-Feedback behavior:
-
-- `not_interested` on a filter archives the filter.
-- `not_interested` on a paper match hides the match from default Daily and Search views.
-- `upvote` and `downvote` are stored for future prompt tuning but do not change behavior in v1.
 
 ## LLM Contracts
 
@@ -553,9 +524,9 @@ POST /dev/reset-onboarding
 Reset behavior:
 
 1. Delete onboarding extractions.
-2. Delete feedback.
-3. Delete idea maps.
-4. Delete paper matches.
+2. Delete idea maps.
+3. Delete paper matches.
+4. Delete search run paper associations.
 5. Delete search runs.
 6. Delete filters.
 7. Keep papers and `paper_html` by default.
@@ -587,8 +558,9 @@ GET /search-runs/{search_run_id}/matches
 `POST /search-runs/daily` flow:
 
 1. Create `search_runs` row with `queued` status and today's `run_date`.
-2. Load daily mock paper batch and upsert papers.
-3. Enqueue `run_daily_search`.
+2. Enqueue `run_daily_search` into Redis/RQ.
+3. Return immediately with queued progress state.
+4. If enqueue fails, mark the run failed and return HTTP 503.
 
 `GET /search-runs` powers the Search history page.
 
@@ -606,14 +578,6 @@ GET /papers/{paper_id}/idea-map
 2. Return existing queued/running/skipped idea map if present.
 3. Otherwise create `idea_maps` row and enqueue `generate_idea_map`.
 
-### Feedback
-
-```http
-POST /feedback
-```
-
-This records feedback. For `not_interested` on filters, the API should also archive the filter.
-
 ## Worker Jobs
 
 ### `extract_onboarding_filters(extraction_id)`
@@ -621,22 +585,22 @@ This records feedback. For `not_interested` on filters, the API should also arch
 1. Mark extraction `running`.
 2. Load raw onboarding text.
 3. Ask the model for proposed filters using default templates and structured output.
-4. In demo mode without `OPENROUTER_API_KEY`, return deterministic proposals with the same shape.
-5. Persist `proposed_filters`.
-6. Mark extraction `completed`.
-7. On failure, mark `failed` and store the error.
+4. Persist `proposed_filters`.
+5. Mark extraction `completed`.
+6. On failure, mark `failed` and store the error.
 
 ### `run_daily_search(search_run_id)`
 
 1. Mark run `running`.
-2. Load active filters.
-3. Load the daily paper batch.
-4. For each active filter, search all abstracts using `filter.definition.search`.
-5. Persist `paper_matches`.
-6. Generate a concise Daily summary over visible surfaced matches.
-7. Persist summary, citations, `candidate_count`, and `match_count`.
-8. Mark run `completed`.
-9. On failure, mark `failed` and store the error.
+2. Fetch the latest arXiv batch, upsert papers, and persist the run's candidate papers.
+3. Update persisted progress and logs after each major stage.
+4. Load active filters.
+5. For each active filter, search all abstracts using `filter.definition.search`.
+6. Persist `paper_matches`.
+7. Generate a concise Daily summary over visible surfaced matches.
+8. Persist summary, citations, `candidate_count`, and `match_count`.
+9. Mark run `completed`.
+10. On failure, mark `failed`, store the error, and update progress.
 
 ### `generate_idea_map(idea_map_id)`
 
@@ -678,7 +642,6 @@ api.getSearchRunMatches(id)
 api.getPaper(id)
 api.getPaperIdeaMap(paperId)
 api.generatePaperIdeaMap(paperId)
-api.submitFeedback(input)
 ```
 
 Recommended query keys:
@@ -761,9 +724,7 @@ Content:
 Interactions:
 
 - Open paper detail.
-- Not Interested on a paper match hides that match by feedback.
 - Not Interested on a filter group archives that filter.
-- Feedback controls on matches.
 
 ### Search Page
 
@@ -834,8 +795,8 @@ Tests should act as executable acceptance criteria for a cloud agent implementin
   - Active filters are run.
   - Archived filters are not run.
   - Archived filters can be restored.
-- Mock paper provider:
-  - Returns deterministic records.
+- arXiv provider:
+  - Parses arXiv Atom records.
   - Records include stable arXiv ids, abstracts, authors, dates, and HTML URLs.
 - HTML parser:
   - Parses sample arXiv-like HTML into addressable blocks.
@@ -859,11 +820,8 @@ Tests should act as executable acceptance criteria for a cloud agent implementin
 - Filter CRUD supports create, update, archive, restore, and list.
 - `POST /search-runs/daily` creates a queued daily run using current active filters.
 - Archived filters are not used in daily runs.
-- `not_interested` feedback on a filter archives it.
-- `not_interested` feedback on a paper match hides it from default results.
 - `GET /search-runs` returns daily search history.
 - `POST /papers/{id}/idea-map` is idempotent for queued/running/completed/skipped maps.
-- `POST /feedback` records feedback against paper matches and idea-map claims/warrants.
 
 ### Worker Tests
 
@@ -924,7 +882,7 @@ Assert schema shape and minimal semantic behavior, not exact wording.
 4. Add database session handling.
 5. Add onboarding endpoints.
 6. Add filter CRUD/archive/restore endpoints.
-7. Add deterministic daily mock paper provider.
+7. Add real arXiv daily paper provider.
 8. Add daily search run endpoints.
 9. Add dev reset endpoint.
 
@@ -956,7 +914,7 @@ Assert schema shape and minimal semantic behavior, not exact wording.
 3. Polish cited summary display.
 4. Polish Search history display.
 5. Polish idea-map expansion and HTML jump behavior.
-6. Add feedback and Not Interested controls.
+6. Add filter archive controls.
 7. Add README instructions.
 
 ### Phase 6: Tests
@@ -970,7 +928,6 @@ Assert schema shape and minimal semantic behavior, not exact wording.
 
 ## Out of Scope for V1
 
-- Real arXiv ingestion for the daily paper batch.
 - Custom searches from the Search page.
 - Date-range search.
 - Search over selected filter subsets.
@@ -979,7 +936,6 @@ Assert schema shape and minimal semantic behavior, not exact wording.
 - Auth.
 - Multi-user support.
 - Scheduled daily jobs.
-- Prompt self-rewriting from feedback.
 - Citation graph visualization.
 
 ## Environment Variables

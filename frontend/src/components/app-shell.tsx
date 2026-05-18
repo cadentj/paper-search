@@ -25,9 +25,9 @@ import { useResetOnboarding } from "@/hooks/use-queries";
 import { type ReactNode } from "react";
 
 const NAV_ITEMS = [
-  { label: "Daily", href: "/daily", icon: Newspaper },
-  { label: "Search", href: "/search", icon: Search },
-  { label: "Filters", href: "/filters", icon: Filter },
+  { label: "Daily", href: "/dashboard/daily", icon: Newspaper },
+  { label: "Search", href: "/dashboard/search", icon: Search },
+  { label: "Filters", href: "/dashboard/filters", icon: Filter },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {

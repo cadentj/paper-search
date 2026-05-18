@@ -12,7 +12,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   useCreateExtraction,
@@ -38,6 +37,7 @@ export default function OnboardingPage() {
   const isExtracting =
     extraction?.status === "queued" || extraction?.status === "running";
   const isComplete = extraction?.status === "completed";
+  const proposedFilters = extraction?.proposed_filters || [];
 
   const handleSubmit = async () => {
     if (!inputText.trim()) return;
@@ -47,8 +47,12 @@ export default function OnboardingPage() {
     setExtractionId(result.id);
   };
 
-  if (isComplete && editedFilters.length === 0 && extraction?.proposed_filters) {
-    setEditedFilters([...extraction.proposed_filters]);
+  if (proposedFilters.length > editedFilters.length) {
+    setEditedFilters((prev) => {
+      const existingIds = new Set(prev.map((f) => f.id));
+      const additions = proposedFilters.filter((f) => !existingIds.has(f.id));
+      return additions.length ? [...prev, ...additions] : prev;
+    });
   }
 
   const handleRemoveFilter = (idx: number) => {
@@ -59,11 +63,15 @@ export default function OnboardingPage() {
     if (editedFilters.length === 0) return;
     await completeOnboarding.mutateAsync(
       editedFilters.map((f) => ({
-        name: f.definition.name,
-        definition: f.definition,
+        name: f.name,
+        definition: {
+          name: f.name,
+          description: f.description,
+          mode: f.mode || "relevance",
+        },
       }))
     );
-    router.push("/daily");
+    router.push("/dashboard/daily");
   };
 
   const handleReset = async () => {
@@ -130,7 +138,7 @@ export default function OnboardingPage() {
           </Card>
         )}
 
-        {isExtracting && (
+        {isExtracting && editedFilters.length === 0 && (
           <div className="space-y-3">
             {[1, 2, 3].map((i) => (
               <Skeleton key={i} className="h-24 w-full rounded-lg" />
@@ -138,14 +146,16 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {isComplete && editedFilters.length > 0 && (
+        {(isComplete || editedFilters.length > 0) && (
           <>
             <div className="space-y-2">
               <h2 className="text-lg font-semibold">
                 Proposed Filters ({editedFilters.length})
               </h2>
               <p className="text-sm text-muted-foreground">
-                Review, edit, or remove filters before completing setup.
+                {isExtracting
+                  ? "Filters will appear here as they are generated."
+                  : "Review, edit, or remove filters before completing setup."}
               </p>
             </div>
 
@@ -156,55 +166,29 @@ export default function OnboardingPage() {
                     {editingIdx === idx ? (
                       <div className="space-y-3">
                         <Input
-                          value={f.definition.name}
+                          value={f.name}
                           onChange={(e) => {
                             const updated = [...editedFilters];
                             updated[idx] = {
                               ...f,
                               name: e.target.value,
-                              definition: {
-                                ...f.definition,
-                                name: e.target.value,
-                              },
                             };
                             setEditedFilters(updated);
                           }}
                           placeholder="Filter name"
                         />
                         <Textarea
-                          value={f.definition.statement}
+                          value={f.description}
                           onChange={(e) => {
                             const updated = [...editedFilters];
                             updated[idx] = {
                               ...f,
-                              definition: {
-                                ...f.definition,
-                                statement: e.target.value,
-                              },
+                              description: e.target.value,
                             };
                             setEditedFilters(updated);
                           }}
-                          placeholder="Statement"
-                          rows={2}
-                        />
-                        <Textarea
-                          value={f.definition.search.instructions}
-                          onChange={(e) => {
-                            const updated = [...editedFilters];
-                            updated[idx] = {
-                              ...f,
-                              definition: {
-                                ...f.definition,
-                                search: {
-                                  ...f.definition.search,
-                                  instructions: e.target.value,
-                                },
-                              },
-                            };
-                            setEditedFilters(updated);
-                          }}
-                          placeholder="Search instructions"
-                          rows={2}
+                          placeholder="Description"
+                          rows={3}
                         />
                         <Button
                           size="sm"
@@ -216,17 +200,9 @@ export default function OnboardingPage() {
                     ) : (
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 space-y-1">
-                          <div className="flex items-center gap-2">
-                            <p className="font-medium">{f.definition.name}</p>
-                            <Badge variant="secondary">
-                              {f.definition.search.outputMode}
-                            </Badge>
-                          </div>
+                          <p className="font-medium">{f.name}</p>
                           <p className="text-sm text-muted-foreground">
-                            {f.definition.statement}
-                          </p>
-                          <p className="text-xs text-muted-foreground italic">
-                            {f.rationale}
+                            {f.description}
                           </p>
                         </div>
                         <div className="flex gap-1">
@@ -257,7 +233,7 @@ export default function OnboardingPage() {
             <div className="flex gap-2">
               <Button
                 onClick={handleComplete}
-                disabled={completeOnboarding.isPending}
+                disabled={isExtracting || completeOnboarding.isPending}
                 className="flex-1"
               >
                 {completeOnboarding.isPending ? (

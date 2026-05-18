@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, FeedbackCreate, FilterDefinition } from "@/lib/api";
+import { api, FilterDefinition } from "@/lib/api";
 
 // Onboarding
 export function useOnboardingStatus() {
@@ -120,6 +120,11 @@ export function useLatestSearchRun() {
   return useQuery({
     queryKey: ["search-runs", "latest"],
     queryFn: api.getLatestSearchRun,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      if (status === "queued" || status === "running") return 1000;
+      return false;
+    },
   });
 }
 
@@ -136,11 +141,18 @@ export function useSearchRun(id: string | null) {
   });
 }
 
-export function useSearchRunMatches(id: string | null) {
+export function useSearchRunMatches(
+  id: string | null,
+  status?: string | null
+) {
   return useQuery({
     queryKey: ["search-runs", id, "matches"],
     queryFn: () => api.getSearchRunMatches(id!),
     enabled: !!id,
+    refetchInterval: () => {
+      if (status === "queued" || status === "running") return 2000;
+      return false;
+    },
   });
 }
 
@@ -150,6 +162,7 @@ export function useCreateDailySearch() {
     mutationFn: api.createDailySearchRun,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["search-runs"] });
+      qc.invalidateQueries({ queryKey: ["search-runs", "latest"] });
     },
   });
 }
@@ -193,18 +206,6 @@ export function useGenerateIdeaMap() {
       qc.invalidateQueries({
         queryKey: ["papers", data.paper_id, "idea-map"],
       });
-    },
-  });
-}
-
-// Feedback
-export function useSubmitFeedback() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: FeedbackCreate) => api.submitFeedback(input),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["search-runs"] });
-      qc.invalidateQueries({ queryKey: ["filters"] });
     },
   });
 }

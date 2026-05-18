@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import SearchPage from "@/app/search/page";
+import SearchPage from "@/app/dashboard/search/page";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), back: vi.fn(), replace: vi.fn() }),
-  usePathname: () => "/search",
+  usePathname: () => "/dashboard/search",
 }));
 
 const mockApi = vi.hoisted(() => ({

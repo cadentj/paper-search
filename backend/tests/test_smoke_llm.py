@@ -36,10 +36,10 @@ class TestOnboardingExtraction:
         filters = content["proposedFilters"]
         assert len(filters) >= 1
         f = filters[0]
+        assert "id" in f
         assert "name" in f
-        assert "definition" in f
-        assert "search" in f["definition"]
-        assert f["definition"]["search"]["outputMode"] in ("warrants", "answers", "relevance")
+        assert "description" in f
+        assert f["mode"] in ("warrants", "answers", "relevance")
 
 
 class TestFilterSearch:
@@ -59,9 +59,8 @@ class TestFilterSearch:
         )
         user_prompt = FILTER_SEARCH_USER_PROMPT.format(
             filter_name="LLM reasoning",
-            filter_statement="Large language models can perform multi-step reasoning",
-            filter_instructions="Search for evidence supporting or refuting this proposition.",
-            output_mode="warrants",
+            filter_description="Large language models can perform multi-step reasoning",
+            filter_behavior="Look for evidence that supports, refutes, or complicates the described claim.",
             papers_text=papers_text,
         )
         result = call_llm(

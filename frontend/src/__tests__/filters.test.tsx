@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import FiltersPage from "@/app/filters/page";
+import FiltersPage from "@/app/dashboard/filters/page";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), back: vi.fn(), replace: vi.fn() }),
-  usePathname: () => "/filters",
+  usePathname: () => "/dashboard/filters",
 }));
 
 const mockApi = vi.hoisted(() => ({
@@ -46,8 +46,8 @@ describe("FiltersPage", () => {
         status: "active",
         definition: {
           name: "Active Filter",
-          statement: "Test statement",
-          search: { instructions: "Search", outputMode: "warrants" },
+          description: "Test statement",
+          mode: "warrants",
         },
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
@@ -58,8 +58,8 @@ describe("FiltersPage", () => {
         status: "archived",
         definition: {
           name: "Archived Filter",
-          statement: "Old statement",
-          search: { instructions: "Search", outputMode: "relevance" },
+          description: "Old statement",
+          mode: "relevance",
         },
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",

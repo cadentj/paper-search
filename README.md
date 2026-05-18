@@ -7,7 +7,7 @@ A single-user research paper filtering system that helps researchers keep up wit
 - **Backend**: FastAPI, SQLAlchemy, SQLite, Redis, RQ workers
 - **Frontend**: Next.js (App Router), React Query, Tailwind CSS, shadcn/ui
 - **LLM**: OpenRouter (deepseek/deepseek-v4-flash via novita)
-- **Runtime**: Docker Compose (Redis), local backend + frontend
+- **Runtime**: Docker Redis, local FastAPI backend, local RQ worker, local frontend
 
 ## Quick Start
 
@@ -16,22 +16,23 @@ A single-user research paper filtering system that helps researchers keep up wit
 - Python 3.12+
 - Node.js 18+ and pnpm
 - Docker & Docker Compose (for Redis)
-- An OpenRouter API key (optional — demo mode works without one)
+- An OpenRouter API key
 
 ### 1. Environment Setup
 
 ```bash
 cp .env.example .env
-# Edit .env and set OPENROUTER_API_KEY if you have one
+# Edit .env and set OPENROUTER_API_KEY
 ```
 
 ### 2. Start Redis
 
 ```bash
-docker compose up -d
+docker compose up -d redis
 ```
 
-This starts Redis on port 6379. If Redis is not available, jobs run in background threads automatically.
+This starts Redis on port 6379. Daily searches, onboarding extraction, and
+idea-map generation do not run inside the FastAPI process.
 
 ### 3. Start Backend
 
@@ -44,7 +45,19 @@ uvicorn app.main:app --reload --port 8000
 
 The API runs at http://localhost:8000 with hot-reload enabled.
 
-### 4. Start Frontend
+### 4. Start Worker
+
+Start the worker in a separate terminal:
+
+```bash
+cd backend
+REDIS_URL=redis://localhost:6379/0 uv run python -m app.worker
+```
+
+The development worker uses RQ's non-forking `SimpleWorker`, which avoids
+macOS Objective-C fork crashes and keeps logs in the worker terminal.
+
+### 5. Start Frontend
 
 ```bash
 cd frontend
@@ -54,7 +67,10 @@ pnpm dev
 
 Frontend runs at http://localhost:3000 and connects to the API at http://localhost:8000.
 
-### 5. Use the App
+Make sure the backend process has `REDIS_URL=redis://localhost:6379/0` when
+running outside Docker. Inside Docker, use `redis://redis:6379/0`.
+
+### 6. Use the App
 
 1. Open http://localhost:3000
 2. Complete onboarding by entering your research interests
@@ -98,7 +114,7 @@ pnpm test
 │   │   ├── llm/          # OpenRouter client & prompts
 │   │   ├── models/       # SQLAlchemy models
 │   │   ├── schemas/      # Pydantic schemas
-│   │   └── services/     # Mock papers, HTML parser
+│   │   └── services/     # arXiv fetch, HTML parser
 │   ├── tests/            # Backend tests
 │   ├── alembic/          # Database migrations
 │   ├── pyproject.toml
@@ -139,16 +155,17 @@ pnpm test
 | GET | /papers/{id}/html | Get cached paper HTML |
 | POST | /papers/{id}/idea-map | Generate idea map |
 | GET | /papers/{id}/idea-map | Get idea map |
-| POST | /feedback | Submit feedback |
 | POST | /dev/reset-onboarding | Reset all data (dev only) |
 
-## Demo Mode
+## LLM Behavior
 
-When `OPENROUTER_API_KEY` is not set, the app runs in demo mode:
-- Onboarding returns pre-built proposed filters
-- Daily search returns deterministic mock matches and summaries
-- Idea map generation is skipped (no real arXiv HTML to parse)
+Daily search requires `OPENROUTER_API_KEY`. Without it, search runs fail with a clear configuration error rather than returning mock matches.
 
 ## Dev Reset
 
-In development mode (`APP_ENV=development`), use the reset button in the sidebar footer to clear all onboarding, filters, search runs, matches, and feedback data.
+In development mode (`APP_ENV=development`), use the reset button in the sidebar footer to clear onboarding, filters, search runs, and matches.
+
+
+I’m interested in recent machine learning papers about improving factuality and reasoning in language models. I want to track work on retrieval-augmented generation, long-context evaluation, hallucination
+detection, verification, self-correction, and benchmark design. I’m especially interested in practical methods that improve answer quality or reliability, and less interested in papers focused only on scaling laws
+or hardware optimization.

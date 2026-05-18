@@ -15,19 +15,15 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
 // Types
 export interface FilterDefinition {
   name: string;
-  statement: string;
-  description?: string;
-  search: {
-    instructions: string;
-    outputMode: "warrants" | "answers" | "relevance";
-  };
+  description: string;
+  mode?: "warrants" | "answers" | "relevance";
 }
 
 export interface ProposedFilter {
   id: string;
   name: string;
-  rationale: string;
-  definition: FilterDefinition;
+  description: string;
+  mode?: "warrants" | "answers" | "relevance";
 }
 
 export interface FilterResponse {
@@ -64,10 +60,21 @@ export interface SearchRun {
   match_count?: number;
   summary?: string;
   summary_citations: SummaryCitation[];
+  stage: string;
+  progress_current: number;
+  progress_total: number;
+  progress_message: string;
+  progress_log: ProgressLogEntry[];
   started_at?: string;
   completed_at?: string;
   error?: string;
   created_at: string;
+}
+
+export interface ProgressLogEntry {
+  at: string;
+  stage: string;
+  message: string;
 }
 
 export interface SummaryCitation {
@@ -141,13 +148,6 @@ export interface IdeaMap {
   updated_at: string;
 }
 
-export interface FeedbackCreate {
-  target_type: "filter" | "paper_match" | "idea_map_claim" | "idea_map_warrant";
-  target_id: string;
-  value: "upvote" | "downvote" | "not_interested";
-  note?: string;
-}
-
 // API functions
 export const api = {
   // Health
@@ -208,10 +208,4 @@ export const api = {
   getPaperIdeaMap: (paperId: string) =>
     fetchApi<IdeaMap>(`/papers/${paperId}/idea-map`),
 
-  // Feedback
-  submitFeedback: (input: FeedbackCreate) =>
-    fetchApi<{ id: string }>("/feedback", {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
 };

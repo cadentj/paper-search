@@ -1,9 +1,9 @@
 import uuid
-import threading
+import logging
 from datetime import datetime, date, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -11,13 +11,12 @@ from app.models.filter import Filter
 from app.models.paper import Paper
 from app.models.paper_match import PaperMatch
 from app.models.search_run import SearchRun
-from app.models.feedback import Feedback
 from app.schemas.search import SearchRunResponse, PaperMatchResponse
-from app.services.mock_papers import get_daily_papers
 from app.jobs.queue import get_queue
 from app.jobs.daily_search import run_daily_search
 
 router = APIRouter(prefix="/search-runs", tags=["search"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("", response_model=list[SearchRunResponse])
@@ -38,51 +37,44 @@ def create_daily_search_run(db: Session = Depends(get_db)):
     run = SearchRun(
         id=str(uuid.uuid4()),
         status="queued",
+        stage="queued",
         run_date=date.today(),
+        progress_current=0,
+        progress_total=1,
+        progress_message="Queued, waiting for worker",
+        progress_log=[
+            {
+                "at": now.isoformat(),
+                "stage": "queued",
+                "message": "Queued, waiting for worker",
+            }
+        ],
         created_at=now,
     )
     db.add(run)
-
-    daily_papers = get_daily_papers()
-    for p_data in daily_papers:
-        existing = db.query(Paper).filter(Paper.arxiv_id == p_data["arxiv_id"]).first()
-        if existing:
-            existing.title = p_data["title"]
-            existing.abstract = p_data["abstract"]
-            existing.authors = p_data["authors"]
-            existing.categories = p_data.get("categories")
-            existing.published_at = p_data.get("published_at")
-            existing.html_url = p_data.get("html_url")
-            existing.landing_url = p_data.get("landing_url")
-            existing.updated_at = now
-        else:
-            paper = Paper(
-                id=str(uuid.uuid4()),
-                arxiv_id=p_data["arxiv_id"],
-                title=p_data["title"],
-                abstract=p_data["abstract"],
-                authors=p_data["authors"],
-                categories=p_data.get("categories"),
-                published_at=p_data.get("published_at"),
-                html_url=p_data.get("html_url"),
-                landing_url=p_data.get("landing_url"),
-                created_at=now,
-                updated_at=now,
-            )
-            db.add(paper)
-
     db.commit()
     db.refresh(run)
 
     try:
         q = get_queue()
-        q.enqueue(run_daily_search, run.id)
-    except Exception:
-        threading.Thread(
-            target=run_daily_search,
-            args=(run.id,),
-            daemon=True,
-        ).start()
+        job = q.enqueue(run_daily_search, run.id)
+        logger.info("enqueued daily search run=%s job=%s", run.id, getattr(job, "id", None))
+    except Exception as exc:
+        logger.exception("failed to enqueue daily search run=%s", run.id)
+        run.status = "failed"
+        run.stage = "failed"
+        run.error = f"Could not enqueue daily search: {exc}"
+        run.progress_message = "Could not enqueue daily search. Is Redis running?"
+        run.progress_log = list(run.progress_log or []) + [
+            {
+                "at": datetime.now(timezone.utc).isoformat(),
+                "stage": "failed",
+                "message": run.progress_message,
+            }
+        ]
+        run.completed_at = datetime.now(timezone.utc)
+        db.commit()
+        raise HTTPException(status_code=503, detail=run.error) from exc
 
     return run
 
@@ -98,7 +90,6 @@ def get_search_run(search_run_id: str, db: Session = Depends(get_db)):
 @router.get("/{search_run_id}/matches", response_model=list[PaperMatchResponse])
 def get_search_run_matches(
     search_run_id: str,
-    include_hidden: bool = Query(False),
     db: Session = Depends(get_db),
 ):
     run = db.query(SearchRun).filter(SearchRun.id == search_run_id).first()
@@ -108,15 +99,6 @@ def get_search_run_matches(
     matches = db.query(PaperMatch).filter(
         PaperMatch.search_run_id == search_run_id
     ).all()
-
-    if not include_hidden:
-        hidden_ids = set()
-        feedbacks = db.query(Feedback).filter(
-            Feedback.target_type == "paper_match",
-            Feedback.value == "not_interested",
-        ).all()
-        hidden_ids = {f.target_id for f in feedbacks}
-        matches = [m for m in matches if m.id not in hidden_ids]
 
     matches = [m for m in matches if m.stance != "irrelevant"]
 

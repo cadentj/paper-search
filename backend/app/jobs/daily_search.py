@@ -1,9 +1,10 @@
 """Daily search worker job."""
 
+import asyncio
+import logging
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
-
-from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import SessionLocal
@@ -11,8 +12,9 @@ from app.models.filter import Filter
 from app.models.paper import Paper
 from app.models.paper_match import PaperMatch
 from app.models.search_run import SearchRun
-from app.models.feedback import Feedback
-from app.llm.client import call_llm, build_json_schema
+from app.models.search_run_paper import SearchRunPaper
+from app.services.arxiv import fetch_daily_papers
+from app.llm.client import async_call_llm, call_llm, build_json_schema
 from app.llm.prompts import (
     FILTER_SEARCH_SYSTEM_PROMPT,
     FILTER_SEARCH_USER_PROMPT,
@@ -22,8 +24,41 @@ from app.llm.prompts import (
     SUMMARY_SCHEMA,
 )
 
+logger = logging.getLogger(__name__)
+PAIR_TIMEOUT_SECONDS = 30.0
+PAIRING_PHASE_TIMEOUT_SECONDS = 180.0
 
-def _build_papers_text(papers: list[Paper]) -> str:
+
+@dataclass
+class FilterPayload:
+    id: str
+    name: str
+    definition: dict
+
+
+@dataclass
+class PaperPayload:
+    id: str
+    title: str
+    arxiv_id: str
+    abstract: str
+    authors: list[str]
+
+
+@dataclass
+class PairEvaluation:
+    filter_id: str
+    filter_name: str
+    paper_id: str
+    paper_title: str
+    arxiv_id: str
+    result: dict | None = None
+    model: str | None = None
+    response_id: str | None = None
+    error: str | None = None
+
+
+def _build_papers_text(papers: list[Paper | PaperPayload]) -> str:
     lines = []
     for p in papers:
         lines.append(
@@ -33,6 +68,10 @@ def _build_papers_text(papers: list[Paper]) -> str:
             f"Abstract: {p.abstract}\n"
         )
     return "\n---\n".join(lines)
+
+
+def _build_paper_text(paper: Paper | PaperPayload) -> str:
+    return _build_papers_text([paper])
 
 
 def _build_matches_text(matches: list[dict]) -> str:
@@ -49,78 +88,250 @@ def _build_matches_text(matches: list[dict]) -> str:
     return "\n---\n".join(lines)
 
 
-DEMO_MATCHES = {
-    "2401.00001": {
-        "stance": "relevant",
-        "relevanceScore": 0.85,
-        "confidence": 0.9,
-        "rationale": "This paper directly addresses scaling laws for neural language models with comprehensive empirical analysis.",
-        "matchedClaims": ["Predictable power-law relationships in model scaling"],
-        "abstractEvidence": ["larger models are significantly more sample-efficient"],
-    },
-    "2401.00002": {
-        "stance": "supports",
-        "relevanceScore": 0.92,
-        "confidence": 0.88,
-        "rationale": "Presents systematic mechanistic interpretability study of transformer attention heads.",
-        "matchedClaims": ["Attention heads perform specific computational roles", "Automated tools can classify head behavior"],
-        "abstractEvidence": ["certain heads consistently perform induction, copying, or inhibition operations"],
-    },
-    "2401.00003": {
-        "stance": "supports",
-        "relevanceScore": 0.88,
-        "confidence": 0.85,
-        "rationale": "DPO is a direct alternative to RLHF that eliminates the need for reward models.",
-        "matchedClaims": ["DPO matches or exceeds RLHF performance"],
-        "abstractEvidence": ["directly optimizes the policy using preference data without an explicit reward model"],
-    },
-    "2401.00004": {
-        "stance": "supports",
-        "relevanceScore": 0.95,
-        "confidence": 0.92,
-        "rationale": "Sparse autoencoders reveal interpretable features in language models enabling targeted model steering.",
-        "matchedClaims": ["Learned features correspond to interpretable concepts", "Features enable targeted model steering"],
-        "abstractEvidence": ["amplifying or suppressing specific features predictably alters model behavior"],
-    },
-    "2401.00005": {
-        "stance": "relevant",
-        "relevanceScore": 0.7,
-        "confidence": 0.8,
-        "rationale": "Chain-of-thought prompting reveals emergent reasoning capabilities at scale.",
-        "matchedClaims": ["CoT improves complex reasoning performance"],
-        "abstractEvidence": ["this capability emerges at sufficient model scale"],
-    },
-    "2401.00006": {
-        "stance": "relevant",
-        "relevanceScore": 0.82,
-        "confidence": 0.85,
-        "rationale": "Constitutional AI provides an alternative alignment approach using explicit principles.",
-        "matchedClaims": ["CAI achieves similar helpfulness with improved harmlessness"],
-        "abstractEvidence": ["the principles governing behavior are explicit and auditable"],
-    },
-}
+def _append_progress_log(run: SearchRun, stage: str, message: str) -> None:
+    log = list(run.progress_log or [])
+    log.append(
+        {
+            "at": datetime.now(timezone.utc).isoformat(),
+            "stage": stage,
+            "message": message,
+        }
+    )
+    run.progress_log = log[-50:]
 
-DEMO_SUMMARY = {
-    "summary": (
-        "Today's search surfaced several significant papers across interpretability, alignment, and scaling.\n\n"
-        "In mechanistic interpretability, two papers stand out. A systematic study of transformer attention heads "
-        "(2401.00002) identifies specific computational roles through causal interventions, showing that certain "
-        "heads consistently perform induction, copying, or inhibition. Complementing this, sparse autoencoders "
-        "(2401.00004) reveal interpretable features that enable targeted model steering without retraining.\n\n"
-        "On the alignment front, Direct Preference Optimization (2401.00003) presents a compelling RLHF alternative "
-        "that eliminates reward models entirely while matching performance. Constitutional AI (2401.00006) takes "
-        "a different approach, using explicit principles to guide self-critique during training.\n\n"
-        "Additionally, scaling law analysis (2401.00001) provides evidence that current models are substantially "
-        "undertrained, suggesting room for significant efficiency gains in training next-generation models."
-    ),
-    "citations": [
-        {"paperMatchId": "", "arxivId": "2401.00002", "citedFor": "Mechanistic analysis of attention head roles"},
-        {"paperMatchId": "", "arxivId": "2401.00004", "citedFor": "Interpretable features via sparse autoencoders"},
-        {"paperMatchId": "", "arxivId": "2401.00003", "citedFor": "DPO as RLHF alternative"},
-        {"paperMatchId": "", "arxivId": "2401.00006", "citedFor": "Constitutional AI alignment approach"},
-        {"paperMatchId": "", "arxivId": "2401.00001", "citedFor": "Evidence that models are undertrained"},
-    ],
-}
+
+def _set_progress(
+    db,
+    run: SearchRun,
+    *,
+    stage: str,
+    current: int,
+    total: int,
+    message: str,
+    status: str | None = None,
+) -> None:
+    logger.info("daily_search run=%s stage=%s %s", run.id, stage, message)
+    run.stage = stage
+    run.progress_current = current
+    run.progress_total = max(total, 1)
+    run.progress_message = message
+    if status:
+        run.status = status
+    _append_progress_log(run, stage, message)
+    db.commit()
+
+
+def _upsert_candidate_papers(db, run: SearchRun) -> list[Paper]:
+    now = datetime.now(timezone.utc)
+    daily_papers = fetch_daily_papers()
+    candidate_paper_ids = set()
+    papers: list[Paper] = []
+
+    db.query(SearchRunPaper).filter(SearchRunPaper.search_run_id == run.id).delete()
+
+    for p_data in daily_papers:
+        existing = db.query(Paper).filter(Paper.arxiv_id == p_data["arxiv_id"]).first()
+        if existing:
+            existing.title = p_data["title"]
+            existing.abstract = p_data["abstract"]
+            existing.authors = p_data["authors"]
+            existing.categories = p_data.get("categories")
+            existing.published_at = p_data.get("published_at")
+            existing.html_url = p_data.get("html_url")
+            existing.landing_url = p_data.get("landing_url")
+            existing.updated_at = now
+            paper = existing
+        else:
+            paper = Paper(
+                id=str(uuid.uuid4()),
+                arxiv_id=p_data["arxiv_id"],
+                title=p_data["title"],
+                abstract=p_data["abstract"],
+                authors=p_data["authors"],
+                categories=p_data.get("categories"),
+                published_at=p_data.get("published_at"),
+                html_url=p_data.get("html_url"),
+                landing_url=p_data.get("landing_url"),
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(paper)
+
+        if paper.id in candidate_paper_ids:
+            continue
+        candidate_paper_ids.add(paper.id)
+        papers.append(paper)
+        db.add(
+            SearchRunPaper(
+                search_run_id=run.id,
+                paper_id=paper.id,
+                created_at=now,
+            )
+        )
+
+    run.candidate_count = len(candidate_paper_ids)
+    db.commit()
+    return papers
+
+
+def _build_filter_payloads(filters: list[Filter]) -> list[FilterPayload]:
+    return [
+        FilterPayload(
+            id=filt.id,
+            name=filt.name,
+            definition=dict(filt.definition or {}),
+        )
+        for filt in filters
+    ]
+
+
+def _build_paper_payloads(papers: list[Paper]) -> list[PaperPayload]:
+    return [
+        PaperPayload(
+            id=paper.id,
+            title=paper.title,
+            arxiv_id=paper.arxiv_id or "",
+            abstract=paper.abstract,
+            authors=list(paper.authors or []),
+        )
+        for paper in papers
+    ]
+
+
+def _filter_behavior(mode: str) -> str:
+    if mode == "warrants":
+        return "Look for evidence that supports, refutes, or complicates the described claim."
+    if mode == "answers":
+        return "Look for papers that answer or partially answer the described question."
+    return "Look for papers relevant to the described topic."
+
+
+async def _evaluate_filter_paper(
+    *,
+    semaphore: asyncio.Semaphore,
+    filt: FilterPayload,
+    paper: PaperPayload,
+) -> PairEvaluation:
+    definition = filt.definition or {}
+
+    user_prompt = FILTER_SEARCH_USER_PROMPT.format(
+        filter_name=definition.get("name", filt.name),
+        filter_description=definition.get("description", ""),
+        filter_behavior=_filter_behavior(definition.get("mode", "relevance")),
+        papers_text=_build_paper_text(paper),
+    )
+    response_format = build_json_schema("filter_search", FILTER_SEARCH_SCHEMA)
+
+    async with semaphore:
+        try:
+            llm_result = await async_call_llm(
+                system_prompt=FILTER_SEARCH_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                response_format=response_format,
+            )
+        except Exception as exc:
+            return PairEvaluation(
+                filter_id=filt.id,
+                filter_name=filt.name,
+                paper_id=paper.id,
+                paper_title=paper.title,
+                arxiv_id=paper.arxiv_id or "",
+                error=str(exc),
+            )
+
+    matches = llm_result["content"].get("matches", [])
+    match = next(
+        (m for m in matches if m.get("arxivId") == paper.arxiv_id),
+        matches[0] if matches else None,
+    )
+
+    return PairEvaluation(
+        filter_id=filt.id,
+        filter_name=filt.name,
+        paper_id=paper.id,
+        paper_title=paper.title,
+        arxiv_id=paper.arxiv_id or "",
+        result=match,
+        model=llm_result["model"],
+        response_id=llm_result["response_id"],
+    )
+
+
+async def _evaluate_filter_paper_with_timeout(
+    *,
+    semaphore: asyncio.Semaphore,
+    filt: FilterPayload,
+    paper: PaperPayload,
+) -> PairEvaluation:
+    try:
+        return await asyncio.wait_for(
+            _evaluate_filter_paper(semaphore=semaphore, filt=filt, paper=paper),
+            timeout=PAIR_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        return PairEvaluation(
+            filter_id=filt.id,
+            filter_name=filt.name,
+            paper_id=paper.id,
+            paper_title=paper.title,
+            arxiv_id=paper.arxiv_id,
+            error=f"Timed out after {PAIR_TIMEOUT_SECONDS:g}s",
+        )
+
+
+async def _evaluate_pairs(
+    *,
+    filters: list[FilterPayload],
+    papers: list[PaperPayload],
+    on_result,
+) -> None:
+    semaphore = asyncio.Semaphore(max(settings.LLM_MAX_CONCURRENCY, 1))
+    task_pairs = {}
+    for filt in filters:
+        for paper in papers:
+            task = asyncio.create_task(
+                _evaluate_filter_paper_with_timeout(
+                    semaphore=semaphore,
+                    filt=filt,
+                    paper=paper,
+                )
+            )
+            task_pairs[task] = (filt, paper)
+
+    pending = set(task_pairs)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + PAIRING_PHASE_TIMEOUT_SECONDS
+
+    while pending:
+        remaining = max(deadline - loop.time(), 0)
+        if remaining <= 0:
+            break
+        done, pending = await asyncio.wait(
+            pending,
+            timeout=remaining,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if not done:
+            break
+        for task in done:
+            await on_result(await task)
+
+    if pending:
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        for task in pending:
+            filt, paper = task_pairs[task]
+            await on_result(
+                PairEvaluation(
+                    filter_id=filt.id,
+                    filter_name=filt.name,
+                    paper_id=paper.id,
+                    paper_title=paper.title,
+                    arxiv_id=paper.arxiv_id,
+                    error=f"Pairing phase timed out after {PAIRING_PHASE_TIMEOUT_SECONDS:g}s",
+                )
+            )
 
 
 def run_daily_search(search_run_id: str) -> None:
@@ -131,154 +342,184 @@ def run_daily_search(search_run_id: str) -> None:
         if not run:
             return
 
-        run.status = "running"
         run.started_at = datetime.now(timezone.utc)
-        db.commit()
+        _set_progress(
+            db,
+            run,
+            stage="fetching_papers",
+            current=0,
+            total=1,
+            message="Fetching latest arXiv papers",
+            status="running",
+        )
+
+        papers = _upsert_candidate_papers(db, run)
+        _set_progress(
+            db,
+            run,
+            stage="fetching_papers",
+            current=1,
+            total=1,
+            message=f"Fetched {len(papers)} arXiv papers",
+            status="running",
+        )
 
         active_filters = db.query(Filter).filter(Filter.status == "active").all()
-        papers = db.query(Paper).all()
+        filter_payloads = _build_filter_payloads(active_filters)
+        paper_payloads = _build_paper_payloads(papers)
+        pair_total = len(filter_payloads) * len(paper_payloads)
 
-        if not active_filters or not papers:
-            run.status = "completed"
+        if not filter_payloads or not paper_payloads:
             run.candidate_count = len(papers)
             run.match_count = 0
-            run.summary = "No active filters or papers to search."
+            run.summary = (
+                "No active filters to search."
+                if papers
+                else "No arXiv papers were available for this daily search."
+            )
             run.completed_at = datetime.now(timezone.utc)
-            db.commit()
+            _set_progress(
+                db,
+                run,
+                stage="completed",
+                current=max(pair_total, 1),
+                total=max(pair_total, 1),
+                message=run.summary,
+                status="completed",
+            )
             return
 
         all_match_info = []
+        completed_pairs = 0
+        failed_pairs = 0
+        first_pair_error = ""
 
-        for filt in active_filters:
-            if not settings.OPENROUTER_API_KEY:
-                for paper in papers:
-                    demo_match_data = DEMO_MATCHES.get(paper.arxiv_id)
-                    if not demo_match_data:
-                        continue
+        _set_progress(
+            db,
+            run,
+            stage="matching_filters",
+            current=0,
+            total=pair_total,
+            message=f"Evaluating 0/{pair_total} filter-paper pairs",
+            status="running",
+        )
 
+        async def handle_pair_result(evaluation: PairEvaluation) -> None:
+            nonlocal completed_pairs, failed_pairs, first_pair_error
+            completed_pairs += 1
+
+            if evaluation.error:
+                failed_pairs += 1
+                if not first_pair_error:
+                    first_pair_error = evaluation.error
+                message = (
+                    f"Pair {completed_pairs}/{pair_total} failed: "
+                    f"{evaluation.filter_name} x {evaluation.arxiv_id}: "
+                    f"{evaluation.error}"
+                )
+                _append_progress_log(run, "matching_filters", message)
+            else:
+                match_data = evaluation.result or {}
+                stance = match_data.get("stance", "irrelevant")
+                if stance != "irrelevant":
                     match = PaperMatch(
                         id=str(uuid.uuid4()),
                         search_run_id=search_run_id,
-                        filter_id=filt.id,
-                        paper_id=paper.id,
-                        stance=demo_match_data["stance"],
-                        relevance_score=demo_match_data["relevanceScore"],
-                        confidence=demo_match_data["confidence"],
-                        rationale=demo_match_data["rationale"],
-                        matched_claims=demo_match_data["matchedClaims"],
-                        abstract_evidence=demo_match_data["abstractEvidence"],
+                        filter_id=evaluation.filter_id,
+                        paper_id=evaluation.paper_id,
+                        stance=stance,
+                        relevance_score=match_data.get("relevanceScore", 0.0),
+                        confidence=match_data.get("confidence"),
+                        rationale=match_data.get("rationale", ""),
+                        matched_claims=match_data.get("matchedClaims", []),
+                        abstract_evidence=match_data.get("abstractEvidence", []),
+                        llm_model=evaluation.model,
+                        llm_response_id=evaluation.response_id,
                     )
                     db.add(match)
                     all_match_info.append({
                         "match_id": match.id,
-                        "paper_title": paper.title,
-                        "arxiv_id": paper.arxiv_id,
-                        "filter_name": filt.name,
+                        "paper_title": evaluation.paper_title,
+                        "arxiv_id": evaluation.arxiv_id,
+                        "filter_name": evaluation.filter_name,
                         "stance": match.stance,
                         "relevance_score": match.relevance_score,
                         "rationale": match.rationale,
                     })
-                continue
 
-            definition = filt.definition or {}
-            search_config = definition.get("search", {})
+            run.stage = "matching_filters"
+            run.progress_current = completed_pairs
+            run.progress_total = pair_total
+            run.progress_message = f"Evaluated {completed_pairs}/{pair_total} filter-paper pairs"
+            db.commit()
 
-            papers_text = _build_papers_text(papers)
-            user_prompt = FILTER_SEARCH_USER_PROMPT.format(
-                filter_name=definition.get("name", filt.name),
-                filter_statement=definition.get("statement", ""),
-                filter_instructions=search_config.get("instructions", ""),
-                output_mode=search_config.get("outputMode", "relevance"),
-                papers_text=papers_text,
+        asyncio.run(
+            _evaluate_pairs(
+                filters=filter_payloads,
+                papers=paper_payloads,
+                on_result=handle_pair_result,
             )
-            response_format = build_json_schema("filter_search", FILTER_SEARCH_SCHEMA)
+        )
+
+        if failed_pairs == pair_total:
+            raise RuntimeError(
+                f"All {pair_total} filter-paper evaluations failed. First error: {first_pair_error}"
+            )
+
+        match_count = len(all_match_info)
+        _set_progress(
+            db,
+            run,
+            stage="summarizing",
+            current=pair_total,
+            total=pair_total,
+            message=f"Summarizing {match_count} visible matches",
+            status="running",
+        )
+
+        if all_match_info:
+            matches_text = _build_matches_text(all_match_info)
+            user_prompt = SUMMARY_USER_PROMPT.format(matches_text=matches_text)
+            response_format = build_json_schema("search_summary", SUMMARY_SCHEMA)
 
             result = call_llm(
-                system_prompt=FILTER_SEARCH_SYSTEM_PROMPT,
+                system_prompt=SUMMARY_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 response_format=response_format,
             )
-
-            content = result["content"]
-            matches_data = content.get("matches", [])
-
-            arxiv_to_paper = {p.arxiv_id: p for p in papers}
-
-            for m_data in matches_data:
-                paper = arxiv_to_paper.get(m_data.get("arxivId"))
-                if not paper:
-                    continue
-
-                match = PaperMatch(
-                    id=str(uuid.uuid4()),
-                    search_run_id=search_run_id,
-                    filter_id=filt.id,
-                    paper_id=paper.id,
-                    stance=m_data.get("stance", "irrelevant"),
-                    relevance_score=m_data.get("relevanceScore", 0.0),
-                    confidence=m_data.get("confidence"),
-                    rationale=m_data.get("rationale", ""),
-                    matched_claims=m_data.get("matchedClaims", []),
-                    abstract_evidence=m_data.get("abstractEvidence", []),
-                    llm_model=result["model"],
-                    llm_response_id=result["response_id"],
-                )
-                db.add(match)
-                all_match_info.append({
-                    "match_id": match.id,
-                    "paper_title": paper.title,
-                    "arxiv_id": paper.arxiv_id,
-                    "filter_name": filt.name,
-                    "stance": match.stance,
-                    "relevance_score": match.relevance_score,
-                    "rationale": match.rationale,
-                })
-
-        db.commit()
-
-        visible_matches = [m for m in all_match_info if m["stance"] != "irrelevant"]
-        match_count = len(visible_matches)
-
-        if not settings.OPENROUTER_API_KEY:
-            summary_data = DEMO_SUMMARY
-            for cit in summary_data["citations"]:
-                for m_info in all_match_info:
-                    if m_info["arxiv_id"] == cit["arxivId"]:
-                        cit["paperMatchId"] = m_info["match_id"]
-                        break
+            summary_data = result["content"]
         else:
-            if visible_matches:
-                matches_text = _build_matches_text(visible_matches)
-                user_prompt = SUMMARY_USER_PROMPT.format(matches_text=matches_text)
-                response_format = build_json_schema("search_summary", SUMMARY_SCHEMA)
-
-                result = call_llm(
-                    system_prompt=SUMMARY_SYSTEM_PROMPT,
-                    user_prompt=user_prompt,
-                    response_format=response_format,
-                )
-                summary_data = result["content"]
-            else:
-                summary_data = {
-                    "summary": "No relevant papers found in today's search.",
-                    "citations": [],
-                }
+            summary_data = {
+                "summary": "No relevant papers found in today's search.",
+                "citations": [],
+            }
 
         run.candidate_count = len(papers)
         run.match_count = match_count
         run.summary = summary_data.get("summary", "")
         run.summary_citations = summary_data.get("citations", [])
-        run.status = "completed"
         run.completed_at = datetime.now(timezone.utc)
-        db.commit()
+        _set_progress(
+            db,
+            run,
+            stage="completed",
+            current=pair_total,
+            total=pair_total,
+            message=f"Completed daily search with {match_count} matches",
+            status="completed",
+        )
 
     except Exception as e:
         db.rollback()
         run = db.query(SearchRun).filter(SearchRun.id == search_run_id).first()
         if run:
             run.status = "failed"
+            run.stage = "failed"
             run.error = str(e)
+            run.progress_message = f"Daily search failed: {e}"
+            _append_progress_log(run, "failed", run.progress_message)
             db.commit()
+        logger.exception("daily_search run=%s failed", search_run_id)
         raise
     finally:
         db.close()

@@ -1,93 +1,83 @@
 """Onboarding extraction worker job."""
 
+import json
 import uuid
 from datetime import datetime, timezone
+from typing import Literal
 
-from sqlalchemy.orm import Session
-
-from app.core.config import settings
+from pydantic import BaseModel
 from app.db.session import SessionLocal
 from app.models.onboarding_extraction import OnboardingExtraction
-from app.llm.client import call_llm, build_json_schema
+from app.llm.client import stream_structured_response
 from app.llm.prompts import (
     ONBOARDING_SYSTEM_PROMPT,
     ONBOARDING_USER_PROMPT,
-    ONBOARDING_SCHEMA,
 )
 
 
-DEMO_PROPOSED_FILTERS = [
-    {
-        "id": "demo-filter-1",
-        "name": "Mechanistic Interpretability Progress",
-        "rationale": "Track new methods and findings in mechanistic interpretability of neural networks.",
-        "definition": {
-            "name": "Mechanistic Interpretability Progress",
-            "statement": "New techniques or findings that advance mechanistic interpretability of language models",
-            "description": "Search for papers presenting novel methods for understanding internal representations and computations in transformer models.",
-            "search": {
-                "instructions": "Look for papers that present new interpretability methods, circuit analysis, or feature identification techniques for neural networks, especially transformers.",
-                "outputMode": "warrants",
-            },
-        },
-    },
-    {
-        "id": "demo-filter-2",
-        "name": "Scaling Laws Evidence",
-        "rationale": "Monitor evidence for or against established scaling laws.",
-        "definition": {
-            "name": "Scaling Laws Evidence",
-            "statement": "Evidence that supports, refutes, or complicates known scaling laws for language models",
-            "description": "Track papers with empirical results about how model performance scales with compute, data, or parameters.",
-            "search": {
-                "instructions": "Find papers with empirical scaling experiments that confirm, challenge, or extend known scaling law predictions.",
-                "outputMode": "warrants",
-            },
-        },
-    },
-    {
-        "id": "demo-filter-3",
-        "name": "RLHF Alternatives",
-        "rationale": "Track developments in alignment methods beyond standard RLHF.",
-        "definition": {
-            "name": "RLHF Alternatives",
-            "statement": "What are the most promising alternatives to RLHF for aligning language models?",
-            "description": "Search for papers proposing or evaluating alternatives to reinforcement learning from human feedback.",
-            "search": {
-                "instructions": "Find papers that propose, evaluate, or compare methods for aligning language models that do not rely on traditional RLHF pipelines with reward models.",
-                "outputMode": "answers",
-            },
-        },
-    },
-    {
-        "id": "demo-filter-4",
-        "name": "Emergent Capabilities",
-        "rationale": "Monitor discoveries of new emergent capabilities in large models.",
-        "definition": {
-            "name": "Emergent Capabilities",
-            "statement": "What new emergent capabilities have been discovered in large language models?",
-            "description": "Track papers documenting capabilities that appear at scale.",
-            "search": {
-                "instructions": "Find papers that document or analyze capabilities that emerge in language models at sufficient scale, including both beneficial and potentially dangerous ones.",
-                "outputMode": "answers",
-            },
-        },
-    },
-    {
-        "id": "demo-filter-5",
-        "name": "AI Safety Research",
-        "rationale": "Stay informed about the broader AI safety research landscape.",
-        "definition": {
-            "name": "AI Safety Research",
-            "statement": "AI safety and alignment research",
-            "description": "Broadly track papers related to making AI systems safe and aligned with human values.",
-            "search": {
-                "instructions": "Find papers related to AI safety, including alignment techniques, evaluation of model risks, robustness, and value alignment approaches.",
-                "outputMode": "relevance",
-            },
-        },
-    },
-]
+class StreamedFilter(BaseModel):
+    id: str
+    name: str
+    description: str
+    mode: Literal["warrants", "answers", "relevance"]
+
+
+class OnboardingFiltersResponse(BaseModel):
+    proposedFilters: list[StreamedFilter]
+
+
+def _normalize_filter(raw: dict) -> dict | None:
+    try:
+        item = StreamedFilter.model_validate(raw)
+    except Exception:
+        return None
+    return item.model_dump()
+
+
+def _extract_complete_filter_objects(buffer: str) -> list[dict]:
+    decoder = json.JSONDecoder()
+    marker = '"proposedFilters"'
+    marker_idx = buffer.find(marker)
+    if marker_idx == -1:
+        return []
+
+    array_start = buffer.find("[", marker_idx)
+    if array_start == -1:
+        return []
+
+    idx = array_start + 1
+    results: list[dict] = []
+    while idx < len(buffer):
+        while idx < len(buffer) and buffer[idx] in " \n\r\t,":
+            idx += 1
+        if idx >= len(buffer) or buffer[idx] == "]":
+            break
+        try:
+            obj, next_idx = decoder.raw_decode(buffer, idx)
+        except json.JSONDecodeError:
+            break
+        if isinstance(obj, dict):
+            normalized = _normalize_filter(obj)
+            if normalized:
+                results.append(normalized)
+        idx = next_idx
+
+    return results
+
+
+def _merge_filters(existing: list[dict], incoming: list[dict]) -> list[dict]:
+    by_id = {f.get("id"): f for f in existing if f.get("id")}
+    merged = list(existing)
+
+    for item in incoming:
+        item_id = item.get("id") or str(uuid.uuid4())
+        item["id"] = item_id
+        if item_id in by_id:
+            continue
+        by_id[item_id] = item
+        merged.append(item)
+
+    return merged
 
 
 def extract_onboarding_filters(extraction_id: str) -> None:
@@ -104,21 +94,28 @@ def extract_onboarding_filters(extraction_id: str) -> None:
         extraction.updated_at = datetime.now(timezone.utc)
         db.commit()
 
-        if not settings.OPENROUTER_API_KEY:
-            extraction.proposed_filters = DEMO_PROPOSED_FILTERS
-            extraction.status = "completed"
-            extraction.completed_at = datetime.now(timezone.utc)
-            extraction.updated_at = datetime.now(timezone.utc)
-            db.commit()
-            return
-
         user_prompt = ONBOARDING_USER_PROMPT.format(input_text=extraction.input_text)
-        response_format = build_json_schema("onboarding_extraction", ONBOARDING_SCHEMA)
+        text_buffer = ""
+        last_count = 0
 
-        result = call_llm(
+        def handle_delta(delta: str) -> None:
+            nonlocal text_buffer, last_count
+            text_buffer += delta
+            parsed_filters = _extract_complete_filter_objects(text_buffer)
+            if len(parsed_filters) <= last_count:
+                return
+
+            current = list(extraction.proposed_filters or [])
+            extraction.proposed_filters = _merge_filters(current, parsed_filters)
+            extraction.updated_at = datetime.now(timezone.utc)
+            last_count = len(parsed_filters)
+            db.commit()
+
+        result = stream_structured_response(
             system_prompt=ONBOARDING_SYSTEM_PROMPT,
             user_prompt=user_prompt,
-            response_format=response_format,
+            text_format=OnboardingFiltersResponse,
+            on_text_delta=handle_delta,
         )
 
         content = result["content"]
@@ -128,7 +125,10 @@ def extract_onboarding_filters(extraction_id: str) -> None:
             if "id" not in f:
                 f["id"] = str(uuid.uuid4())
 
-        extraction.proposed_filters = proposed
+        extraction.proposed_filters = _merge_filters(
+            list(extraction.proposed_filters or []),
+            [_normalize_filter(f) or f for f in proposed],
+        )
         extraction.llm_model = result["model"]
         extraction.llm_response_id = result["response_id"]
         extraction.status = "completed"

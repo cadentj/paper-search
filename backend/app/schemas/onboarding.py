@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 
 class OnboardingStatusResponse(BaseModel):
@@ -15,8 +15,8 @@ class OnboardingExtractionCreate(BaseModel):
 class ProposedFilter(BaseModel):
     id: str
     name: str
-    rationale: str
-    definition: dict
+    description: str
+    mode: Literal["warrants", "answers", "relevance"] = "relevance"
 
 
 class OnboardingExtractionResponse(BaseModel):

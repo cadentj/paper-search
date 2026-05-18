@@ -11,7 +11,7 @@ export default function Home() {
   useEffect(() => {
     if (isLoading) return;
     if (data?.completed) {
-      router.replace("/daily");
+      router.replace("/dashboard/daily");
     } else {
       router.replace("/onboarding");
     }

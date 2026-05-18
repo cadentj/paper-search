@@ -3,37 +3,50 @@
 import uuid
 from datetime import datetime, timezone
 
-from app.services.mock_papers import get_daily_papers, MOCK_PAPERS
+import pytest
+
+from app.services.arxiv import build_category_query, normalize_arxiv_id, parse_arxiv_feed
 from app.services.html_parser import parse_arxiv_html, validate_citation, blocks_to_prompt_text
 
 
-class TestMockPaperProvider:
-    def test_returns_deterministic_records(self):
-        papers1 = get_daily_papers()
-        papers2 = get_daily_papers()
-        assert len(papers1) == len(papers2)
-        for p1, p2 in zip(papers1, papers2):
-            assert p1["arxiv_id"] == p2["arxiv_id"]
-            assert p1["title"] == p2["title"]
+class TestArxivProvider:
+    SAMPLE_FEED = """
+    <feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+      <entry>
+        <id>http://arxiv.org/abs/2605.01234v2</id>
+        <published>2026-05-16T18:00:00Z</published>
+        <title>
+          A Current Paper About AI Systems
+        </title>
+        <summary>
+          We study modern AI systems and report useful findings.
+        </summary>
+        <author><name>Researcher One</name></author>
+        <author><name>Researcher Two</name></author>
+        <arxiv:primary_category term="cs.AI" />
+        <category term="cs.AI" />
+        <category term="cs.LG" />
+      </entry>
+    </feed>
+    """
 
-    def test_records_have_required_fields(self):
-        papers = get_daily_papers()
-        assert len(papers) > 0
-        for p in papers:
-            assert "arxiv_id" in p
-            assert "title" in p
-            assert "abstract" in p
-            assert "authors" in p
-            assert isinstance(p["authors"], list)
-            assert "html_url" in p
-            assert "published_at" in p
+    def test_normalizes_arxiv_id(self):
+        assert normalize_arxiv_id("http://arxiv.org/abs/2605.01234v2") == "2605.01234"
+        assert normalize_arxiv_id("2605.01234v1") == "2605.01234"
 
-    def test_stable_arxiv_ids(self):
-        papers = get_daily_papers()
-        ids = [p["arxiv_id"] for p in papers]
-        assert len(ids) == len(set(ids))
-        for aid in ids:
-            assert aid.startswith("2401.")
+    def test_builds_category_query(self):
+        assert build_category_query(["cs.AI", "cs.CL"]) == "cat:cs.AI OR cat:cs.CL"
+
+    def test_parses_feed_records(self):
+        papers = parse_arxiv_feed(self.SAMPLE_FEED)
+        assert len(papers) == 1
+        paper = papers[0]
+        assert paper["arxiv_id"] == "2605.01234"
+        assert paper["title"] == "A Current Paper About AI Systems"
+        assert paper["authors"] == ["Researcher One", "Researcher Two"]
+        assert paper["categories"] == ["cs.AI", "cs.LG"]
+        assert paper["html_url"] == "https://arxiv.org/html/2605.01234"
+        assert paper["published_at"].year == 2026
 
 
 class TestHtmlParser:
@@ -149,45 +162,118 @@ class TestBlocksToPromptText:
 
 
 class TestFilterDefinition:
-    def test_claim_template(self):
+    def test_claim_mode(self):
         definition = {
             "name": "Test claim",
-            "statement": "LLMs can reason",
-            "search": {"instructions": "Find evidence", "outputMode": "warrants"},
+            "description": "LLMs can reason",
+            "mode": "warrants",
         }
-        assert definition["search"]["outputMode"] == "warrants"
+        assert definition["mode"] == "warrants"
 
-    def test_question_template(self):
+    def test_question_mode(self):
         definition = {
             "name": "Test question",
-            "statement": "What causes hallucination?",
-            "search": {"instructions": "Find answers", "outputMode": "answers"},
+            "description": "What causes hallucination?",
+            "mode": "answers",
         }
-        assert definition["search"]["outputMode"] == "answers"
+        assert definition["mode"] == "answers"
 
-    def test_topic_template(self):
+    def test_topic_mode(self):
         definition = {
             "name": "Test topic",
-            "statement": "Transformer architectures",
-            "search": {"instructions": "Find relevant papers", "outputMode": "relevance"},
+            "description": "Transformer architectures",
+            "mode": "relevance",
         }
-        assert definition["search"]["outputMode"] == "relevance"
+        assert definition["mode"] == "relevance"
 
     def test_no_kind_field(self):
         definition = {
             "name": "Test",
-            "statement": "Test statement",
-            "search": {"instructions": "Search", "outputMode": "warrants"},
+            "description": "Test statement",
+            "mode": "warrants",
         }
         assert "kind" not in definition
 
     def test_no_version_field(self):
         definition = {
             "name": "Test",
-            "statement": "Test statement",
-            "search": {"instructions": "Search", "outputMode": "warrants"},
+            "description": "Test statement",
+            "mode": "warrants",
         }
         assert "version" not in definition
+
+    def test_no_statement_or_search_fields(self):
+        definition = {
+            "name": "Test",
+            "description": "Test statement",
+            "mode": "warrants",
+        }
+        assert "statement" not in definition
+        assert "search" not in definition
+        assert "instructions" not in definition
+        assert "outputMode" not in definition
+
+
+class TestLLMClient:
+    @pytest.mark.asyncio
+    async def test_async_call_llm_retries_transient_status(self, monkeypatch):
+        import httpx
+
+        from app.llm import client as llm_client
+
+        request = httpx.Request("POST", llm_client.OPENROUTER_URL)
+        attempts = {"count": 0}
+
+        class FakeResponse:
+            def __init__(self, status_code: int):
+                self.status_code = status_code
+                self.request = request
+
+            def raise_for_status(self):
+                if self.status_code >= 400:
+                    raise httpx.HTTPStatusError(
+                        "rate limited",
+                        request=request,
+                        response=httpx.Response(self.status_code, request=request),
+                    )
+
+            def json(self):
+                return {
+                    "id": "response-id",
+                    "model": "test-model",
+                    "choices": [{"message": {"content": '{"ok": true}'}}],
+                }
+
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+            async def post(self, *args, **kwargs):
+                attempts["count"] += 1
+                if attempts["count"] == 1:
+                    return FakeResponse(429)
+                return FakeResponse(200)
+
+        async def fake_sleep(delay):
+            return None
+
+        monkeypatch.setattr(llm_client.settings, "OPENROUTER_API_KEY", "test-key")
+        monkeypatch.setattr(llm_client.settings, "LLM_MAX_RETRIES", 1)
+        monkeypatch.setattr(llm_client.settings, "LLM_RETRY_BASE_SECONDS", 0)
+        monkeypatch.setattr(llm_client.asyncio, "sleep", fake_sleep)
+        monkeypatch.setattr(llm_client.httpx, "AsyncClient", FakeAsyncClient)
+
+        result = await llm_client.async_call_llm("system", "user")
+
+        assert attempts["count"] == 2
+        assert result["content"] == {"ok": True}
+        assert result["model"] == "test-model"
 
 
 class TestSQLiteSetup:
@@ -200,9 +286,10 @@ class TestSQLiteSetup:
         assert "papers" in tables
         assert "paper_html" in tables
         assert "search_runs" in tables
+        assert "search_run_papers" in tables
         assert "paper_matches" in tables
         assert "idea_maps" in tables
-        assert "feedback" in tables
+        assert "feedback" not in tables
 
     def test_wal_mode_enabled(self, db_engine):
         with db_engine.connect() as conn:
@@ -219,7 +306,7 @@ class TestFilterLifecycle:
         f = Filter(
             id=str(uuid.uuid4()),
             name="Test Filter",
-            definition={"name": "Test", "statement": "Test", "search": {"instructions": "", "outputMode": "warrants"}},
+            definition={"name": "Test", "description": "Test", "mode": "warrants"},
             status="active",
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -234,7 +321,7 @@ class TestFilterLifecycle:
         f = Filter(
             id=str(uuid.uuid4()),
             name="Archived Filter",
-            definition={"name": "Test", "statement": "Test", "search": {"instructions": "", "outputMode": "warrants"}},
+            definition={"name": "Test", "description": "Test", "mode": "warrants"},
             status="archived",
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -250,7 +337,7 @@ class TestFilterLifecycle:
         f = Filter(
             id=str(uuid.uuid4()),
             name="Restorable",
-            definition={"name": "Test", "statement": "Test", "search": {"instructions": "", "outputMode": "warrants"}},
+            definition={"name": "Test", "description": "Test", "mode": "warrants"},
             status="archived",
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
