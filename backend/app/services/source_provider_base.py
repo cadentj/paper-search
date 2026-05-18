@@ -40,7 +40,7 @@ class DbBackedSourceProvider:
                 "failed to read %s candidates for %s", self.source_type, run_date
             )
             return SourceFetchResult(
-                items=[],
+                papers=[],
                 errors=[f"{self.source_type} fetch failed: {exc}"],
             )
         finally:

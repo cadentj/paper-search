@@ -83,7 +83,7 @@ def lesswrong_record_from_shard(post: dict[str, Any]) -> dict[str, Any]:
         "source_type": "lesswrong",
         "source_id": post_id,
         "title": post.get("title") or "Untitled LessWrong post",
-        "abstract": "LessWrong post content is fetched on demand.",
+        "abstract": search_text,
         "search_text": search_text,
         "authors": [author for author in [post.get("author")] if author],
         "categories": [],

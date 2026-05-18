@@ -19,7 +19,7 @@ from app.services.index_records import (
     lesswrong_record_from_shard,
     settings_arxiv_categories,
 )
-from app.services.source_types import CandidateItem, SourceFetchResult
+from app.services.source_types import SourceFetchResult
 
 
 def count_for_date(db: Session, *, source_type: str, run_date: date) -> int:
@@ -30,28 +30,13 @@ def candidates_for_date(
     db: Session, *, source_type: str, run_date: date
 ) -> SourceFetchResult:
     rows = _papers_for_date(db, source_type=source_type, run_date=run_date).all()
-    items = [_candidate_from_paper(paper) for paper in rows]
-    return SourceFetchResult(items=items)
+    return SourceFetchResult(papers=rows)
 
 
 def _papers_for_date(db: Session, *, source_type: str, run_date: date):
     return db.query(Paper).filter(
         Paper.source_type == source_type,
         func.date(Paper.published_at) == run_date,
-    )
-
-
-def _candidate_from_paper(paper: Paper) -> CandidateItem:
-    return CandidateItem(
-        source_type=paper.source_type,
-        source_id=paper.source_id or "",
-        title=paper.title,
-        display_text=paper.search_text or paper.abstract or "",
-        authors=list(paper.authors or []),
-        categories=list(paper.categories or []),
-        published_at=paper.published_at,
-        html_url=paper.html_url,
-        source_url=paper.source_url,
     )
 
 

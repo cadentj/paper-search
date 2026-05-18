@@ -4,20 +4,17 @@ from __future__ import annotations
 
 from datetime import date
 
+from app.models.paper import Paper
 from app.services.arxiv_provider import ArxivProvider
 from app.services.lesswrong_provider import LessWrongProvider
 from app.services.source_types import (
-    CandidateItem,
     SourceFetchResult,
     SourceProvider,
-    candidate_from_record,
 )
 
 __all__ = [
-    "CandidateItem",
     "SourceFetchResult",
     "SourceProvider",
-    "candidate_from_record",
     "provider_for",
     "counts_by_source_for_date",
     "candidates_for_sources",
@@ -46,7 +43,7 @@ def candidates_for_sources(
     source_types: set[str],
     run_date: date,
 ) -> SourceFetchResult:
-    items: list[CandidateItem] = []
+    papers: list[Paper] = []
     errors: list[str] = []
     skipped_missing_text: dict[str, int] = {}
     for source_type in sorted(source_types):
@@ -55,12 +52,12 @@ def candidates_for_sources(
             errors.append(f"Unknown source provider: {source_type}")
             continue
         result = provider.candidates_for_date(run_date)
-        items.extend(result.items)
+        papers.extend(result.papers)
         errors.extend(result.errors)
         for key, value in result.skipped_missing_text.items():
             skipped_missing_text[key] = skipped_missing_text.get(key, 0) + value
     return SourceFetchResult(
-        items=items,
+        papers=papers,
         errors=errors,
         skipped_missing_text=skipped_missing_text,
     )

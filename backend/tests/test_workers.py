@@ -92,24 +92,31 @@ def _paper_fixture(source_id: str, title: str) -> dict:
     }
 
 
-def _source_fetch_result_from_paper_dicts(papers: list[dict]):
-    from app.services.source_providers import CandidateItem, SourceFetchResult
+def _source_fetch_result_from_paper_dicts(db_session, papers: list[dict]):
+    from app.models.paper import Paper
+    from app.services.source_providers import SourceFetchResult
 
-    items = [
-        CandidateItem(
-            source_type="arxiv",
+    rows: list[Paper] = []
+    for p in papers:
+        paper = Paper(
+            id=str(uuid.uuid4()),
+            source_type=p.get("source_type", "arxiv"),
             source_id=p["source_id"],
             title=p["title"],
-            display_text=p.get("abstract") or "",
+            abstract=p.get("abstract") or "",
+            search_text=p.get("search_text") or p.get("abstract") or "",
             authors=list(p.get("authors") or []),
             categories=list(p.get("categories") or []),
             published_at=p.get("published_at"),
             html_url=p.get("html_url"),
             source_url=p.get("source_url"),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
         )
-        for p in papers
-    ]
-    return SourceFetchResult(items=items)
+        db_session.add(paper)
+        rows.append(paper)
+    db_session.commit()
+    return SourceFetchResult(papers=rows)
 
 
 def _daily_job(db_session, run_id: str):
@@ -236,7 +243,9 @@ class TestRunDailySearch:
         monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
         monkeypatch.setattr(
             "app.jobs.daily_search.candidates_for_sources",
-            lambda sources, rd, p=daily_papers: _source_fetch_result_from_paper_dicts(p),
+            lambda sources, rd, p=daily_papers, db=db_session: _source_fetch_result_from_paper_dicts(
+                db, p
+            ),
         )
         monkeypatch.setattr(
             "app.jobs.daily_search.async_call_llm",
@@ -296,8 +305,8 @@ class TestRunDailySearch:
         monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
         monkeypatch.setattr(
             "app.jobs.daily_search.candidates_for_sources",
-            lambda sources, rd: _source_fetch_result_from_paper_dicts(
-                [_paper_fixture("2605.00004", "Fetched Paper")]
+            lambda sources, rd, db=db_session: _source_fetch_result_from_paper_dicts(
+                db, [_paper_fixture("2605.00004", "Fetched Paper")]
             ),
         )
 
@@ -355,8 +364,8 @@ class TestRunDailySearch:
         monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
         monkeypatch.setattr(
             "app.jobs.daily_search.candidates_for_sources",
-            lambda sources, rd: _source_fetch_result_from_paper_dicts(
-                [_paper_fixture("2401.00001", "Included Paper")]
+            lambda sources, rd, db=db_session: _source_fetch_result_from_paper_dicts(
+                db, [_paper_fixture("2401.00001", "Included Paper")]
             ),
         )
 
@@ -434,11 +443,11 @@ class TestRunDailySearch:
 
         TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
         monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
+        from app.services.source_providers import SourceFetchResult
+
         monkeypatch.setattr(
             "app.jobs.daily_search.candidates_for_sources",
-            lambda sources, rd: _source_fetch_result_from_paper_dicts(
-                [_paper_fixture("2605.00003", "Current Paper")]
-            ),
+            lambda sources, rd, p=paper: SourceFetchResult(papers=[p]),
         )
         monkeypatch.setattr("app.core.config.settings.OPENROUTER_API_KEY", "")
 
@@ -496,7 +505,9 @@ class TestRunDailySearch:
         monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
         monkeypatch.setattr(
             "app.jobs.daily_search.candidates_for_sources",
-            lambda sources, rd, p=daily_papers: _source_fetch_result_from_paper_dicts(p),
+            lambda sources, rd, p=daily_papers, db=db_session: _source_fetch_result_from_paper_dicts(
+                db, p
+            ),
         )
         monkeypatch.setattr(
             "app.jobs.daily_search.async_call_llm",
@@ -557,7 +568,9 @@ class TestRunDailySearch:
         monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
         monkeypatch.setattr(
             "app.jobs.daily_search.candidates_for_sources",
-            lambda sources, rd, p=daily_papers: _source_fetch_result_from_paper_dicts(p),
+            lambda sources, rd, p=daily_papers, db=db_session: _source_fetch_result_from_paper_dicts(
+                db, p
+            ),
         )
         monkeypatch.setattr(
             "app.jobs.daily_search.async_call_llm",

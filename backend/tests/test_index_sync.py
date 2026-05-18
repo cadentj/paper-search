@@ -90,8 +90,8 @@ class TestDailyIndexStore:
         result = candidates_for_date(
             db_session, source_type="lesswrong", run_date=date(2026, 5, 18)
         )
-        assert len(result.items) == 1
-        assert result.items[0].source_id == "abc"
+        assert len(result.papers) == 1
+        assert result.papers[0].source_id == "abc"
 
     def test_candidates_for_date_reads_db(self, db_session):
         record = arxiv_record_from_shard(
@@ -112,5 +112,5 @@ class TestDailyIndexStore:
         result = candidates_for_date(
             db_session, source_type="arxiv", run_date=date(2026, 5, 18)
         )
-        assert result.items[0].title == "Shard"
-        assert result.items[0].display_text == "Body"
+        assert result.papers[0].title == "Shard"
+        assert result.papers[0].search_text == "Body"

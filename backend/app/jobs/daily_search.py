@@ -15,7 +15,7 @@ from app.models.search_run import SearchRun
 from app.models.search_run_paper import SearchRunPaper
 from app.models.job import Job
 from app.services.jobs import build_progress, get_or_create_job_for_subject
-from app.services.source_providers import CandidateItem, candidates_for_sources
+from app.services.source_providers import candidates_for_sources
 from app.services.source_settings import enabled_source_types
 from app.llm.client import async_call_llm, call_llm
 from app.llm.config import JUDGE_PROFILE, SUMMARY_PROFILE
@@ -176,7 +176,7 @@ def _set_pair_progress(
     )
 
 
-def _upsert_candidate_papers(db, run: SearchRun, job: Job | None = None) -> list[Paper]:
+def _link_candidate_papers(db, run: SearchRun, job: Job | None = None) -> list[Paper]:
     now = datetime.now(timezone.utc)
     active_sources = enabled_source_types(db)
     fetch_result = candidates_for_sources(active_sources, run.run_date)
@@ -190,56 +190,32 @@ def _upsert_candidate_papers(db, run: SearchRun, job: Job | None = None) -> list
                     "fetching_items",
                     f"skipped_missing_text[{stype}]={count} (no excerpt in index shard)",
                 )
-    if active_sources and fetch_result.errors and not fetch_result.items:
+    if active_sources and fetch_result.errors and not fetch_result.papers:
         raise RuntimeError("; ".join(fetch_result.errors))
-    daily_items = fetch_result.items
-    candidate_paper_ids = set()
+
+    paper_ids = [paper.id for paper in fetch_result.papers]
+    if paper_ids:
+        papers = db.query(Paper).filter(Paper.id.in_(paper_ids)).all()
+        papers_by_id = {paper.id: paper for paper in papers}
+        ordered_papers = [
+            papers_by_id[paper_id]
+            for paper_id in paper_ids
+            if paper_id in papers_by_id
+        ]
+    else:
+        ordered_papers = []
+
+    candidate_paper_ids: set[str] = set()
     papers: list[Paper] = []
     counts: dict[str, int] = {}
 
     db.query(SearchRunPaper).filter(SearchRunPaper.search_run_id == run.id).delete()
 
-    for item in daily_items:
-        source_type = item.source_type
-        source_id = item.source_id
-        existing = db.query(Paper).filter(
-            Paper.source_type == source_type,
-            Paper.source_id == source_id,
-        ).first()
-        if existing:
-            existing.source_type = source_type
-            existing.source_id = source_id
-            existing.title = item.title
-            existing.abstract = _stored_abstract(item)
-            existing.search_text = item.display_text or ""
-            existing.authors = item.authors
-            existing.categories = item.categories
-            existing.published_at = item.published_at
-            existing.html_url = item.html_url
-            existing.source_url = item.source_url
-            existing.updated_at = now
-            paper = existing
-        else:
-            paper = Paper(
-                id=str(uuid.uuid4()),
-                source_type=source_type,
-                source_id=source_id,
-                title=item.title,
-                abstract=_stored_abstract(item),
-                search_text=item.display_text or "",
-                authors=item.authors,
-                categories=item.categories,
-                published_at=item.published_at,
-                html_url=item.html_url,
-                source_url=item.source_url,
-                created_at=now,
-                updated_at=now,
-            )
-            db.add(paper)
-
+    for paper in ordered_papers:
         if paper.id in candidate_paper_ids:
             continue
         candidate_paper_ids.add(paper.id)
+        source_type = paper.source_type or "arxiv"
         counts[source_type] = counts.get(source_type, 0) + 1
         papers.append(paper)
         db.add(
@@ -265,12 +241,6 @@ def _build_filter_payloads(filters: list[Filter]) -> list[FilterPayload]:
         )
         for filt in filters
     ]
-
-
-def _stored_abstract(item: CandidateItem) -> str:
-    if item.source_type == "lesswrong":
-        return "LessWrong post content is fetched on demand."
-    return item.display_text or ""
 
 
 def _build_paper_payloads(papers: list[Paper]) -> list[PaperPayload]:
@@ -455,7 +425,7 @@ def run_daily_search(search_run_id: str, job_id: str | None = None) -> None:
             status="running",
         )
 
-        papers = _upsert_candidate_papers(db, run, job)
+        papers = _link_candidate_papers(db, run, job)
         _set_progress(
             db,
             run,
