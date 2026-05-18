@@ -21,7 +21,11 @@ from app.schemas.jobs import JobStartResponse
 from app.jobs.queue import get_queue
 from app.jobs.daily_search import run_daily_search
 from app.services.jobs import build_progress, create_job
-from app.services.daily_dates import fixed_daily_dates, is_valid_daily_date
+from app.services.daily_dates import (
+    DAILY_SEARCH_DATES,
+    DAILY_SEARCH_DATE_SET,
+    DEFAULT_DAILY_SEARCH_DATE,
+)
 from app.services.source_providers import counts_by_source_for_dates
 from app.services.source_settings import enabled_source_types, ensure_default_data_sources
 
@@ -44,11 +48,10 @@ def get_latest_search_run(db: Session = Depends(get_db)):
 @router.get("/available-dates", response_model=AvailableSearchDatesResponse)
 def get_available_search_dates(db: Session = Depends(get_db)):
     enabled_sources = enabled_source_types(db)
-    dates = fixed_daily_dates()
-    source_counts = counts_by_source_for_dates(enabled_sources, dates)
+    source_counts = counts_by_source_for_dates(enabled_sources, list(DAILY_SEARCH_DATES))
 
     rows = []
-    for day in reversed(dates):
+    for day in reversed(DAILY_SEARCH_DATES):
         counts_by_source = {}
         for source_type in sorted(enabled_sources):
             counts_by_source[source_type] = source_counts.get(source_type, {}).get(day.isoformat(), 0)
@@ -63,7 +66,7 @@ def get_available_search_dates(db: Session = Depends(get_db)):
         )
 
     return {
-        "default_date": dates[-1].isoformat() if dates else None,
+        "default_date": DEFAULT_DAILY_SEARCH_DATE.isoformat(),
         "dates": rows,
     }
 
@@ -74,11 +77,10 @@ def create_daily_search_run(
     db: Session = Depends(get_db),
 ):
     ensure_default_data_sources(db)
-    dates = fixed_daily_dates()
-    requested_date = request.run_date if request and request.run_date else (dates[-1] if dates else None)
+    requested_date = request.run_date if request and request.run_date else DEFAULT_DAILY_SEARCH_DATE
     if not requested_date:
         raise HTTPException(status_code=400, detail="No daily search dates are configured")
-    if not is_valid_daily_date(requested_date):
+    if requested_date not in DAILY_SEARCH_DATE_SET:
         raise HTTPException(status_code=400, detail=f"{requested_date} is outside the configured daily search window")
     if not enabled_source_types(db):
         raise HTTPException(status_code=400, detail="No data sources are enabled")

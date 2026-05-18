@@ -1,5 +1,4 @@
 from pathlib import Path
-from datetime import date
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
@@ -16,14 +15,11 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./data/paper_search.db"
     REDIS_URL: str = "redis://localhost:6379/0"
     OPENROUTER_API_KEY: str = ""
-    ARXIV_DAILY_LIMIT: int = 50
     ARXIV_CATEGORIES: str = "cs.AI,cs.CL,cs.LG"
     ARXIV_HTML_PUBLIC_BASE_URL: str
     ARXIV_HTML_INDEX_PATH: str = "data/index/papers-by-date.json"
     ARXIV_PUBLIC_INDEX_TTL_SECONDS: int = 300
     ARXIV_PUBLIC_DAILY_LIMIT: int = 0
-    ARXIV_ANCHOR_DATE: date = date(2026, 5, 14)
-    DAILY_DATE_WINDOW_DAYS: int = 31
     LESSWRONG_EXCERPT_WORDS: int = 250
     LESSWRONG_HTML_PUBLIC_BASE_URL: str = ""
     LESSWRONG_HTML_INDEX_PATH: str = "data/index/posts-by-date.json"

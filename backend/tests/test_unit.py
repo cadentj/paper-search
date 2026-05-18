@@ -2,86 +2,12 @@
 
 import pytest
 
-from app.services.arxiv import (
-    build_category_query,
-    fetch_metadata_by_ids,
-    normalize_arxiv_id,
-    parse_arxiv_feed,
-)
 from app.services.html_parser import (
     blocks_to_prompt_text,
     parse_arxiv_html,
     prepare_arxiv_html_for_viewer,
     validate_citation,
 )
-
-
-class TestArxivProvider:
-    SAMPLE_FEED = """
-    <feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
-      <entry>
-        <id>http://arxiv.org/abs/2605.01234v2</id>
-        <published>2026-05-16T18:00:00Z</published>
-        <title>
-          A Current Paper About AI Systems
-        </title>
-        <summary>
-          We study modern AI systems and report useful findings.
-        </summary>
-        <author><name>Researcher One</name></author>
-        <author><name>Researcher Two</name></author>
-        <arxiv:primary_category term="cs.AI" />
-        <category term="cs.AI" />
-        <category term="cs.LG" />
-      </entry>
-    </feed>
-    """
-
-    def test_normalizes_arxiv_id(self):
-        assert normalize_arxiv_id("http://arxiv.org/abs/2605.01234v2") == "2605.01234"
-        assert normalize_arxiv_id("2605.01234v1") == "2605.01234"
-
-    def test_builds_category_query(self):
-        assert build_category_query(["cs.AI", "cs.CL"]) == "cat:cs.AI OR cat:cs.CL"
-
-    def test_parses_feed_records(self):
-        papers = parse_arxiv_feed(self.SAMPLE_FEED)
-        assert len(papers) == 1
-        paper = papers[0]
-        assert paper["arxiv_id"] == "2605.01234"
-        assert paper["title"] == "A Current Paper About AI Systems"
-        assert paper["authors"] == ["Researcher One", "Researcher Two"]
-        assert paper["categories"] == ["cs.AI", "cs.LG"]
-        assert paper["html_url"] == "https://arxiv.org/html/2605.01234"
-        assert paper["published_at"].year == 2026
-
-    def test_fetch_metadata_by_ids(self, monkeypatch):
-        requested: list[str] = []
-        sample_feed = self.SAMPLE_FEED
-
-        class FakeResponse:
-            text = sample_feed
-
-            def raise_for_status(self):
-                return None
-
-        class FakeClient:
-            def get(self, url, params=None):
-                requested.extend((params or {}).get("id_list", "").split(","))
-                return FakeResponse()
-
-            def close(self):
-                return None
-
-        metadata = fetch_metadata_by_ids(
-            ["2605.01234v2"],
-            client=FakeClient(),
-            batch_delay_seconds=0,
-        )
-        assert requested == ["2605.01234"]
-        assert metadata["2605.01234"]["abstract"] == (
-            "We study modern AI systems and report useful findings."
-        )
 
 
 class TestPublicArxivCache:
