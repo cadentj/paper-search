@@ -1,6 +1,6 @@
 import { addDays, format, parseISO } from "date-fns";
 
-// Keep in sync with backend/app/services/daily_dates.py
+// Keep in sync with core/src/paper_search_core/daily_dates.py
 export const DAILY_SEARCH_START = "2026-04-14";
 export const DAILY_SEARCH_END = "2026-05-14";
 export const DEFAULT_DAILY_SEARCH_DATE = DAILY_SEARCH_END;

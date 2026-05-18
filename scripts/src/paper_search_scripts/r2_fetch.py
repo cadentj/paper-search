@@ -1,4 +1,4 @@
-"""HTTP fetch for R2 public manifest and date shards (sync script only)."""
+"""HTTP fetch for R2 public manifest and date shards."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from app.services.public_r2_index import public_url_for_base
+from paper_search_core.r2_urls import public_url_for_base
 
 
 def fetch_manifest(*, public_base_url: str, manifest_path: str) -> dict[str, Any]:

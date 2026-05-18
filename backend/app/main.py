@@ -30,7 +30,7 @@ try:
         == 0
     ):
         logger.warning(
-            "No synced daily index for %s — run: cd backend && uv run python ../scripts/sync_public_index.py",
+            "No synced daily index for %s — run from repo root: uv run sync-public-index",
             DEFAULT_DAILY_SEARCH_DATE,
         )
 finally:

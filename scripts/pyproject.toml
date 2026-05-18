@@ -1,0 +1,33 @@
+[project]
+name = "paper-search-scripts"
+version = "0.1.0"
+description = "CLI tools for paper-search (R2 index sync, etc.)"
+requires-python = ">=3.11"
+dependencies = [
+    "paper-search-core",
+    "httpx>=0.27.0",
+    "pydantic-settings>=2.0.0",
+    "sqlalchemy>=2.0.0",
+    "tqdm>=4.66.0",
+]
+
+[project.scripts]
+sync-public-index = "paper_search_scripts.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+paper-search-core = { workspace = true }
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/paper_search_scripts"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

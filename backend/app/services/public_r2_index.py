@@ -4,25 +4,13 @@ from __future__ import annotations
 
 import threading
 from typing import Any
-from urllib.parse import quote, urljoin
-
 import httpx
+
+from paper_search_core.r2_urls import has_searchable_text, public_url_for_base
 
 
 _http_client: httpx.Client | None = None
 _http_client_lock = threading.Lock()
-
-
-def public_url_for_base(base_url: str, path_or_key: str) -> str:
-    base = base_url.rstrip("/") + "/"
-    path = path_or_key.lstrip("/")
-    return urljoin(base, quote(path, safe="/:.-_"))
-
-
-def has_searchable_text(
-    item: dict[str, Any], *, text_fields: tuple[str, ...]
-) -> bool:
-    return any(str(item.get(f) or "").strip() for f in text_fields)
 
 
 def _shared_client() -> httpx.Client:

@@ -4,25 +4,36 @@ from __future__ import annotations
 
 import logging
 from datetime import date
-from sqlalchemy.orm import Session
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 from tqdm import tqdm
 
-from app.core.config import settings
-from app.db.session import SessionLocal, engine
-from app.models import Base
-from app.services.daily_dates import DAILY_SEARCH_DATE_SET
-from app.services.daily_index_store import upsert_arxiv_day, upsert_lesswrong_day
-from app.services.r2_index_fetch import fetch_manifest, items_for_date
+from paper_search_core.daily_dates import DAILY_SEARCH_DATE_SET
+from paper_search_core.models import Base
+from paper_search_scripts.config import SyncSettings
+from paper_search_scripts.index_loader import load_arxiv_day, load_lesswrong_day
+from paper_search_scripts.r2_fetch import fetch_manifest, items_for_date
 
 logger = logging.getLogger(__name__)
 
 
-def sync_public_indexes(*, progress: tqdm | None = None) -> dict[str, dict[str, tuple[int, int]]]:
+def sync_public_indexes(
+    settings: SyncSettings,
+    *,
+    progress: tqdm | None = None,
+) -> dict[str, dict[str, tuple[int, int]]]:
+    engine = create_engine(
+        settings.DATABASE_URL,
+        connect_args={"check_same_thread": False},
+    )
     Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine)
+    index_settings = settings.index_settings()
 
     summary: dict[str, dict[str, tuple[int, int]]] = {"arxiv": {}, "lesswrong": {}}
     scanned_total = 0
-    db = SessionLocal()
+    db = session_factory()
     try:
         summary["arxiv"], scanned_total = _sync_source(
             db,
@@ -30,7 +41,8 @@ def sync_public_indexes(*, progress: tqdm | None = None) -> dict[str, dict[str, 
             public_base_url=settings.ARXIV_HTML_PUBLIC_BASE_URL,
             manifest_path=settings.ARXIV_HTML_INDEX_PATH,
             items_key="papers",
-            upsert_day=upsert_arxiv_day,
+            settings=index_settings,
+            arxiv_public_daily_limit=settings.ARXIV_PUBLIC_DAILY_LIMIT,
             progress=progress,
             scanned_total=scanned_total,
         )
@@ -40,7 +52,8 @@ def sync_public_indexes(*, progress: tqdm | None = None) -> dict[str, dict[str, 
             public_base_url=settings.LESSWRONG_HTML_PUBLIC_BASE_URL,
             manifest_path=settings.LESSWRONG_HTML_INDEX_PATH,
             items_key="posts",
-            upsert_day=upsert_lesswrong_day,
+            settings=index_settings,
+            arxiv_public_daily_limit=0,
             progress=progress,
             scanned_total=scanned_total,
         )
@@ -50,6 +63,7 @@ def sync_public_indexes(*, progress: tqdm | None = None) -> dict[str, dict[str, 
         raise
     finally:
         db.close()
+        engine.dispose()
     return summary
 
 
@@ -60,7 +74,8 @@ def _sync_source(
     public_base_url: str,
     manifest_path: str,
     items_key: str,
-    upsert_day,
+    settings,
+    arxiv_public_daily_limit: int,
     progress: tqdm | None = None,
     scanned_total: int = 0,
 ) -> tuple[dict[str, tuple[int, int]], int]:
@@ -93,11 +108,20 @@ def _sync_source(
             items_key=items_key,
         )
         if source_type == "arxiv":
-            total, searchable, _skipped = upsert_arxiv_day(
-                db, run_date=run_date, shard_items=shard_items
+            total, searchable, _skipped = load_arxiv_day(
+                db,
+                run_date=run_date,
+                shard_items=shard_items,
+                settings=settings,
+                arxiv_public_daily_limit=arxiv_public_daily_limit,
             )
         else:
-            total, searchable = upsert_day(db, run_date=run_date, shard_items=shard_items)
+            total, searchable = load_lesswrong_day(
+                db,
+                run_date=run_date,
+                shard_items=shard_items,
+                settings=settings,
+            )
         per_date[date_key] = (total, searchable)
         scanned_total += total
         if progress is not None:

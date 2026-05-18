@@ -39,10 +39,10 @@ idea-map generation do not run inside the FastAPI process.
 Pull arXiv and LessWrong date manifests and shards from the public R2 buckets into the app database (required before counts and daily search work):
 
 ```bash
-cd backend
-pip install -e ".[dev]"
-mkdir -p data
-uv run python ../scripts/sync_public_index.py
+# From repo root (installs core, backend, and scripts via uv workspace)
+uv sync
+mkdir -p backend/data
+uv run sync-public-index
 ```
 
 Re-run this when the published R2 indexes change. HTML for paper viewing is still fetched from R2 on demand.
