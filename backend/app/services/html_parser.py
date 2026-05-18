@@ -22,6 +22,20 @@ BACK_MATTER_RE = re.compile(
     r"\b(appendix|references|acknowledgements|acknowledgments|supplementary|supplemental)\b",
     re.IGNORECASE,
 )
+ALWAYS_ADDRESSABLE_TAGS = {
+    "p",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "td",
+    "th",
+    "figcaption",
+    "blockquote",
+}
+CONTENT_TAGS = ALWAYS_ADDRESSABLE_TAGS | {"li"}
 
 
 def parse_arxiv_html(html: str, *, exclude_back_matter: bool = False) -> list[HtmlBlock]:
@@ -121,25 +135,10 @@ def _parse_arxiv_html_document(
     current_section = ""
     in_back_matter = False
 
-    content_tags = {
-        "p",
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "h6",
-        "li",
-        "td",
-        "th",
-        "figcaption",
-        "blockquote",
-    }
-
     for element in body.descendants:
         if not isinstance(element, Tag):
             continue
-        if element.name not in content_tags:
+        if not _is_addressable_block(element):
             continue
 
         text = _normalize_text(element.get_text(" ", strip=True))
@@ -209,6 +208,21 @@ def _block_preview(block: HtmlBlock) -> dict:
 
 def _canonical_block_id(order_index: int) -> str:
     return f"B{order_index:03d}"
+
+
+def _is_addressable_block(element: Tag) -> bool:
+    if element.name in ALWAYS_ADDRESSABLE_TAGS:
+        return True
+    if element.name != "li":
+        return False
+    return not _has_addressable_block_descendant(element)
+
+
+def _has_addressable_block_descendant(element: Tag) -> bool:
+    return any(
+        isinstance(descendant, Tag) and descendant.name in CONTENT_TAGS
+        for descendant in element.descendants
+    )
 
 
 def _is_back_matter_heading(text: str) -> bool:
