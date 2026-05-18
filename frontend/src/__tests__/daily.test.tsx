@@ -11,7 +11,9 @@ const mockApi = vi.hoisted(() => ({
   getLatestSearchRun: vi.fn(),
   getSearchRun: vi.fn(),
   getSearchRunMatches: vi.fn(),
+  getDailySearchJob: vi.fn(),
   createDailySearchRun: vi.fn(),
+  getDailyCandidateCount: vi.fn(),
   getFilters: vi.fn(),
   createFilter: vi.fn(),
   archiveFilter: vi.fn(),
@@ -29,49 +31,76 @@ function renderWithProviders(ui: React.ReactElement) {
 }
 
 describe("DailyPage", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockApi.getDailyCandidateCount.mockResolvedValue({
+      date: "2026-05-18",
+      count: 5,
+      counts_by_source: { arxiv: 5 },
+    });
+  });
 
   it("shows loading skeletons when search is running", async () => {
-    mockApi.getLatestSearchRun.mockResolvedValue({ id: "r1", status: "running" });
+    mockApi.getLatestSearchRun.mockResolvedValue({
+      id: "r1",
+      job_id: "j1",
+      status: "running",
+    });
     mockApi.getSearchRun.mockResolvedValue({
       id: "r1",
       status: "running",
-      stage: "matching_filters",
-      progress_current: 2,
-      progress_total: 5,
-      progress_message: "Matching filter 1/3: LLM Reasoning",
-      progress_log: [
-        {
-          at: "2026-05-17T19:00:00Z",
-          stage: "fetching_papers",
-          message: "Fetched 50 arXiv papers",
-        },
-        {
-          at: "2026-05-17T19:00:01Z",
+    });
+    mockApi.getDailySearchJob.mockResolvedValue({
+      job: {
+        id: "j1",
+        kind: "daily_search",
+        status: "running",
+        subject_type: "search_run",
+        subject_id: "r1",
+        progress: {
           stage: "matching_filters",
+          current: 2,
+          total: 5,
           message: "Matching filter 1/3: LLM Reasoning",
+          log: [
+            {
+              at: "2026-05-17T19:00:00Z",
+              stage: "fetching_papers",
+              message: "Fetched 50 arXiv papers",
+            },
+            {
+              at: "2026-05-17T19:00:01Z",
+              stage: "matching_filters",
+              message: "Matching filter 1/3: LLM Reasoning",
+            },
+          ],
+        },
+        created_at: "2026-05-17T19:00:00Z",
+        updated_at: "2026-05-17T19:00:01Z",
+      },
+      subject: { id: "r1", job_id: "j1", status: "running" },
+      items: [
+        {
+          id: "m1",
+          search_run_id: "r1",
+          filter_id: "f1",
+          paper_id: "p1",
+          result: "Already found during the run",
+          created_at: "2026-05-17T19:00:00Z",
+          paper_title: "Streaming Match",
+          paper_authors: ["Author A"],
+          filter_name: "LLM Reasoning",
         },
       ],
+      next_cursor: "cursor-1",
+      done: false,
     });
-    mockApi.getSearchRunMatches.mockResolvedValue([
-      {
-        id: "m1",
-        search_run_id: "r1",
-        filter_id: "f1",
-        paper_id: "p1",
-        result: "Already found during the run",
-        created_at: "2026-05-17T19:00:00Z",
-        paper_title: "Streaming Match",
-        paper_authors: ["Author A"],
-        filter_name: "LLM Reasoning",
-      },
-    ]);
     renderWithProviders(<DailyPage />);
     await waitFor(() => {
       expect(screen.getByText(/searching/i)).toBeInTheDocument();
       expect(screen.getAllByText(/matching filter 1\/3/i).length).toBeGreaterThan(0);
       expect(screen.getByText("40%")).toBeInTheDocument();
-      expect(mockApi.getSearchRunMatches).toHaveBeenCalled();
+      expect(mockApi.getSearchRunMatches).not.toHaveBeenCalled();
       expect(screen.getByRole("button", { name: /LLM Reasoning/i })).toBeInTheDocument();
     });
   });

@@ -20,7 +20,7 @@ from app.services.html_parser import (
     citation_validation_diagnostics,
     parse_arxiv_html,
 )
-from app.services.paper_html_source import arxiv_html_url, read_paper_html
+from app.services.arxiv_provider import arxiv_html_url, read_paper_html
 from app.llm.client import stream_structured_response
 from app.llm.config import IDEA_MAP_PROFILE
 from app.llm.prompts import (

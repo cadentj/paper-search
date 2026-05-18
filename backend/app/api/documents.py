@@ -12,7 +12,7 @@ from app.jobs.documents import process_document
 from app.jobs.queue import get_queue
 from app.models.document import Document
 from app.schemas.documents import DocumentResponse, DocumentUploadResponse
-from app.services.jobs import build_progress, create_job
+from app.services.jobs import build_progress, create_job, latest_job_for_subject
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -118,4 +118,16 @@ def get_document(document_id: str, db: Session = Depends(get_db)):
     document = db.query(Document).filter(Document.id == document_id).first()
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
-    return document
+    return _document_payload(document, db)
+
+
+def _document_payload(document: Document, db: Session) -> dict:
+    payload = DocumentResponse.model_validate(document).model_dump()
+    job = latest_job_for_subject(
+        db,
+        subject_type="document",
+        subject_id=document.id,
+        kind="document_processing",
+    )
+    payload["job_id"] = job.id if job else None
+    return payload

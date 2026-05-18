@@ -21,6 +21,7 @@ class ProposedFilter(BaseModel):
 
 class OnboardingExtractionResponse(BaseModel):
     id: str
+    job_id: Optional[str] = None
     status: str
     input_text: str
     proposed_filters: list[ProposedFilter | dict]

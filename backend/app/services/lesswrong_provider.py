@@ -1,17 +1,22 @@
-"""Public R2-backed LessWrong post provider."""
+"""LessWrong source — public R2 index access and provider."""
 
 from __future__ import annotations
 
-from datetime import datetime
+import logging
+from datetime import date, datetime
 from typing import Any
 
 from app.core.config import settings
+from app.models.paper import Paper
 from app.services.public_r2_index import (
     ShardedPublicIndexReader,
     has_searchable_text,
     http_get_text,
     public_url_for_base,
 )
+from app.services.source_types import SourceFetchResult, candidate_from_record
+
+logger = logging.getLogger(__name__)
 
 _LW_READER = ShardedPublicIndexReader(
     public_base_url=settings.LESSWRONG_HTML_PUBLIC_BASE_URL,
@@ -67,15 +72,6 @@ def posts_for_date(*, run_date: str, date_payload: dict[str, Any]) -> list[dict[
     return _LW_READER.items_for_date(run_date=run_date, date_payload=date_payload)
 
 
-def _transient_text_from_post_shard(post: dict[str, Any]) -> str:
-    raw = post.get("text_preview")
-    if raw is None:
-        raw = post.get("excerpt")
-    if raw is None:
-        return ""
-    return _first_words(str(raw), settings.LESSWRONG_EXCERPT_WORDS)
-
-
 def fetch_public_post_html(*, html_url: str | None = None, html_key: str | None = None) -> str | None:
     url = html_url or (public_url(html_key) if html_key else None)
     if not url:
@@ -91,6 +87,54 @@ def fetch_index() -> dict[str, Any]:
 
 def public_url(path_or_key: str) -> str:
     return public_url_for_base(settings.LESSWRONG_HTML_PUBLIC_BASE_URL, path_or_key)
+
+
+class LessWrongProvider:
+    source_type = "lesswrong"
+
+    def count_for_date(self, run_date: date) -> int:
+        try:
+            index = fetch_index()
+        except Exception:
+            logger.exception("failed to fetch LessWrong index count for %s", run_date)
+            return 0
+        payload = (index.get("dates") or {}).get(run_date.isoformat())
+        return int((payload or {}).get("count") or 0)
+
+    def candidates_for_date(self, run_date: date) -> SourceFetchResult:
+        try:
+            records, skipped = fetch_public_cached_posts(run_date=run_date.isoformat())
+        except Exception as exc:
+            logger.exception("failed to fetch cached LessWrong posts for %s", run_date)
+            return SourceFetchResult(items=[], errors=[f"LessWrong fetch failed: {exc}"])
+        skipped_map = {"lesswrong": skipped} if skipped else {}
+        return SourceFetchResult(
+            items=[candidate_from_record(record) for record in records],
+            skipped_missing_text=skipped_map,
+        )
+
+    def html_for_paper(self, paper: Paper) -> dict[str, str | None]:
+        try:
+            html = fetch_public_post_html(
+                html_url=paper.html_url,
+                html_key=(paper.source_metadata or {}).get("html_key"),
+            )
+        except Exception:
+            logger.exception("failed to fetch LessWrong HTML for paper=%s", paper.id)
+            html = None
+        return {
+            "html": html,
+            "source_url": paper.source_url or paper.landing_url,
+        }
+
+
+def _transient_text_from_post_shard(post: dict[str, Any]) -> str:
+    raw = post.get("text_preview")
+    if raw is None:
+        raw = post.get("excerpt")
+    if raw is None:
+        return ""
+    return _first_words(str(raw), settings.LESSWRONG_EXCERPT_WORDS)
 
 
 def _first_words(value: str, count: int) -> str:

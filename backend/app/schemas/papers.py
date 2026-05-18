@@ -25,6 +25,7 @@ class PaperResponse(BaseModel):
 
 class IdeaMapResponse(BaseModel):
     id: str
+    job_id: Optional[str] = None
     paper_id: str
     status: str
     claims: list

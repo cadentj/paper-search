@@ -5,6 +5,7 @@ from typing import Optional
 
 class SearchRunResponse(BaseModel):
     id: str
+    job_id: Optional[str] = None
     status: str
     run_date: date
     candidate_count: Optional[int] = None

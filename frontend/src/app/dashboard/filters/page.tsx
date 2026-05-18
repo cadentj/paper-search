@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,9 +27,9 @@ import {
 import {
   useArchiveFilter,
   useCreateOnboardingGeneration,
-  useDocument,
+  useDocumentProcessingJob,
   useFilters,
-  useJob,
+  useOnboardingGenerationJob,
   usePromoteDraftFilters,
   useRestoreFilter,
   useUpdateFilter,
@@ -81,8 +82,11 @@ function DocumentChip({
   onUpdate: (document: UploadedDocument) => void;
 }) {
   const isActive = BLOCKING_DOCUMENT_STATUSES.has(document.status);
-  const { data: latestDocument } = useDocument(document.id, isActive);
-  const { data: job } = useJob(document.job_id);
+  const { data: documentJob } = useDocumentProcessingJob(
+    isActive ? document.job_id : null
+  );
+  const latestDocument = documentJob?.subject;
+  const job = documentJob?.job;
   const displayDocument = latestDocument
     ? { ...document, ...latestDocument, job_id: document.job_id }
     : document;
@@ -247,6 +251,7 @@ function DraftFilterCard({ filter }: { filter: FilterResponse }) {
 }
 
 export default function FiltersPage() {
+  const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [inputText, setInputText] = useState("");
   const [documents, setDocuments] = useState<UploadedDocument[]>([]);
@@ -259,7 +264,8 @@ export default function FiltersPage() {
   const promoteDraftFilters = usePromoteDraftFilters();
   const archiveFilter = useArchiveFilter();
   const restoreFilter = useRestoreFilter();
-  const { data: generationJob } = useJob(generationJobId);
+  const { data: generationState } = useOnboardingGenerationJob(generationJobId);
+  const generationJob = generationState?.job;
   const { data: draftFilters = [] } = useFilters("draft");
   const { data: allFilters } = useFilters();
 
@@ -290,6 +296,20 @@ export default function FiltersPage() {
     if (documents.length === 0) return null;
     return `${processedCount}/${documents.length} PDFs processed`;
   }, [documents.length, processedCount]);
+
+  useEffect(() => {
+    if (!generationState) return;
+    if (generationState.items.length > 0) {
+      queryClient.setQueryData<FilterResponse[]>(
+        ["filters", "draft"],
+        (current = []) => {
+          const byId = new Map(current.map((filter) => [filter.id, filter]));
+          generationState.items.forEach((filter) => byId.set(filter.id, filter));
+          return Array.from(byId.values());
+        }
+      );
+    }
+  }, [generationState, queryClient]);
 
   const handleFiles = async (files: FileList | null) => {
     if (!files?.length) return;

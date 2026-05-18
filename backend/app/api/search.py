@@ -20,7 +20,7 @@ from app.schemas.search import (
 from app.schemas.jobs import JobStartResponse
 from app.jobs.queue import get_queue
 from app.jobs.daily_search import run_daily_search
-from app.services.jobs import build_progress, create_job
+from app.services.jobs import build_progress, create_job, latest_job_for_subject
 from app.services.daily_dates import DAILY_SEARCH_DATE_SET, DEFAULT_DAILY_SEARCH_DATE
 from app.services.source_providers import counts_by_source_for_date
 from app.services.source_settings import enabled_source_types, ensure_default_data_sources
@@ -32,13 +32,13 @@ logger = logging.getLogger(__name__)
 @router.get("", response_model=list[SearchRunResponse])
 def list_search_runs(db: Session = Depends(get_db)):
     runs = db.query(SearchRun).order_by(SearchRun.created_at.desc()).all()
-    return runs
+    return [_search_run_payload(run, db) for run in runs]
 
 
 @router.get("/latest", response_model=Optional[SearchRunResponse])
 def get_latest_search_run(db: Session = Depends(get_db)):
     run = db.query(SearchRun).order_by(SearchRun.created_at.desc()).first()
-    return run
+    return _search_run_payload(run, db) if run else None
 
 
 @router.get("/daily-candidate-count", response_model=DailyCandidateCountResponse)
@@ -133,7 +133,7 @@ def get_search_run(search_run_id: str, db: Session = Depends(get_db)):
     run = db.query(SearchRun).filter(SearchRun.id == search_run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Search run not found")
-    return run
+    return _search_run_payload(run, db)
 
 
 @router.get("/{search_run_id}/matches", response_model=list[PaperMatchResponse])
@@ -182,3 +182,15 @@ def _paper_item_label(paper: Paper) -> str:
     source_type = paper.source_type or "arxiv"
     source_id = paper.source_id or paper.arxiv_id or paper.id
     return f"{source_type}:{source_id}"
+
+
+def _search_run_payload(run: SearchRun, db: Session) -> dict:
+    payload = SearchRunResponse.model_validate(run).model_dump()
+    job = latest_job_for_subject(
+        db,
+        subject_type="search_run",
+        subject_id=run.id,
+        kind="daily_search",
+    )
+    payload["job_id"] = job.id if job else None
+    return payload

@@ -1,10 +1,12 @@
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel
 
 
 class DocumentResponse(BaseModel):
     id: str
+    job_id: Optional[str] = None
     original_filename: str
     content_type: str
     size_bytes: int

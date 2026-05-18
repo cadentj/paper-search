@@ -1,7 +1,8 @@
 "use client";
 
+import { useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, FilterDefinition } from "@/lib/api";
+import { api, FilterDefinition, FilterResponse, PaperMatch } from "@/lib/api";
 
 const ACTIVE_JOB_STATUSES = new Set(["queued", "running"]);
 
@@ -15,6 +16,84 @@ export function useJob(id: string | null) {
       if (status && ACTIVE_JOB_STATUSES.has(status)) return 1000;
       return false;
     },
+  });
+}
+
+export function useDailySearchJob(id: string | null) {
+  const cursorRef = useRef<string | null>(null);
+  const jobIdRef = useRef<string | null>(null);
+  const itemsRef = useRef<Map<string, PaperMatch>>(new Map());
+
+  return useQuery({
+    queryKey: ["jobs", "daily-search", id],
+    queryFn: async () => {
+      if (jobIdRef.current !== id) {
+        jobIdRef.current = id;
+        cursorRef.current = null;
+        itemsRef.current = new Map();
+      }
+      const result = await api.getDailySearchJob(id!, cursorRef.current);
+      result.items.forEach((item) => itemsRef.current.set(item.id, item));
+      cursorRef.current = result.next_cursor ?? cursorRef.current;
+      return { ...result, items: Array.from(itemsRef.current.values()) };
+    },
+    enabled: !!id,
+    refetchInterval: (query) => (query.state.data?.done ? false : 1000),
+  });
+}
+
+export function useIdeaMapJob(id: string | null) {
+  return useQuery({
+    queryKey: ["jobs", "idea-map", id],
+    queryFn: () => api.getIdeaMapJob(id!),
+    enabled: !!id,
+    refetchInterval: (query) => (query.state.data?.done ? false : 1000),
+  });
+}
+
+export function useOnboardingGenerationJob(
+  id: string | null
+) {
+  const cursorRef = useRef<string | null>(null);
+  const jobIdRef = useRef<string | null>(null);
+  const itemsRef = useRef<Map<string, FilterResponse>>(new Map());
+
+  return useQuery({
+    queryKey: ["jobs", "onboarding-generation", id],
+    queryFn: async () => {
+      if (jobIdRef.current !== id) {
+        jobIdRef.current = id;
+        cursorRef.current = null;
+        itemsRef.current = new Map();
+      }
+      const result = await api.getOnboardingGenerationJob(
+        id!,
+        cursorRef.current
+      );
+      result.items.forEach((item) => itemsRef.current.set(item.id, item));
+      cursorRef.current = result.next_cursor ?? cursorRef.current;
+      return { ...result, items: Array.from(itemsRef.current.values()) };
+    },
+    enabled: !!id,
+    refetchInterval: (query) => (query.state.data?.done ? false : 1000),
+  });
+}
+
+export function useOnboardingExtractionJob(id: string | null) {
+  return useQuery({
+    queryKey: ["jobs", "onboarding-extraction", id],
+    queryFn: () => api.getOnboardingExtractionJob(id!),
+    enabled: !!id,
+    refetchInterval: (query) => (query.state.data?.done ? false : 1000),
+  });
+}
+
+export function useDocumentProcessingJob(id: string | null) {
+  return useQuery({
+    queryKey: ["jobs", "document-processing", id],
+    queryFn: () => api.getDocumentProcessingJob(id!),
+    enabled: !!id,
+    refetchInterval: (query) => (query.state.data?.done ? false : 1000),
   });
 }
 

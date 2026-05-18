@@ -22,7 +22,7 @@ import {
   useCreateFilter,
   useArchiveFilter,
   useDailyCandidateCount,
-  useJob,
+  useDailySearchJob,
 } from "@/hooks/use-queries";
 import {
   DAILY_SEARCH_DATE_SET,
@@ -63,7 +63,7 @@ import {
 } from "lucide-react";
 import type { Job, PaperMatch, SearchRun } from "@/lib/api";
 
-type FilterMode = "claim" | "question" | "topic";
+type FilterMode = "claim" | "topic";
 type MatchGroup = { name: string; matches: PaperMatch[] };
 
 const PROGRESS_SKELETON_KEYS = [
@@ -244,7 +244,7 @@ function QuickAddFilter({
       <Select
         value={filterType}
         onValueChange={(value) => {
-          if (value === "claim" || value === "question" || value === "topic") {
+          if (value === "claim" || value === "topic") {
             onFilterTypeChange(value);
           }
         }}
@@ -254,7 +254,6 @@ function QuickAddFilter({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="claim">Claim</SelectItem>
-          <SelectItem value="question">Question</SelectItem>
           <SelectItem value="topic">Topic</SelectItem>
         </SelectContent>
       </Select>
@@ -484,17 +483,24 @@ export default function DailyPage() {
   const queryClient = useQueryClient();
   const { data: latestRun } = useLatestSearchRun();
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const { data: activeJob } = useJob(activeJobId);
-  const activeRunId =
-    activeJob?.subject_type === "search_run" ? activeJob.subject_id || null : null;
-  const runId = activeRunId || latestRun?.id || null;
+  const recoveredJobId =
+    latestRun?.status === "queued" || latestRun?.status === "running"
+      ? latestRun.job_id || null
+      : null;
+  const currentJobId = activeJobId || recoveredJobId;
+  const { data: dailyJob } = useDailySearchJob(currentJobId);
+  const activeJob = dailyJob?.job ?? null;
+  const typedRun = dailyJob?.subject ?? null;
+  const runId = typedRun?.id || latestRun?.id || null;
   const isJobRunning =
     activeJob?.status === "queued" || activeJob?.status === "running";
-  const { data: run } = useSearchRun(runId, !!activeRunId && !!isJobRunning);
-  const { data: matches = EMPTY_PAPER_MATCHES } = useSearchRunMatches(
-    runId,
-    activeJob?.status ?? run?.status
+  const { data: fetchedRun } = useSearchRun(runId, false);
+  const run = typedRun || fetchedRun || latestRun || null;
+  const { data: historicalMatches = EMPTY_PAPER_MATCHES } = useSearchRunMatches(
+    currentJobId ? null : runId,
+    run?.status
   );
+  const matches = currentJobId ? dailyJob?.items ?? EMPTY_PAPER_MATCHES : historicalMatches;
   const createSearch = useCreateDailySearch();
   const archiveFilter = useArchiveFilter();
   const createFilter = useCreateFilter();
@@ -513,17 +519,16 @@ export default function DailyPage() {
   const selectedDateBreakdown = candidateCount?.counts_by_source;
 
   useEffect(() => {
-    if (!activeJob || activeJob.status === "queued" || activeJob.status === "running") {
-      return;
-    }
-    if (activeRunId) {
-      queryClient.invalidateQueries({ queryKey: ["search-runs", activeRunId] });
-      queryClient.invalidateQueries({ queryKey: ["search-runs", activeRunId, "matches"] });
+    if (!dailyJob) return;
+    if (dailyJob.done) {
+      queryClient.invalidateQueries({ queryKey: ["search-runs", dailyJob.subject.id] });
+      queryClient.invalidateQueries({ queryKey: ["search-runs", dailyJob.subject.id, "matches"] });
       queryClient.invalidateQueries({ queryKey: ["search-runs", "latest"] });
     }
-  }, [activeJob, activeRunId, queryClient]);
+  }, [dailyJob, queryClient]);
 
-  const isRunning = isJobRunning || createSearch.isPending;
+  const isRunPending = run?.status === "queued" || run?.status === "running";
+  const isRunning = isJobRunning || isRunPending || createSearch.isPending;
   const progressTotal = Math.max(activeJob?.progress?.total ?? 1, 1);
   const progressCurrent = Math.min(activeJob?.progress?.current ?? 0, progressTotal);
   const progressPercent = Math.round((progressCurrent / progressTotal) * 100);
@@ -598,7 +603,7 @@ export default function DailyPage() {
         onFilterTypeChange={setQuickFilterType}
         onAddFilter={handleQuickAddFilter}
       />
-      {(isRunning || createSearch.isPending) && (
+      {(isJobRunning || createSearch.isPending) && (
         <SearchProgress
           job={activeJob}
           progressPercent={progressPercent}

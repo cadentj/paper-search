@@ -47,6 +47,7 @@ export interface OnboardingStatus {
 
 export interface OnboardingExtraction {
   id: string;
+  job_id?: string | null;
   status: string;
   input_text: string;
   proposed_filters: ProposedFilter[];
@@ -91,6 +92,7 @@ export interface JobStartResponse {
 
 export interface DocumentResponse {
   id: string;
+  job_id?: string | null;
   original_filename: string;
   content_type: string;
   size_bytes: number;
@@ -110,6 +112,7 @@ export interface DocumentUploadResponse extends DocumentResponse {
 
 export interface SearchRun {
   id: string;
+  job_id?: string | null;
   status: string;
   run_date: string;
   candidate_count?: number;
@@ -203,6 +206,7 @@ export interface IdeaMapClaim {
 
 export interface IdeaMap {
   id: string;
+  job_id?: string | null;
   paper_id: string;
   status: string;
   claims: IdeaMapClaim[];
@@ -213,6 +217,46 @@ export interface IdeaMap {
   updated_at: string;
 }
 
+export interface DailySearchJobResponse {
+  job: Job;
+  subject: SearchRun;
+  items: PaperMatch[];
+  next_cursor?: string | null;
+  done: boolean;
+}
+
+export interface IdeaMapJobResponse {
+  job: Job;
+  subject: IdeaMap;
+  items: Record<string, unknown>[];
+  next_cursor?: string | null;
+  done: boolean;
+}
+
+export interface OnboardingGenerationJobResponse {
+  job: Job;
+  subject: Job;
+  items: FilterResponse[];
+  next_cursor?: string | null;
+  done: boolean;
+}
+
+export interface OnboardingExtractionJobResponse {
+  job: Job;
+  subject: OnboardingExtraction;
+  items: Record<string, unknown>[];
+  next_cursor?: string | null;
+  done: boolean;
+}
+
+export interface DocumentProcessingJobResponse {
+  job: Job;
+  subject: DocumentResponse;
+  items: Record<string, unknown>[];
+  next_cursor?: string | null;
+  done: boolean;
+}
+
 // API functions
 export const api = {
   // Health
@@ -220,6 +264,20 @@ export const api = {
 
   // Jobs
   getJob: (id: string) => fetchApi<Job>(`/jobs/${id}`),
+  getDailySearchJob: (id: string, cursor?: string | null) =>
+    fetchApi<DailySearchJobResponse>(
+      `/jobs/daily-search/${id}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
+    ),
+  getIdeaMapJob: (id: string) =>
+    fetchApi<IdeaMapJobResponse>(`/jobs/idea-map/${id}`),
+  getOnboardingGenerationJob: (id: string, cursor?: string | null) =>
+    fetchApi<OnboardingGenerationJobResponse>(
+      `/jobs/onboarding-generation/${id}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
+    ),
+  getOnboardingExtractionJob: (id: string) =>
+    fetchApi<OnboardingExtractionJobResponse>(`/jobs/onboarding-extraction/${id}`),
+  getDocumentProcessingJob: (id: string) =>
+    fetchApi<DocumentProcessingJobResponse>(`/jobs/document-processing/${id}`),
 
   // Onboarding
   getOnboardingStatus: () => fetchApi<OnboardingStatus>("/onboarding/status"),

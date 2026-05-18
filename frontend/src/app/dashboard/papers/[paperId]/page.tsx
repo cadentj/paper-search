@@ -11,7 +11,7 @@ import {
   usePaperHtml,
   useIdeaMap,
   useGenerateIdeaMap,
-  useJob,
+  useIdeaMapJob,
 } from "@/hooks/use-queries";
 import {
   Loader2,
@@ -470,13 +470,19 @@ export default function PaperDetailPage({
   const { data: paper } = usePaper(paperId);
   const { data: htmlData } = usePaperHtml(paperId);
   const [ideaMapJobId, setIdeaMapJobId] = useState<string | null>(null);
-  const { data: ideaMapJob } = useJob(ideaMapJobId);
-  const isIdeaMapJobRunning =
-    ideaMapJob?.status === "queued" || ideaMapJob?.status === "running";
-  const { data: ideaMap, error: ideaMapError } = useIdeaMap(
-    paperId,
-    !!isIdeaMapJobRunning
+  const { data: fetchedIdeaMap, error: ideaMapError } = useIdeaMap(paperId);
+  const recoveredIdeaMapJobId =
+    fetchedIdeaMap?.status === "queued" ||
+    fetchedIdeaMap?.status === "running" ||
+    fetchedIdeaMap?.status === "claims_running" ||
+    fetchedIdeaMap?.status === "warrants_running"
+      ? fetchedIdeaMap.job_id || null
+      : null;
+  const { data: ideaMapJobState } = useIdeaMapJob(
+    ideaMapJobId || recoveredIdeaMapJobId
   );
+  const ideaMapJob = ideaMapJobState?.job;
+  const ideaMap = ideaMapJobState?.subject || fetchedIdeaMap;
   const generateIdeaMap = useGenerateIdeaMap();
 
   const [expandedClaims, setExpandedClaims] = useState<Set<string>>(new Set());

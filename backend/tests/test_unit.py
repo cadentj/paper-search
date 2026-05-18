@@ -10,9 +10,9 @@ from app.services.html_parser import (
 )
 
 
-class TestPublicArxivCache:
+class TestArxivProvider:
     def test_uses_index_abstract_without_html_fetch(self, monkeypatch):
-        from app.services import public_arxiv_cache as cache
+        from app.services import arxiv_provider as cache
 
         def fail_fetch(**kwargs):
             raise AssertionError("HTML fetch should not run when index has abstract")
@@ -35,7 +35,7 @@ class TestPublicArxivCache:
         assert record["authors"] == ["Author One"]
 
     def test_papers_for_date_reads_date_shard(self, monkeypatch):
-        from app.services import public_arxiv_cache as cache
+        from app.services import arxiv_provider as cache
 
         def fake_shard(self, index_key: str) -> dict:
             return {
@@ -59,7 +59,7 @@ class TestPublicArxivCache:
         assert papers[0]["title"] == "Shard"
 
     def test_fetch_public_cached_papers_skips_empty_abstract(self, monkeypatch):
-        from app.services import public_arxiv_cache as cache
+        from app.services import arxiv_provider as cache
 
         def fake_shard(self, index_key: str) -> dict:
             return {
@@ -103,9 +103,9 @@ class TestPublicArxivCache:
         assert records[0]["arxiv_id"] == "2605.01234"
 
 
-class TestPublicLesswrongCache:
+class TestLesswrongProvider:
     def test_fetch_skips_posts_without_preview(self, monkeypatch):
-        from app.services import public_lesswrong_cache as lw
+        from app.services import lesswrong_provider as lw
 
         def fake_shard(self, index_key: str) -> dict:
             return {

@@ -157,4 +157,16 @@ def get_idea_map(paper_id: str, db: Session = Depends(get_db)):
     idea_map = db.query(IdeaMap).filter(IdeaMap.paper_id == paper_id).first()
     if not idea_map:
         raise HTTPException(status_code=404, detail="Idea map not found")
-    return idea_map
+    return _idea_map_payload(idea_map, db)
+
+
+def _idea_map_payload(idea_map: IdeaMap, db: Session) -> dict:
+    payload = IdeaMapResponse.model_validate(idea_map).model_dump()
+    job = latest_job_for_subject(
+        db,
+        subject_type="idea_map",
+        subject_id=idea_map.id,
+        kind="idea_map",
+    )
+    payload["job_id"] = job.id if job else None
+    return payload

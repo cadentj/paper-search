@@ -21,7 +21,7 @@ from app.schemas.filters import FilterResponse
 from app.schemas.jobs import JobStartResponse
 from app.jobs.queue import get_queue
 from app.jobs.onboarding import extract_onboarding_filters, generate_onboarding_draft_filters
-from app.services.jobs import build_progress, create_job
+from app.services.jobs import build_progress, create_job, latest_job_for_subject
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
 logger = logging.getLogger(__name__)
@@ -188,7 +188,7 @@ def get_extraction(extraction_id: str, db: Session = Depends(get_db)):
     ).first()
     if not extraction:
         raise HTTPException(status_code=404, detail="Extraction not found")
-    return extraction
+    return _extraction_payload(extraction, db)
 
 
 @router.post("/complete", response_model=list[FilterResponse])
@@ -221,3 +221,15 @@ def complete_onboarding(body: OnboardingCompleteRequest, db: Session = Depends(g
         db.refresh(f)
 
     return created_filters
+
+
+def _extraction_payload(extraction: OnboardingExtraction, db: Session) -> dict:
+    payload = OnboardingExtractionResponse.model_validate(extraction).model_dump()
+    job = latest_job_for_subject(
+        db,
+        subject_type="onboarding_extraction",
+        subject_id=extraction.id,
+        kind="onboarding_extraction",
+    )
+    payload["job_id"] = job.id if job else None
+    return payload

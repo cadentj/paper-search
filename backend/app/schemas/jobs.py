@@ -2,6 +2,12 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.documents import DocumentResponse
+from app.schemas.filters import FilterResponse
+from app.schemas.onboarding import OnboardingExtractionResponse
+from app.schemas.papers import IdeaMapResponse
+from app.schemas.search import PaperMatchResponse, SearchRunResponse
+
 
 class JobProgress(BaseModel):
     stage: str = "queued"
@@ -33,3 +39,43 @@ class JobResponse(BaseModel):
 
 class JobStartResponse(BaseModel):
     job_id: str
+
+
+class DailySearchJobResponse(BaseModel):
+    job: JobResponse
+    subject: SearchRunResponse
+    items: list[PaperMatchResponse] = Field(default_factory=list)
+    next_cursor: str | None = None
+    done: bool = False
+
+
+class IdeaMapJobResponse(BaseModel):
+    job: JobResponse
+    subject: IdeaMapResponse
+    items: list[dict] = Field(default_factory=list)
+    next_cursor: str | None = None
+    done: bool = False
+
+
+class OnboardingGenerationJobResponse(BaseModel):
+    job: JobResponse
+    subject: JobResponse
+    items: list[FilterResponse] = Field(default_factory=list)
+    next_cursor: str | None = None
+    done: bool = False
+
+
+class OnboardingExtractionJobResponse(BaseModel):
+    job: JobResponse
+    subject: OnboardingExtractionResponse
+    items: list[dict] = Field(default_factory=list)
+    next_cursor: str | None = None
+    done: bool = False
+
+
+class DocumentProcessingJobResponse(BaseModel):
+    job: JobResponse
+    subject: DocumentResponse
+    items: list[dict] = Field(default_factory=list)
+    next_cursor: str | None = None
+    done: bool = False
