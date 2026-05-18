@@ -14,6 +14,11 @@ const mockApi = vi.hoisted(() => ({
   archiveFilter: vi.fn(),
   restoreFilter: vi.fn(),
   updateFilter: vi.fn(),
+  getJob: vi.fn(),
+  uploadDocument: vi.fn(),
+  getDocument: vi.fn(),
+  createOnboardingGeneration: vi.fn(),
+  promoteDraftFilters: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -31,33 +36,36 @@ describe("FiltersPage", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("shows active and archived filters", async () => {
-    mockApi.getFilters.mockResolvedValue([
-      {
-        id: "f1",
-        name: "Active Filter",
-        status: "active",
-        definition: {
+    mockApi.getFilters.mockImplementation((status?: string) => {
+      if (status === "draft") return Promise.resolve([]);
+      return Promise.resolve([
+        {
+          id: "f1",
           name: "Active Filter",
-          description: "Test statement",
-          mode: "claim",
+          status: "active",
+          definition: {
+            name: "Active Filter",
+            description: "Test statement",
+            mode: "claim",
+          },
+          created_at: "2024-01-01T00:00:00Z",
+          updated_at: "2024-01-01T00:00:00Z",
         },
-        created_at: "2024-01-01T00:00:00Z",
-        updated_at: "2024-01-01T00:00:00Z",
-      },
-      {
-        id: "f2",
-        name: "Archived Filter",
-        status: "archived",
-        definition: {
+        {
+          id: "f2",
           name: "Archived Filter",
-          description: "Old statement",
-          mode: "topic",
+          status: "archived",
+          definition: {
+            name: "Archived Filter",
+            description: "Old statement",
+            mode: "topic",
+          },
+          created_at: "2024-01-01T00:00:00Z",
+          updated_at: "2024-01-01T00:00:00Z",
+          archived_at: "2024-01-02T00:00:00Z",
         },
-        created_at: "2024-01-01T00:00:00Z",
-        updated_at: "2024-01-01T00:00:00Z",
-        archived_at: "2024-01-02T00:00:00Z",
-      },
-    ]);
+      ]);
+    });
     renderWithProviders(<FiltersPage />);
     await waitFor(() => {
       expect(screen.getByText("Active Filter")).toBeInTheDocument();
@@ -74,5 +82,28 @@ describe("FiltersPage", () => {
 
     expect(archivedToggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Archived Filter")).toBeInTheDocument();
+  });
+
+  it("shows research context input for generating filters", async () => {
+    mockApi.getFilters.mockImplementation(() => Promise.resolve([]));
+    renderWithProviders(<FiltersPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Research context")).toBeInTheDocument();
+      expect(
+        screen.getByPlaceholderText(
+          /add a research direction/i
+        )
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("shows empty state when no filters exist", async () => {
+    mockApi.getFilters.mockImplementation(() => Promise.resolve([]));
+    renderWithProviders(<FiltersPage />);
+    await waitFor(() => {
+      expect(
+        screen.getByText(/no filters yet/i)
+      ).toBeInTheDocument();
+    });
   });
 });

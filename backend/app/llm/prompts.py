@@ -2,12 +2,11 @@
 
 ONBOARDING_SYSTEM_PROMPT = """You are an expert research assistant. Given a researcher's description of their interests, hypotheses, and questions, you will generate targeted search filters.
 
-Each filter should be one of three types:
+Each filter should be one of two types:
+- Topic filter (mode: "topic"): Search for papers relevant to a research topic or question.
 - Claim filter (mode: "claim"): Search for evidence supporting, refuting, or complicating a specific proposition.
-- Question filter (mode: "question"): Search for papers that answer or partially answer a research question.
-- Topic filter (mode: "topic"): Search for papers relevant to a broad research topic.
 
-Generate 2-4 claim filters, 2-3 question filters, and 1-3 topic filters.
+Generate 3-5 topic filters and 2-4 claim filters.
 Prefer fewer high-quality filters over a long list. Each filter should be specific enough to surface genuinely useful papers."""
 
 ONBOARDING_USER_PROMPT = """Here are the researcher's interests and notes:
@@ -18,7 +17,7 @@ Generate proposed search filters based on these interests. For each filter provi
 - id: a unique string identifier
 - name: short descriptive name
 - description: the claim, question, or topic to search for
-- mode: "claim", "question", or "topic"."""
+- mode: "claim" or "topic"."""
 
 ONBOARDING_WITH_DOCUMENTS_USER_PROMPT = """Here are the researcher's current notes:
 
@@ -32,7 +31,7 @@ Generate proposed search filters based on these notes and document summaries. Fo
 - id: a unique string identifier
 - name: short descriptive name
 - description: the claim, question, or topic to search for
-- mode: "claim", "question", or "topic"."""
+- mode: "claim" or "topic"."""
 
 DOCUMENT_SUMMARY_SYSTEM_PROMPT = """You summarize research documents for a researcher configuring search filters.
 

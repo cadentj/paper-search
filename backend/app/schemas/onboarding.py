@@ -16,7 +16,7 @@ class ProposedFilter(BaseModel):
     id: str
     name: str
     description: str
-    mode: Literal["claim", "question", "topic"] = "topic"
+    mode: Literal["claim", "topic"] = "topic"
 
 
 class OnboardingExtractionResponse(BaseModel):

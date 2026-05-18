@@ -25,5 +25,5 @@ export default async function Home() {
   if (await getOnboardingCompleted()) {
     redirect("/dashboard/daily");
   }
-  redirect("/dashboard/onboarding");
+  redirect("/dashboard/filters");
 }

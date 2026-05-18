@@ -1,5 +1,5 @@
-import { OnboardingClient } from "@/app/onboarding/onboarding-client";
+import { redirect } from "next/navigation";
 
 export default function DashboardOnboardingPage() {
-  return <OnboardingClient />;
+  redirect("/dashboard/filters");
 }
