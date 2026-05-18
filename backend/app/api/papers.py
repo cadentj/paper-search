@@ -12,6 +12,7 @@ from app.models.idea_map import IdeaMap
 from app.schemas.papers import PaperResponse, IdeaMapResponse
 from app.jobs.queue import get_queue
 from app.jobs.idea_map import generate_idea_map
+from app.services.html_parser import prepare_arxiv_html_for_viewer
 
 router = APIRouter(prefix="/papers", tags=["papers"])
 logger = logging.getLogger(__name__)
@@ -33,7 +34,10 @@ def get_paper_html(paper_id: str, db: Session = Depends(get_db)):
 
     cached = db.query(PaperHtml).filter(PaperHtml.paper_id == paper_id).first()
     if cached:
-        return {"html": cached.html, "source_url": cached.source_url}
+        return {
+            "html": prepare_arxiv_html_for_viewer(cached.html, cached.source_url),
+            "source_url": cached.source_url,
+        }
 
     return {"html": None, "source_url": f"https://arxiv.org/html/{paper.arxiv_id}" if paper.arxiv_id else None}
 
@@ -47,8 +51,6 @@ def create_or_get_idea_map(paper_id: str, db: Session = Depends(get_db)):
     existing = db.query(IdeaMap).filter(IdeaMap.paper_id == paper_id).first()
     if existing:
         if existing.status in {"queued", "running"}:
-            return existing
-        if existing.status == "completed" and existing.claims:
             return existing
 
         existing.status = "queued"

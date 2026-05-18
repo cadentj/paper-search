@@ -4,8 +4,8 @@ Run from repo root:
     cd backend
     python scratch_openrouter_stream.py
 
-This intentionally does not import app settings, so it can verify the SDK
-surface independently of the app's current httpx client.
+This intentionally bypasses the app client, so it can verify the SDK surface
+independently of the app's current httpx client.
 """
 
 from __future__ import annotations
@@ -17,6 +17,8 @@ from typing import List
 
 from openai import OpenAI
 from pydantic import BaseModel
+
+from app.llm.config import FILTER_GENERATION_PROFILE, get_llm_config
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,7 +53,7 @@ def print_exception(exc: Exception) -> None:
             pass
 
 
-def test_responses_stream(client: OpenAI, model: str) -> None:
+def test_responses_stream(client: OpenAI, model: str, provider: str) -> None:
     print("\n=== responses.stream + text_format ===")
     with client.responses.stream(
         model=model,
@@ -62,6 +64,7 @@ def test_responses_stream(client: OpenAI, model: str) -> None:
                 "content": "The quick brown fox jumps over the lazy dog with piercing blue eyes.",
             },
         ],
+        extra_body={"provider": {"order": [provider]}},
         text_format=EntitiesModel,
     ) as stream:
         for event in stream:
@@ -77,7 +80,7 @@ def test_responses_stream(client: OpenAI, model: str) -> None:
         print(final_response)
 
 
-def test_chat_stream(client: OpenAI, model: str) -> None:
+def test_chat_stream(client: OpenAI, model: str, provider: str) -> None:
     print("\n=== chat.completions stream + response_format ===")
     schema = EntitiesModel.model_json_schema()
     stream = client.chat.completions.create(
@@ -97,6 +100,7 @@ def test_chat_stream(client: OpenAI, model: str) -> None:
                 "schema": schema,
             },
         },
+        extra_body={"provider": {"order": [provider]}},
         stream=True,
     )
 
@@ -113,7 +117,7 @@ def test_chat_stream(client: OpenAI, model: str) -> None:
 def main() -> None:
     load_root_env()
     api_key = os.environ.get("OPENROUTER_API_KEY")
-    model = os.environ.get("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash")
+    model_config = get_llm_config(FILTER_GENERATION_PROFILE)
     if not api_key:
         raise RuntimeError("OPENROUTER_API_KEY is not set")
 
@@ -124,7 +128,7 @@ def main() -> None:
 
     for test in (test_responses_stream, test_chat_stream):
         try:
-            test(client, model)
+            test(client, model_config.model, model_config.provider)
         except Exception as exc:
             print_exception(exc)
 

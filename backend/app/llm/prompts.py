@@ -134,26 +134,27 @@ SUMMARY_SCHEMA = {
     "additionalProperties": False,
 }
 
-IDEA_MAP_SYSTEM_PROMPT = """You are a paper analyst. Given HTML content from an academic paper, extract the paper's core claims and their supporting warrants with precise citations.
+IDEA_MAP_SYSTEM_PROMPT = """You are a paper analyst. Given addressable HTML blocks from the main body of an academic paper, extract the paper's core claims and their supporting warrants with block-range citations.
 
 Definitions:
 - Claim: a concise proposition the paper argues, demonstrates, or relies on.
 - Warrant: the specific reason the paper gives for believing the claim (a result, experiment, theorem, ablation, argument, or comparison).
-- Citation: the exact HTML text location that justifies the warrant.
+- Citation: a contiguous range of provided block ids that justifies the warrant.
 
 Rules:
 - Each warrant must have exactly one citation.
 - If a warrant needs multiple citations, split it into multiple warrants under the same claim.
-- The blockId must match an existing block in the provided content.
-- The quote must be an exact substring found in that block's text.
-- Provide prefix and suffix for additional context around the quote.
+- Cite only block ids that appear in the provided content.
+- Use startBlockId and endBlockId. For one-block citations, set them to the same id.
+- Citation ranges must be contiguous and no longer than 3 blocks.
+- Do not invent quotes or cite text that is not supported by the cited block range.
 - Include the sectionTitle if the block is within a section."""
 
 IDEA_MAP_USER_PROMPT = """Here are the addressable blocks from the paper HTML:
 
 {blocks_text}
 
-Extract the paper's core claims and supporting warrants with citations to these blocks."""
+Extract the paper's core claims and supporting warrants with citations to these block ids."""
 
 IDEA_MAP_SCHEMA = {
     "type": "object",
@@ -175,14 +176,11 @@ IDEA_MAP_SCHEMA = {
                                 "citation": {
                                     "type": "object",
                                     "properties": {
-                                        "blockId": {"type": "string"},
-                                        "quote": {"type": "string"},
-                                        "prefix": {"type": "string"},
-                                        "suffix": {"type": "string"},
-                                        "htmlAnchor": {"type": "string"},
+                                        "startBlockId": {"type": "string"},
+                                        "endBlockId": {"type": "string"},
                                         "sectionTitle": {"type": "string"},
                                     },
-                                    "required": ["blockId", "quote", "prefix", "suffix", "htmlAnchor", "sectionTitle"],
+                                    "required": ["startBlockId", "endBlockId", "sectionTitle"],
                                     "additionalProperties": False,
                                 },
                             },

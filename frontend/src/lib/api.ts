@@ -121,11 +121,8 @@ export interface IdeaMapWarrant {
   id: string;
   text: string;
   citation: {
-    blockId: string;
-    quote: string;
-    prefix?: string;
-    suffix?: string;
-    htmlAnchor: string;
+    startBlockId: string;
+    endBlockId: string;
     sectionTitle?: string;
   };
 }

@@ -29,6 +29,8 @@ import {
   Plus,
   Archive,
   RotateCcw,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 
 export default function FiltersPage() {
@@ -40,6 +42,7 @@ export default function FiltersPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [archivedOpen, setArchivedOpen] = useState(false);
 
   const activeFilters = allFilters?.filter((f) => f.status === "active") || [];
   const archivedFilters =
@@ -141,31 +144,42 @@ export default function FiltersPage() {
 
         {archivedFilters.length > 0 && (
           <div className="space-y-3">
-            <h2 className="text-lg font-semibold text-muted-foreground">
+            <button
+              type="button"
+              className="flex items-center gap-2 text-lg font-semibold text-muted-foreground"
+              onClick={() => setArchivedOpen((open) => !open)}
+              aria-expanded={archivedOpen}
+            >
+              {archivedOpen ? (
+                <ChevronDown className="size-4" />
+              ) : (
+                <ChevronRight className="size-4" />
+              )}
               Archived ({archivedFilters.length})
-            </h2>
-            {archivedFilters.map((f) => (
-              <Card key={f.id} className="opacity-60">
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <div className="min-w-0 space-y-1">
-                      <CardTitle className="text-sm">{f.name}</CardTitle>
-                      <p className="text-sm text-muted-foreground">
-                        {f.definition?.description}
-                      </p>
+            </button>
+            {archivedOpen &&
+              archivedFilters.map((f) => (
+                <Card key={f.id} className="opacity-60">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0 space-y-1">
+                        <CardTitle className="text-sm">{f.name}</CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                          {f.definition?.description}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => restoreFilter.mutate(f.id)}
+                      >
+                        <RotateCcw className="mr-1 size-3" />
+                        Restore
+                      </Button>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => restoreFilter.mutate(f.id)}
-                    >
-                      <RotateCcw className="mr-1 size-3" />
-                      Restore
-                    </Button>
-                  </div>
-                </CardHeader>
-              </Card>
-            ))}
+                  </CardHeader>
+                </Card>
+              ))}
           </div>
         )}
 

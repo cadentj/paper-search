@@ -62,8 +62,8 @@ export default function PaperDetailPage({
   const handleWarrantClick = (warrant: IdeaMapWarrant) => {
     setHighlightedWarrant(warrant.id);
     if (iframeRef.current?.contentWindow && warrant.citation) {
-      const anchor = warrant.citation.htmlAnchor;
-      if (anchor) {
+      const { startBlockId, endBlockId } = warrant.citation;
+      if (startBlockId && endBlockId) {
         try {
           const doc = iframeRef.current.contentDocument;
           if (doc) {
@@ -71,19 +71,36 @@ export default function PaperDetailPage({
             prevHighlights.forEach((el) => {
               el.classList.remove("ps-highlight");
               (el as HTMLElement).style.backgroundColor = "";
+              (el as HTMLElement).style.outline = "";
+              (el as HTMLElement).style.scrollMarginTop = "";
             });
 
-            const targetId = anchor.replace("#", "");
-            const target = doc.getElementById(targetId);
-            if (target) {
-              target.scrollIntoView({ behavior: "smooth", block: "center" });
-              target.style.backgroundColor = "#fef08a";
-              target.classList.add("ps-highlight");
+            const start = doc.getElementById(startBlockId);
+            const end = doc.getElementById(endBlockId);
+            if (start && end) {
+              const blockSelector =
+                "p[id], h1[id], h2[id], h3[id], h4[id], h5[id], h6[id], li[id], td[id], th[id], figcaption[id], blockquote[id]";
+              const blocks = Array.from(doc.querySelectorAll(blockSelector));
+              const startIndex = blocks.indexOf(start);
+              const endIndex = blocks.indexOf(end);
+              const highlightedBlocks =
+                startIndex >= 0 && endIndex >= startIndex
+                  ? blocks.slice(startIndex, endIndex + 1)
+                  : [start];
+
+              highlightedBlocks.forEach((el) => {
+                const target = el as HTMLElement;
+                target.style.backgroundColor = "#fef08a";
+                target.style.outline = "2px solid #facc15";
+                target.style.scrollMarginTop = "24px";
+                target.classList.add("ps-highlight");
+              });
+              start.scrollIntoView({ behavior: "smooth", block: "center" });
             }
           }
         } catch {
           iframeRef.current.contentWindow.postMessage(
-            { type: "scrollTo", anchor },
+            { type: "scrollTo", anchor: `#${startBlockId}` },
             "*"
           );
         }
@@ -152,6 +169,17 @@ export default function PaperDetailPage({
                 >
                   <Sparkles className="mr-1 size-3" />
                   Generate
+                </Button>
+              )}
+              {isIdeaMapComplete && !isIdeaMapEmpty && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleGenerate}
+                  disabled={generateIdeaMap.isPending}
+                >
+                  <Sparkles className="mr-1 size-3" />
+                  Regenerate
                 </Button>
               )}
             </div>

@@ -833,21 +833,11 @@ Tests should act as executable acceptance criteria for a cloud agent implementin
 - `generate_idea_map` marks unavailable HTML as `skipped`.
 - `generate_idea_map` persists only validated warrant citations.
 
-### OpenRouter Smoke Tests
+### LLM Configuration Tests
 
-Run only when both are set:
-
-```txt
-OPENROUTER_API_KEY=...
-RUN_LIVE_LLM_TESTS=1
-```
-
-Use tiny fixtures:
-
-- Onboarding extraction from a short paragraph.
-- Filter search over 2-3 mock abstracts.
-- Daily summary over 2-3 fake matches.
-- Idea-map extraction from a short local arXiv-like HTML fixture.
+- TOML model/provider config loads all required profiles.
+- LLM client request bodies route each profile to its configured model/provider.
+- Retry behavior remains covered with mocked OpenRouter responses.
 
 Assert schema shape and minimal semantic behavior, not exact wording.
 
@@ -944,12 +934,7 @@ Assert schema shape and minimal semantic behavior, not exact wording.
 DATABASE_URL=sqlite:///./data/paper_search.db
 REDIS_URL=redis://redis:6379/0
 OPENROUTER_API_KEY=
-OPENROUTER_MODEL=deepseek/deepseek-v4-flash
-OPENROUTER_PROVIDER=novita
 NEXT_PUBLIC_API_URL=http://localhost:8000
-APP_ENV=development
-ENABLE_DEV_RESET=true
-RUN_LIVE_LLM_TESTS=0
 ```
 
 When API and worker run in Docker, use:

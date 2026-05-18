@@ -10,6 +10,12 @@ from app.models.paper_match import PaperMatch
 from app.models.search_run import SearchRun
 from app.models.idea_map import IdeaMap
 from app.models.paper_html import PaperHtml
+from app.llm.config import (
+    FILTER_GENERATION_PROFILE,
+    IDEA_MAP_PROFILE,
+    JUDGE_PROFILE,
+    SUMMARY_PROFILE,
+)
 
 
 class TestExtractOnboardingFilters:
@@ -30,29 +36,32 @@ class TestExtractOnboardingFilters:
 
         # Patch SessionLocal in the jobs module to use test DB
         TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+
+        def fake_stream_structured_response(**kwargs):
+            assert kwargs["profile"] == FILTER_GENERATION_PROFILE
+            kwargs["on_text_delta"](
+                '{"proposedFilters":[{"id":"filter-1","name":"Mechanistic Interpretability",'
+                '"description":"Mechanistic interpretability of neural networks","mode":"relevance"}'
+            )
+            return {
+                "content": {
+                    "proposedFilters": [
+                        {
+                            "id": "filter-1",
+                            "name": "Mechanistic Interpretability",
+                            "description": "Mechanistic interpretability of neural networks",
+                            "mode": "relevance",
+                        }
+                    ]
+                },
+                "model": "test-model",
+                "response_id": "onboarding-response",
+            }
+
         monkeypatch.setattr("app.jobs.onboarding.SessionLocal", TestSession)
         monkeypatch.setattr(
             "app.jobs.onboarding.stream_structured_response",
-            lambda **kwargs: (
-                kwargs["on_text_delta"](
-                    '{"proposedFilters":[{"id":"filter-1","name":"Mechanistic Interpretability",'
-                    '"description":"Mechanistic interpretability of neural networks","mode":"relevance"}'
-                )
-                or {
-                    "content": {
-                        "proposedFilters": [
-                            {
-                                "id": "filter-1",
-                                "name": "Mechanistic Interpretability",
-                                "description": "Mechanistic interpretability of neural networks",
-                                "mode": "relevance",
-                            }
-                        ]
-                    },
-                    "model": "test-model",
-                    "response_id": "onboarding-response",
-                }
-            ),
+            fake_stream_structured_response,
         )
 
         from app.jobs.onboarding import extract_onboarding_filters
@@ -90,6 +99,7 @@ def _fake_daily_async_llm(*, matched_arxiv_ids: set[str], assert_prompt=None, fa
     fail_arxiv_ids = fail_arxiv_ids or set()
 
     async def fake_async_call_llm(**kwargs):
+        assert kwargs["profile"] == JUDGE_PROFILE
         if assert_prompt:
             assert_prompt(kwargs["user_prompt"])
         arxiv_id = _extract_prompt_arxiv_id(kwargs["user_prompt"])
@@ -125,6 +135,7 @@ def _fake_summary_llm(*, matched_arxiv_id: str):
     calls = {"count": 0}
 
     def fake_call_llm(**kwargs):
+        assert kwargs["profile"] == SUMMARY_PROFILE
         calls["count"] += 1
         return {
             "content": {
@@ -652,10 +663,10 @@ class TestGenerateIdeaMap:
         db_session.commit()
 
         TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-        monkeypatch.setattr("app.jobs.idea_map.SessionLocal", TestSession)
-        monkeypatch.setattr(
-            "app.jobs.idea_map.call_llm",
-            lambda **kwargs: {
+
+        def fake_idea_map_llm(**kwargs):
+            assert kwargs["profile"] == IDEA_MAP_PROFILE
+            return {
                 "content": {
                     "claims": [
                         {
@@ -677,7 +688,12 @@ class TestGenerateIdeaMap:
                 },
                 "model": "test-model",
                 "response_id": "idea-map-response",
-            },
+            }
+
+        monkeypatch.setattr("app.jobs.idea_map.SessionLocal", TestSession)
+        monkeypatch.setattr(
+            "app.jobs.idea_map.call_llm",
+            fake_idea_map_llm,
         )
 
         # Should NOT call httpx.get since HTML is cached

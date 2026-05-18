@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from app.core.config import settings
+from app.core.config import LLM_MAX_CONCURRENCY, settings
 from app.db.session import SessionLocal
 from app.models.filter import Filter
 from app.models.paper import Paper
@@ -15,6 +15,7 @@ from app.models.search_run import SearchRun
 from app.models.search_run_paper import SearchRunPaper
 from app.services.arxiv import fetch_daily_papers
 from app.llm.client import async_call_llm, call_llm, build_json_schema
+from app.llm.config import JUDGE_PROFILE, SUMMARY_PROFILE
 from app.llm.prompts import (
     FILTER_SEARCH_SYSTEM_PROMPT,
     FILTER_SEARCH_USER_PROMPT,
@@ -228,6 +229,7 @@ async def _evaluate_filter_paper(
                 system_prompt=FILTER_SEARCH_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 response_format=response_format,
+                profile=JUDGE_PROFILE,
             )
         except Exception as exc:
             return PairEvaluation(
@@ -285,7 +287,7 @@ async def _evaluate_pairs(
     papers: list[PaperPayload],
     on_result,
 ) -> None:
-    semaphore = asyncio.Semaphore(max(settings.LLM_MAX_CONCURRENCY, 1))
+    semaphore = asyncio.Semaphore(max(LLM_MAX_CONCURRENCY, 1))
     task_pairs = {}
     for filt in filters:
         for paper in papers:
@@ -486,6 +488,7 @@ def run_daily_search(search_run_id: str) -> None:
                 system_prompt=SUMMARY_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 response_format=response_format,
+                profile=SUMMARY_PROFILE,
             )
             summary_data = result["content"]
         else:

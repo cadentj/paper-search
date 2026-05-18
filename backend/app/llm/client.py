@@ -6,7 +6,8 @@ import random
 
 import httpx
 from openai import OpenAI
-from app.core.config import settings
+from app.core.config import LLM_MAX_RETRIES, LLM_RETRY_BASE_SECONDS, settings
+from app.llm.config import JUDGE_PROFILE, LLMModelConfig, get_llm_config
 
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -25,10 +26,15 @@ def _headers() -> dict:
     }
 
 
-def _body(system_prompt: str, user_prompt: str, response_format: dict | None) -> dict:
+def _body(
+    system_prompt: str,
+    user_prompt: str,
+    response_format: dict | None,
+    model_config: LLMModelConfig,
+) -> dict:
     body: dict = {
-        "model": settings.OPENROUTER_MODEL,
-        "provider": {"order": [settings.OPENROUTER_PROVIDER]},
+        "model": model_config.model,
+        "provider": {"order": [model_config.provider]},
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -41,7 +47,7 @@ def _body(system_prompt: str, user_prompt: str, response_format: dict | None) ->
     return body
 
 
-def _parse_response(data: dict) -> dict:
+def _parse_response(data: dict, model_config: LLMModelConfig) -> dict:
     choice = data["choices"][0]
     content_str = choice["message"]["content"]
 
@@ -52,7 +58,7 @@ def _parse_response(data: dict) -> dict:
 
     return {
         "content": content,
-        "model": data.get("model", settings.OPENROUTER_MODEL),
+        "model": data.get("model", model_config.model),
         "response_id": data.get("id", ""),
     }
 
@@ -64,7 +70,7 @@ def _is_transient_error(exc: Exception) -> bool:
 
 
 def _retry_delay(attempt: int) -> float:
-    base = settings.LLM_RETRY_BASE_SECONDS * (2 ** max(attempt - 1, 0))
+    base = LLM_RETRY_BASE_SECONDS * (2 ** max(attempt - 1, 0))
     return base + random.uniform(0, min(base, 1.0))
 
 
@@ -72,24 +78,27 @@ def call_llm(
     system_prompt: str,
     user_prompt: str,
     response_format: dict | None = None,
+    *,
+    profile: str = JUDGE_PROFILE,
 ) -> dict:
     """Call OpenRouter with structured output support.
 
     Returns dict with keys: content, model, response_id
     """
     headers = _headers()
-    body = _body(system_prompt, user_prompt, response_format)
+    model_config = get_llm_config(profile)
+    body = _body(system_prompt, user_prompt, response_format, model_config)
     last_exc: Exception | None = None
 
     with httpx.Client(timeout=LLM_REQUEST_TIMEOUT_SECONDS) as client:
-        for attempt in range(settings.LLM_MAX_RETRIES + 1):
+        for attempt in range(LLM_MAX_RETRIES + 1):
             try:
                 resp = client.post(OPENROUTER_URL, headers=headers, json=body)
                 resp.raise_for_status()
-                return _parse_response(resp.json())
+                return _parse_response(resp.json(), model_config)
             except Exception as exc:
                 last_exc = exc
-                if attempt >= settings.LLM_MAX_RETRIES or not _is_transient_error(exc):
+                if attempt >= LLM_MAX_RETRIES or not _is_transient_error(exc):
                     raise
                 import time
 
@@ -102,21 +111,24 @@ async def async_call_llm(
     system_prompt: str,
     user_prompt: str,
     response_format: dict | None = None,
+    *,
+    profile: str = JUDGE_PROFILE,
 ) -> dict:
     """Async OpenRouter call with retry/backoff for concurrent worker jobs."""
     headers = _headers()
-    body = _body(system_prompt, user_prompt, response_format)
+    model_config = get_llm_config(profile)
+    body = _body(system_prompt, user_prompt, response_format, model_config)
     last_exc: Exception | None = None
 
     async with httpx.AsyncClient(timeout=LLM_REQUEST_TIMEOUT_SECONDS) as client:
-        for attempt in range(settings.LLM_MAX_RETRIES + 1):
+        for attempt in range(LLM_MAX_RETRIES + 1):
             try:
                 resp = await client.post(OPENROUTER_URL, headers=headers, json=body)
                 resp.raise_for_status()
-                return _parse_response(resp.json())
+                return _parse_response(resp.json(), model_config)
             except Exception as exc:
                 last_exc = exc
-                if attempt >= settings.LLM_MAX_RETRIES or not _is_transient_error(exc):
+                if attempt >= LLM_MAX_RETRIES or not _is_transient_error(exc):
                     raise
                 await asyncio.sleep(_retry_delay(attempt + 1))
 
@@ -141,11 +153,13 @@ def stream_structured_response(
     user_prompt: str,
     text_format,
     on_text_delta=None,
+    profile: str = JUDGE_PROFILE,
 ) -> dict:
     """Stream an OpenRouter Responses API structured output via the OpenAI SDK."""
     if not settings.OPENROUTER_API_KEY:
         raise ValueError("OPENROUTER_API_KEY is not set")
 
+    model_config = get_llm_config(profile)
     client = OpenAI(
         base_url=OPENROUTER_BASE_URL,
         api_key=settings.OPENROUTER_API_KEY,
@@ -155,11 +169,12 @@ def stream_structured_response(
     text_buffer = ""
 
     with client.responses.stream(
-        model=settings.OPENROUTER_MODEL,
+        model=model_config.model,
         input=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
+        extra_body={"provider": {"order": [model_config.provider]}},
         text_format=text_format,
     ) as stream:
         for event in stream:
@@ -182,6 +197,6 @@ def stream_structured_response(
 
     return {
         "content": content,
-        "model": final_response.model or settings.OPENROUTER_MODEL,
+        "model": final_response.model or model_config.model,
         "response_id": final_response.id,
     }

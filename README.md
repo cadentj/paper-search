@@ -6,7 +6,7 @@ A single-user research paper filtering system that helps researchers keep up wit
 
 - **Backend**: FastAPI, SQLAlchemy, SQLite, Redis, RQ workers
 - **Frontend**: Next.js (App Router), React Query, Tailwind CSS, shadcn/ui
-- **LLM**: OpenRouter (deepseek/deepseek-v4-flash via novita)
+- **LLM**: OpenRouter, with model/provider routing in `backend/llm_config.toml`
 - **Runtime**: Docker Redis, local FastAPI backend, local RQ worker, local frontend
 
 ## Quick Start
@@ -87,13 +87,6 @@ cd backend
 pytest tests/ -v
 ```
 
-### With live LLM tests (requires API key)
-
-```bash
-cd backend
-OPENROUTER_API_KEY=your-key RUN_LIVE_LLM_TESTS=1 pytest tests/ -v
-```
-
 ### Frontend
 
 ```bash
@@ -166,6 +159,4 @@ Daily search requires `OPENROUTER_API_KEY`. Without it, search runs fail with a 
 In development mode (`APP_ENV=development`), use the reset button in the sidebar footer to clear onboarding, filters, search runs, and matches.
 
 
-I’m interested in recent machine learning papers about improving factuality and reasoning in language models. I want to track work on retrieval-augmented generation, long-context evaluation, hallucination
-detection, verification, self-correction, and benchmark design. I’m especially interested in practical methods that improve answer quality or reliability, and less interested in papers focused only on scaling laws
-or hardware optimization.
+I’m interested in recent machine learning papers about improving factuality and reasoning in language models. I want to track work on retrieval-augmented generation, long-context evaluation, hallucination detection, verification, self-correction, and benchmark design. I’m especially interested in practical methods that improve answer quality or reliability, and less interested in papers focused only on scaling laws or hardware optimization.

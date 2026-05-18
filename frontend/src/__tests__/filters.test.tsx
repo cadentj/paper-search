@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import FiltersPage from "@/app/dashboard/filters/page";
 
@@ -69,9 +69,18 @@ describe("FiltersPage", () => {
     renderWithProviders(<FiltersPage />);
     await waitFor(() => {
       expect(screen.getByText("Active Filter")).toBeInTheDocument();
-      expect(screen.getByText("Archived Filter")).toBeInTheDocument();
       expect(screen.getByText(/active \(1\)/i)).toBeInTheDocument();
-      expect(screen.getByText(/archived \(1\)/i)).toBeInTheDocument();
     });
+
+    const archivedToggle = screen.getByRole("button", {
+      name: /archived \(1\)/i,
+    });
+    expect(archivedToggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Archived Filter")).not.toBeInTheDocument();
+
+    fireEvent.click(archivedToggle);
+
+    expect(archivedToggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Archived Filter")).toBeInTheDocument();
   });
 });

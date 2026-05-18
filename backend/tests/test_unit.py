@@ -215,14 +215,56 @@ class TestFilterDefinition:
 
 
 class TestLLMClient:
+    def test_loads_llm_config_defaults(self):
+        from app.llm.config import (
+            FILTER_GENERATION_PROFILE,
+            IDEA_MAP_PROFILE,
+            JUDGE_PROFILE,
+            SUMMARY_PROFILE,
+            get_llm_config,
+        )
+
+        filter_generation = get_llm_config(FILTER_GENERATION_PROFILE)
+        judge = get_llm_config(JUDGE_PROFILE)
+        idea_map = get_llm_config(IDEA_MAP_PROFILE)
+        summary = get_llm_config(SUMMARY_PROFILE)
+
+        assert filter_generation.model == "openai/gpt-oss-120b"
+        assert filter_generation.provider == "cerebras"
+        assert judge.model == "deepseek/deepseek-v4-flash"
+        assert judge.provider == "novita"
+        assert idea_map.model == "deepseek/deepseek-v4-flash"
+        assert idea_map.provider == "novita"
+        assert summary.model == "deepseek/deepseek-v4-flash"
+        assert summary.provider == "novita"
+
+    def test_load_llm_config_requires_all_groups(self, tmp_path):
+        from app.llm.config import load_llm_config
+
+        config_path = tmp_path / "llm_config.toml"
+        config_path.write_text(
+            '[filter_generation]\nmodel = "model"\nprovider = "provider"\n'
+        )
+
+        with pytest.raises(RuntimeError, match=r"Missing LLM config group \[judge\]"):
+            load_llm_config(config_path)
+
+    def test_unknown_llm_config_profile_fails(self):
+        from app.llm.config import get_llm_config
+
+        with pytest.raises(RuntimeError, match="Unknown LLM config profile"):
+            get_llm_config("missing")
+
     @pytest.mark.asyncio
     async def test_async_call_llm_retries_transient_status(self, monkeypatch):
         import httpx
 
         from app.llm import client as llm_client
+        from app.llm.config import FILTER_GENERATION_PROFILE
 
         request = httpx.Request("POST", llm_client.OPENROUTER_URL)
         attempts = {"count": 0}
+        request_bodies = []
 
         class FakeResponse:
             def __init__(self, status_code: int):
@@ -256,6 +298,7 @@ class TestLLMClient:
 
             async def post(self, *args, **kwargs):
                 attempts["count"] += 1
+                request_bodies.append(kwargs["json"])
                 if attempts["count"] == 1:
                     return FakeResponse(429)
                 return FakeResponse(200)
@@ -264,14 +307,18 @@ class TestLLMClient:
             return None
 
         monkeypatch.setattr(llm_client.settings, "OPENROUTER_API_KEY", "test-key")
-        monkeypatch.setattr(llm_client.settings, "LLM_MAX_RETRIES", 1)
-        monkeypatch.setattr(llm_client.settings, "LLM_RETRY_BASE_SECONDS", 0)
+        monkeypatch.setattr(llm_client, "LLM_MAX_RETRIES", 1)
+        monkeypatch.setattr(llm_client, "LLM_RETRY_BASE_SECONDS", 0)
         monkeypatch.setattr(llm_client.asyncio, "sleep", fake_sleep)
         monkeypatch.setattr(llm_client.httpx, "AsyncClient", FakeAsyncClient)
 
-        result = await llm_client.async_call_llm("system", "user")
+        result = await llm_client.async_call_llm(
+            "system", "user", profile=FILTER_GENERATION_PROFILE
+        )
 
         assert attempts["count"] == 2
+        assert request_bodies[0]["model"] == "openai/gpt-oss-120b"
+        assert request_bodies[0]["provider"] == {"order": ["cerebras"]}
         assert result["content"] == {"ok": True}
         assert result["model"] == "test-model"
 

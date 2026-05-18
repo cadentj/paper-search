@@ -1,0 +1,15 @@
+[filter_generation]
+model = "openai/gpt-oss-120b"
+provider = "cerebras"
+
+[judge]
+model = "deepseek/deepseek-v4-flash"
+provider = "novita"
+
+[idea_map]
+model = "deepseek/deepseek-v4-flash"
+provider = "novita"
+
+[summary]
+model = "deepseek/deepseek-v4-flash"
+provider = "novita"

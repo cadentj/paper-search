@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from app.db.session import SessionLocal
 from app.models.onboarding_extraction import OnboardingExtraction
 from app.llm.client import stream_structured_response
+from app.llm.config import FILTER_GENERATION_PROFILE
 from app.llm.prompts import (
     ONBOARDING_SYSTEM_PROMPT,
     ONBOARDING_USER_PROMPT,
@@ -116,6 +117,7 @@ def extract_onboarding_filters(extraction_id: str) -> None:
             user_prompt=user_prompt,
             text_format=OnboardingFiltersResponse,
             on_text_delta=handle_delta,
+            profile=FILTER_GENERATION_PROFILE,
         )
 
         content = result["content"]

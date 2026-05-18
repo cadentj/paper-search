@@ -17,6 +17,7 @@ from app.services.html_parser import (
     parse_arxiv_html,
 )
 from app.llm.client import call_llm, build_json_schema
+from app.llm.config import IDEA_MAP_PROFILE
 from app.llm.prompts import (
     IDEA_MAP_SYSTEM_PROMPT,
     IDEA_MAP_USER_PROMPT,
@@ -78,7 +79,7 @@ def generate_idea_map(idea_map_id: str) -> None:
             db.add(paper_html)
             db.commit()
 
-        blocks = parse_arxiv_html(html_content)
+        blocks = parse_arxiv_html(html_content, exclude_back_matter=True)
         if not blocks:
             idea_map.status = "skipped"
             idea_map.dropped_reason = "HTML could not be parsed into addressable blocks"
@@ -94,6 +95,7 @@ def generate_idea_map(idea_map_id: str) -> None:
             system_prompt=IDEA_MAP_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             response_format=response_format,
+            profile=IDEA_MAP_PROFILE,
         )
 
         content = result["content"]
@@ -111,12 +113,20 @@ def generate_idea_map(idea_map_id: str) -> None:
 
         validated_claims = []
         rejected_warrant_count = 0
+        block_map = {block.block_id: block for block in blocks}
         for claim in raw_claims:
             valid_warrants = []
             for warrant in claim.get("warrants", []):
                 citation = warrant.get("citation", {})
                 diagnostics = citation_validation_diagnostics(blocks, citation)
                 if diagnostics["valid"]:
+                    start_block = block_map[citation["startBlockId"]]
+                    warrant["citation"] = {
+                        "startBlockId": citation["startBlockId"],
+                        "endBlockId": citation["endBlockId"],
+                        "sectionTitle": citation.get("sectionTitle")
+                        or start_block.section_title,
+                    }
                     valid_warrants.append(warrant)
                 else:
                     rejected_warrant_count += 1
