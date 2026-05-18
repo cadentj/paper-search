@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["httpx>=0.27.0"]
+# dependencies = ["httpx>=0.27.0", "tqdm>=4.66.0"]
 # ///
 """Polite, resumable arXiv HTML scraper for recent category papers."""
 
@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import httpx
+from tqdm import tqdm
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -316,16 +317,26 @@ def run_scrape(
     headers = {"User-Agent": args.user_agent}
     stats = {"attempted": 0, "success": 0, "missing": 0, "error": 0, "bytes": 0}
     burst_counter = 0
-    with connect_state(db_path) as conn, httpx.Client(
+    skipped_done = 0
+    with tqdm(
+        total=len(candidates),
+        desc="scraping",
+        unit="paper",
+        dynamic_ncols=True,
+    ) as progress, connect_state(db_path) as conn, httpx.Client(
         timeout=args.timeout,
         follow_redirects=True,
         headers=headers,
     ) as client:
         create_state(conn)
+        _update_progress(progress, stats, skipped_done)
         for candidate in candidates:
             if deadline and time.monotonic() >= deadline:
                 break
             if already_done(conn, candidate.arxiv_id):
+                skipped_done += 1
+                progress.update(1)
+                _update_progress(progress, stats, skipped_done)
                 continue
 
             wait_for_strategy(strategy, args, burst_counter)
@@ -336,19 +347,38 @@ def run_scrape(
             stats[result["status"]] += 1
             stats["bytes"] += result.get("bytes", 0)
             record_result(conn, candidate, result)
-            print(
-                f"{candidate.arxiv_id} {result['status']} "
-                f"{result.get('status_code', '')} {result.get('bytes', 0)}B",
-                flush=True,
-            )
+            if result["status"] == "error":
+                tqdm.write(
+                    f"{candidate.arxiv_id} error "
+                    f"{result.get('status_code', '')} "
+                    f"{result.get('error', '')}".strip()
+                )
+            progress.update(1)
+            _update_progress(progress, stats, skipped_done)
 
     elapsed = max(time.monotonic() - started, 0.001)
+    print(
+        f"done attempted={stats['attempted']} ok={stats['success']} "
+        f"missing={stats['missing']} error={stats['error']} skipped={skipped_done} "
+        f"bytes={stats['bytes']} elapsed={elapsed:.1f}s",
+        flush=True,
+    )
     return {
         **stats,
         "elapsed_seconds": elapsed,
         "successes_per_minute": stats["success"] / elapsed * 60.0,
         "strategy": strategy,
     }
+
+
+def _update_progress(progress: tqdm, stats: dict[str, int], skipped_done: int) -> None:
+    progress.set_postfix(
+        attempted=stats["attempted"],
+        ok=stats["success"],
+        missing=stats["missing"],
+        error=stats["error"],
+        skipped=skipped_done,
+    )
 
 
 def fetch_one(client: httpx.Client, candidate: Candidate, output_dir: Path) -> dict[str, Any]:

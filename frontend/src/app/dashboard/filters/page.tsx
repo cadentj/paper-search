@@ -53,7 +53,7 @@ export default function FiltersPage() {
     const definition: FilterDefinition = {
       name,
       description,
-      mode: "relevance",
+      mode: "topic",
     };
     await createFilter.mutateAsync({ name, definition });
     setDialogOpen(false);

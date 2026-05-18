@@ -6,7 +6,7 @@ from typing import Literal, Optional
 class FilterDefinition(BaseModel):
     name: str
     description: str
-    mode: Literal["warrants", "answers", "relevance"] = "relevance"
+    mode: Literal["claim", "question", "topic"] = "topic"
 
 
 class FilterCreate(BaseModel):

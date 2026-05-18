@@ -13,17 +13,20 @@ from app.models.paper import Paper
 from app.models.paper_match import PaperMatch
 from app.models.search_run import SearchRun
 from app.models.search_run_paper import SearchRunPaper
-from app.services.arxiv import fetch_daily_papers
-from app.llm.client import async_call_llm, call_llm, build_json_schema
+from app.services.local_arxiv_cache import fetch_local_cached_papers
+from app.llm.client import async_call_llm, call_llm
 from app.llm.config import JUDGE_PROFILE, SUMMARY_PROFILE
 from app.llm.prompts import (
     FILTER_SEARCH_SYSTEM_PROMPT,
     FILTER_SEARCH_USER_PROMPT,
-    FILTER_SEARCH_SCHEMA,
     SUMMARY_SYSTEM_PROMPT,
     SUMMARY_USER_PROMPT,
-    SUMMARY_SCHEMA,
 )
+from app.llm.schemas import (
+    FilterSearchResponse,
+    SearchSummaryResponse,
+)
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 PAIR_TIMEOUT_SECONDS = 30.0
@@ -122,9 +125,25 @@ def _set_progress(
     db.commit()
 
 
+def _set_pair_progress(
+    progress: tqdm,
+    *,
+    completed: int,
+    matched: int,
+    irrelevant: int,
+    failed: int,
+) -> None:
+    progress.set_postfix(
+        done=completed,
+        matched=matched,
+        irrelevant=irrelevant,
+        failed=failed,
+    )
+
+
 def _upsert_candidate_papers(db, run: SearchRun) -> list[Paper]:
     now = datetime.now(timezone.utc)
-    daily_papers = fetch_daily_papers()
+    daily_papers = fetch_local_cached_papers()
     candidate_paper_ids = set()
     papers: list[Paper] = []
 
@@ -200,9 +219,9 @@ def _build_paper_payloads(papers: list[Paper]) -> list[PaperPayload]:
 
 
 def _filter_behavior(mode: str) -> str:
-    if mode == "warrants":
+    if mode == "claim":
         return "Look for evidence that supports, refutes, or complicates the described claim."
-    if mode == "answers":
+    if mode == "question":
         return "Look for papers that answer or partially answer the described question."
     return "Look for papers relevant to the described topic."
 
@@ -218,17 +237,15 @@ async def _evaluate_filter_paper(
     user_prompt = FILTER_SEARCH_USER_PROMPT.format(
         filter_name=definition.get("name", filt.name),
         filter_description=definition.get("description", ""),
-        filter_behavior=_filter_behavior(definition.get("mode", "relevance")),
+        filter_behavior=_filter_behavior(definition.get("mode", "topic")),
         papers_text=_build_paper_text(paper),
     )
-    response_format = build_json_schema("filter_search", FILTER_SEARCH_SCHEMA)
-
     async with semaphore:
         try:
             llm_result = await async_call_llm(
                 system_prompt=FILTER_SEARCH_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
-                response_format=response_format,
+                response_model=FilterSearchResponse,
                 profile=JUDGE_PROFILE,
             )
         except Exception as exc:
@@ -351,7 +368,7 @@ def run_daily_search(search_run_id: str) -> None:
             stage="fetching_papers",
             current=0,
             total=1,
-            message="Fetching latest arXiv papers",
+            message="Selecting local cached arXiv papers",
             status="running",
         )
 
@@ -362,7 +379,7 @@ def run_daily_search(search_run_id: str) -> None:
             stage="fetching_papers",
             current=1,
             total=1,
-            message=f"Fetched {len(papers)} arXiv papers",
+            message=f"Selected {len(papers)} local cached arXiv papers",
             status="running",
         )
 
@@ -394,6 +411,8 @@ def run_daily_search(search_run_id: str) -> None:
         all_match_info = []
         completed_pairs = 0
         failed_pairs = 0
+        matched_pairs = 0
+        irrelevant_pairs = 0
         first_pair_error = ""
 
         _set_progress(
@@ -407,7 +426,8 @@ def run_daily_search(search_run_id: str) -> None:
         )
 
         async def handle_pair_result(evaluation: PairEvaluation) -> None:
-            nonlocal completed_pairs, failed_pairs, first_pair_error
+            nonlocal completed_pairs, failed_pairs, matched_pairs
+            nonlocal irrelevant_pairs, first_pair_error
             completed_pairs += 1
 
             if evaluation.error:
@@ -420,10 +440,12 @@ def run_daily_search(search_run_id: str) -> None:
                     f"{evaluation.error}"
                 )
                 _append_progress_log(run, "matching_filters", message)
+                tqdm.write(message)
             else:
                 match_data = evaluation.result or {}
                 stance = match_data.get("stance", "irrelevant")
                 if stance != "irrelevant":
+                    matched_pairs += 1
                     match = PaperMatch(
                         id=str(uuid.uuid4()),
                         search_run_id=search_run_id,
@@ -448,20 +470,44 @@ def run_daily_search(search_run_id: str) -> None:
                         "relevance_score": match.relevance_score,
                         "rationale": match.rationale,
                     })
+                else:
+                    irrelevant_pairs += 1
 
             run.stage = "matching_filters"
             run.progress_current = completed_pairs
             run.progress_total = pair_total
             run.progress_message = f"Evaluated {completed_pairs}/{pair_total} filter-paper pairs"
             db.commit()
-
-        asyncio.run(
-            _evaluate_pairs(
-                filters=filter_payloads,
-                papers=paper_payloads,
-                on_result=handle_pair_result,
+            pair_progress.update(1)
+            _set_pair_progress(
+                pair_progress,
+                completed=completed_pairs,
+                matched=matched_pairs,
+                irrelevant=irrelevant_pairs,
+                failed=failed_pairs,
             )
-        )
+
+        with tqdm(
+            total=pair_total,
+            desc="filter-paper pairs",
+            unit="pair",
+            dynamic_ncols=True,
+            disable=None,
+        ) as pair_progress:
+            _set_pair_progress(
+                pair_progress,
+                completed=completed_pairs,
+                matched=matched_pairs,
+                irrelevant=irrelevant_pairs,
+                failed=failed_pairs,
+            )
+            asyncio.run(
+                _evaluate_pairs(
+                    filters=filter_payloads,
+                    papers=paper_payloads,
+                    on_result=handle_pair_result,
+                )
+            )
 
         if failed_pairs == pair_total:
             raise RuntimeError(
@@ -482,12 +528,11 @@ def run_daily_search(search_run_id: str) -> None:
         if all_match_info:
             matches_text = _build_matches_text(all_match_info)
             user_prompt = SUMMARY_USER_PROMPT.format(matches_text=matches_text)
-            response_format = build_json_schema("search_summary", SUMMARY_SCHEMA)
 
             result = call_llm(
                 system_prompt=SUMMARY_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
-                response_format=response_format,
+                response_model=SearchSummaryResponse,
                 profile=SUMMARY_PROFILE,
             )
             summary_data = result["content"]

@@ -7,12 +7,12 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.paper import Paper
-from app.models.paper_html import PaperHtml
 from app.models.idea_map import IdeaMap
 from app.schemas.papers import PaperResponse, IdeaMapResponse
 from app.jobs.queue import get_queue
 from app.jobs.idea_map import generate_idea_map
 from app.services.html_parser import prepare_arxiv_html_for_viewer
+from app.services.paper_html_source import arxiv_html_url, read_local_paper_html
 
 router = APIRouter(prefix="/papers", tags=["papers"])
 logger = logging.getLogger(__name__)
@@ -32,14 +32,20 @@ def get_paper_html(paper_id: str, db: Session = Depends(get_db)):
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    cached = db.query(PaperHtml).filter(PaperHtml.paper_id == paper_id).first()
-    if cached:
+    local_html = read_local_paper_html(paper.arxiv_id)
+    if local_html:
         return {
-            "html": prepare_arxiv_html_for_viewer(cached.html, cached.source_url),
-            "source_url": cached.source_url,
+            "html": prepare_arxiv_html_for_viewer(
+                local_html.html,
+                local_html.source_url,
+            ),
+            "source_url": local_html.source_url,
         }
 
-    return {"html": None, "source_url": f"https://arxiv.org/html/{paper.arxiv_id}" if paper.arxiv_id else None}
+    return {
+        "html": None,
+        "source_url": arxiv_html_url(paper.arxiv_id) if paper.arxiv_id else None,
+    }
 
 
 @router.post("/{paper_id}/idea-map", response_model=IdeaMapResponse)
@@ -50,7 +56,7 @@ def create_or_get_idea_map(paper_id: str, db: Session = Depends(get_db)):
 
     existing = db.query(IdeaMap).filter(IdeaMap.paper_id == paper_id).first()
     if existing:
-        if existing.status in {"queued", "running"}:
+        if existing.status in {"queued", "running", "claims_running", "warrants_running"}:
             return existing
 
         existing.status = "queued"

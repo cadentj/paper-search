@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = ""
     ARXIV_DAILY_LIMIT: int = 50
     ARXIV_CATEGORIES: str = "cs.AI,cs.CL,cs.LG,stat.ML"
+    ARXIV_HTML_CACHE_DIR: str = str(REPO_ROOT / "data" / "arxiv_html_cache" / "html")
+    ARXIV_HTML_STATE_DB: str = str(REPO_ROOT / "data" / "arxiv_html_cache" / "scrape_state.sqlite")
     APP_ENV: str = "development"
     ENABLE_DEV_RESET: bool = True
 

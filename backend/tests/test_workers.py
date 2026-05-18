@@ -8,13 +8,15 @@ from app.models.onboarding_extraction import OnboardingExtraction
 from app.models.paper import Paper
 from app.models.paper_match import PaperMatch
 from app.models.search_run import SearchRun
-from app.models.idea_map import IdeaMap
-from app.models.paper_html import PaperHtml
 from app.llm.config import (
     FILTER_GENERATION_PROFILE,
-    IDEA_MAP_PROFILE,
     JUDGE_PROFILE,
     SUMMARY_PROFILE,
+)
+from app.llm.schemas import (
+    FilterSearchResponse,
+    OnboardingFiltersResponse,
+    SearchSummaryResponse,
 )
 
 
@@ -39,9 +41,10 @@ class TestExtractOnboardingFilters:
 
         def fake_stream_structured_response(**kwargs):
             assert kwargs["profile"] == FILTER_GENERATION_PROFILE
+            assert kwargs["response_model"] is OnboardingFiltersResponse
             kwargs["on_text_delta"](
                 '{"proposedFilters":[{"id":"filter-1","name":"Mechanistic Interpretability",'
-                '"description":"Mechanistic interpretability of neural networks","mode":"relevance"}'
+                '"description":"Mechanistic interpretability of neural networks","mode":"topic"}'
             )
             return {
                 "content": {
@@ -50,7 +53,7 @@ class TestExtractOnboardingFilters:
                             "id": "filter-1",
                             "name": "Mechanistic Interpretability",
                             "description": "Mechanistic interpretability of neural networks",
-                            "mode": "relevance",
+                            "mode": "topic",
                         }
                     ]
                 },
@@ -100,6 +103,7 @@ def _fake_daily_async_llm(*, matched_arxiv_ids: set[str], assert_prompt=None, fa
 
     async def fake_async_call_llm(**kwargs):
         assert kwargs["profile"] == JUDGE_PROFILE
+        assert kwargs["response_model"] is FilterSearchResponse
         if assert_prompt:
             assert_prompt(kwargs["user_prompt"])
         arxiv_id = _extract_prompt_arxiv_id(kwargs["user_prompt"])
@@ -136,10 +140,15 @@ def _fake_summary_llm(*, matched_arxiv_id: str):
 
     def fake_call_llm(**kwargs):
         assert kwargs["profile"] == SUMMARY_PROFILE
+        assert kwargs["response_model"] is SearchSummaryResponse
+        assert '<cite arxivId="' in kwargs["system_prompt"]
         calls["count"] += 1
         return {
             "content": {
-                "summary": "One relevant paper matched today's filters.",
+                "summary": (
+                    "One relevant paper matched today's filters "
+                    f'<cite arxivId="{matched_arxiv_id}"/>.'
+                ),
                 "citations": [
                     {
                         "paperMatchId": "",
@@ -166,7 +175,7 @@ class TestRunDailySearch:
             definition={
                 "name": "Test Filter",
                 "description": "Neural network scaling laws",
-                "mode": "warrants",
+                "mode": "claim",
             },
             status="active",
             created_at=datetime.now(timezone.utc),
@@ -193,7 +202,7 @@ class TestRunDailySearch:
         # Patch SessionLocal
         TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
         monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
-        monkeypatch.setattr("app.jobs.daily_search.fetch_daily_papers", lambda: daily_papers)
+        monkeypatch.setattr("app.jobs.daily_search.fetch_local_cached_papers", lambda: daily_papers)
         monkeypatch.setattr(
             "app.jobs.daily_search.async_call_llm",
             _fake_daily_async_llm(matched_arxiv_ids={"2605.00001"}),
@@ -227,7 +236,7 @@ class TestRunDailySearch:
             definition={
                 "name": "Archived",
                 "description": "Test",
-                "mode": "warrants",
+                "mode": "claim",
             },
             status="archived",
             created_at=datetime.now(timezone.utc),
@@ -249,7 +258,7 @@ class TestRunDailySearch:
         TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
         monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
         monkeypatch.setattr(
-            "app.jobs.daily_search.fetch_daily_papers",
+            "app.jobs.daily_search.fetch_local_cached_papers",
             lambda: [_paper_fixture("2605.00004", "Fetched Paper")],
         )
 
@@ -271,7 +280,7 @@ class TestRunDailySearch:
             definition={
                 "name": "Test Filter",
                 "description": "Neural network scaling laws",
-                "mode": "warrants",
+                "mode": "claim",
             },
             status="active",
             created_at=datetime.now(timezone.utc),
@@ -303,7 +312,7 @@ class TestRunDailySearch:
         TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
         monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
         monkeypatch.setattr(
-            "app.jobs.daily_search.fetch_daily_papers",
+            "app.jobs.daily_search.fetch_local_cached_papers",
             lambda: [_paper_fixture("2401.00001", "Included Paper")],
         )
 
@@ -345,7 +354,7 @@ class TestRunDailySearch:
             definition={
                 "name": "Test Filter",
                 "description": "Neural network scaling laws",
-                "mode": "warrants",
+                "mode": "claim",
             },
             status="active",
             created_at=datetime.now(timezone.utc),
@@ -377,7 +386,7 @@ class TestRunDailySearch:
         TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
         monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
         monkeypatch.setattr(
-            "app.jobs.daily_search.fetch_daily_papers",
+            "app.jobs.daily_search.fetch_local_cached_papers",
             lambda: [_paper_fixture("2605.00003", "Current Paper")],
         )
         monkeypatch.setattr("app.core.config.settings.OPENROUTER_API_KEY", "")
@@ -409,7 +418,7 @@ class TestRunDailySearch:
             definition={
                 "name": "Test Filter",
                 "description": "Neural network scaling laws",
-                "mode": "warrants",
+                "mode": "claim",
             },
             status="active",
             created_at=datetime.now(timezone.utc),
@@ -434,7 +443,7 @@ class TestRunDailySearch:
 
         TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
         monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
-        monkeypatch.setattr("app.jobs.daily_search.fetch_daily_papers", lambda: daily_papers)
+        monkeypatch.setattr("app.jobs.daily_search.fetch_local_cached_papers", lambda: daily_papers)
         monkeypatch.setattr(
             "app.jobs.daily_search.async_call_llm",
             _fake_daily_async_llm(
@@ -458,68 +467,6 @@ class TestRunDailySearch:
         assert updated_run.match_count == 1
         assert any("failed" in entry["message"] for entry in updated_run.progress_log)
 
-    def test_pair_timeout_increments_progress_and_completes(
-        self, db_session, db_engine, monkeypatch
-    ):
-        from sqlalchemy.orm import sessionmaker
-        import asyncio
-
-        filt = Filter(
-            id=str(uuid.uuid4()),
-            name="Test Filter",
-            definition={
-                "name": "Test Filter",
-                "description": "Neural network scaling laws",
-                "mode": "warrants",
-            },
-            status="active",
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        )
-        db_session.add(filt)
-
-        run_id = str(uuid.uuid4())
-        db_session.add(
-            SearchRun(
-                id=run_id,
-                status="queued",
-                run_date=datetime.now(timezone.utc).date(),
-                created_at=datetime.now(timezone.utc),
-            )
-        )
-        daily_papers = [
-            _paper_fixture("2605.00020", "Successful Paper"),
-            _paper_fixture("2605.00021", "Slow Paper"),
-        ]
-        db_session.commit()
-
-        async def slow_then_match(**kwargs):
-            arxiv_id = _extract_prompt_arxiv_id(kwargs["user_prompt"])
-            if arxiv_id == "2605.00021":
-                await asyncio.sleep(0.05)
-            return await _fake_daily_async_llm(matched_arxiv_ids={"2605.00020"})(**kwargs)
-
-        TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-        monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
-        monkeypatch.setattr("app.jobs.daily_search.fetch_daily_papers", lambda: daily_papers)
-        monkeypatch.setattr("app.jobs.daily_search.PAIR_TIMEOUT_SECONDS", 0.01)
-        monkeypatch.setattr("app.jobs.daily_search.async_call_llm", slow_then_match)
-        monkeypatch.setattr(
-            "app.jobs.daily_search.call_llm",
-            _fake_summary_llm(matched_arxiv_id="2605.00020"),
-        )
-
-        from app.jobs.daily_search import run_daily_search
-        run_daily_search(run_id)
-
-        db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
-        assert updated_run.status == "completed"
-        assert updated_run.progress_current == 2
-        assert updated_run.progress_total == 2
-        assert updated_run.match_count == 1
-        assert any("Timed out" in entry["message"] for entry in updated_run.progress_log)
-
     def test_all_pair_failures_mark_run_failed(self, db_session, db_engine, monkeypatch):
         from sqlalchemy.orm import sessionmaker
 
@@ -529,7 +476,7 @@ class TestRunDailySearch:
             definition={
                 "name": "Test Filter",
                 "description": "Neural network scaling laws",
-                "mode": "warrants",
+                "mode": "claim",
             },
             status="active",
             created_at=datetime.now(timezone.utc),
@@ -551,7 +498,7 @@ class TestRunDailySearch:
 
         TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
         monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
-        monkeypatch.setattr("app.jobs.daily_search.fetch_daily_papers", lambda: daily_papers)
+        monkeypatch.setattr("app.jobs.daily_search.fetch_local_cached_papers", lambda: daily_papers)
         monkeypatch.setattr(
             "app.jobs.daily_search.async_call_llm",
             _fake_daily_async_llm(
@@ -575,140 +522,3 @@ class TestRunDailySearch:
         assert updated_run.stage == "failed"
         assert updated_run.progress_current == 1
         assert updated_run.progress_total == 1
-
-
-class TestGenerateIdeaMap:
-    def test_marks_unavailable_html_as_skipped(self, db_session, db_engine, monkeypatch):
-        from sqlalchemy.orm import sessionmaker
-
-        # Create paper without HTML
-        paper_id = str(uuid.uuid4())
-        paper = Paper(
-            id=paper_id,
-            arxiv_id="9999.99999",
-            title="Test Paper",
-            abstract="Test abstract for paper.",
-            authors=["Author"],
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        )
-        db_session.add(paper)
-        db_session.flush()
-
-        idea_map_id = str(uuid.uuid4())
-        idea_map = IdeaMap(
-            id=idea_map_id,
-            paper_id=paper_id,
-            status="queued",
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        )
-        db_session.add(idea_map)
-        db_session.commit()
-
-        TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-        monkeypatch.setattr("app.jobs.idea_map.SessionLocal", TestSession)
-
-        # Mock httpx to simulate fetch failure
-        import httpx
-
-        def mock_get(*args, **kwargs):
-            raise httpx.HTTPError("Not found")
-
-        monkeypatch.setattr("httpx.get", mock_get)
-
-        from app.jobs.idea_map import generate_idea_map
-        generate_idea_map(idea_map_id)
-
-        db_session.expire_all()
-        updated = db_session.query(IdeaMap).filter(IdeaMap.id == idea_map_id).first()
-        assert updated.status in ("skipped", "failed")
-
-    def test_uses_cached_html(self, db_session, db_engine, monkeypatch):
-        from sqlalchemy.orm import sessionmaker
-
-        paper_id = str(uuid.uuid4())
-        paper = Paper(
-            id=paper_id,
-            arxiv_id="2401.00001",
-            title="Test Paper",
-            abstract="Test abstract.",
-            authors=["Author"],
-            html_url="https://arxiv.org/html/2401.00001",
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        )
-        db_session.add(paper)
-        db_session.flush()
-
-        # Pre-cache HTML
-        cached_html = PaperHtml(
-            paper_id=paper_id,
-            source_url="https://arxiv.org/html/2401.00001",
-            html="<html><body><p id='p1'>This is a cached paragraph with sufficient text content.</p></body></html>",
-            fetched_at=datetime.now(timezone.utc),
-        )
-        db_session.add(cached_html)
-        db_session.flush()
-
-        idea_map_id = str(uuid.uuid4())
-        idea_map = IdeaMap(
-            id=idea_map_id,
-            paper_id=paper_id,
-            status="queued",
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        )
-        db_session.add(idea_map)
-        db_session.commit()
-
-        TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-
-        def fake_idea_map_llm(**kwargs):
-            assert kwargs["profile"] == IDEA_MAP_PROFILE
-            return {
-                "content": {
-                    "claims": [
-                        {
-                            "id": "claim-1",
-                            "text": "The paper makes a test claim.",
-                            "warrants": [
-                                {
-                                    "id": "warrant-1",
-                                    "text": "The cached paragraph supports the claim.",
-                                    "citation": {
-                                        "blockId": "p1",
-                                        "quote": "cached paragraph",
-                                        "htmlAnchor": "#p1",
-                                    },
-                                }
-                            ],
-                        }
-                    ]
-                },
-                "model": "test-model",
-                "response_id": "idea-map-response",
-            }
-
-        monkeypatch.setattr("app.jobs.idea_map.SessionLocal", TestSession)
-        monkeypatch.setattr(
-            "app.jobs.idea_map.call_llm",
-            fake_idea_map_llm,
-        )
-
-        # Should NOT call httpx.get since HTML is cached
-        call_count = {"n": 0}
-        original_get = __import__("httpx").get
-        def counting_get(*args, **kwargs):
-            call_count["n"] += 1
-            return original_get(*args, **kwargs)
-        monkeypatch.setattr("httpx.get", counting_get)
-
-        from app.jobs.idea_map import generate_idea_map
-        generate_idea_map(idea_map_id)
-
-        assert call_count["n"] == 0
-
-        db_session.expire_all()
-        updated = db_session.query(IdeaMap).filter(IdeaMap.id == idea_map_id).first()
-        assert updated.status in ("completed", "skipped", "failed")

@@ -92,7 +92,7 @@ The user enters freeform notes about:
 
 The backend converts this into proposed filters using three default templates:
 
-- Claim template: search for warrants for or against a proposition.
+- Claim template: search for evidence that supports, refutes, or complicates a proposition.
 - Question template: search for answers or partial answers to a question.
 - Topic template: search for abstracts relevant to a topic.
 
@@ -107,12 +107,8 @@ A filter is a JSON-defined search instruction. There is no top-level `kind` enum
 ```ts
 type FilterDefinition = {
   name: string
-  statement: string
-  description?: string
-  search: {
-    instructions: string
-    outputMode: "warrants" | "answers" | "relevance"
-  }
+  description: string
+  mode: "claim" | "question" | "topic"
 }
 ```
 
@@ -430,11 +426,10 @@ Citation validation:
 
 ## LLM Contracts
 
-Use structured outputs with Pydantic schemas in worker code. The LLM client should call OpenRouter with:
+Use structured outputs with Pydantic schemas in worker code. The LLM client should call OpenRouter through the OpenAI SDK Responses API with:
 
 - `OPENROUTER_API_KEY`
-- model `deepseek/deepseek-v4-flash`
-- provider `novita`
+- model/provider routing from `backend/llm_config.toml`
 
 ### Onboarding Extraction
 
@@ -446,9 +441,9 @@ type OnboardingExtractionOutput = {
 
 Prompt target:
 
-- 2-4 warrant-search filters
-- 2-3 answer-search filters
-- 1-3 relevance-search filters
+- 2-4 claim filters
+- 2-3 question filters
+- 1-3 topic filters
 
 Prefer fewer high-quality filters over a long list.
 
@@ -786,9 +781,9 @@ Tests should act as executable acceptance criteria for a cloud agent implementin
 ### Backend Unit Tests
 
 - Filter template normalization:
-  - Claim template produces `outputMode = "warrants"`.
-  - Question template produces `outputMode = "answers"`.
-  - Topic template produces `outputMode = "relevance"`.
+  - Claim template produces `mode = "claim"`.
+  - Question template produces `mode = "question"`.
+  - Topic template produces `mode = "topic"`.
   - Persisted filters do not require a top-level `kind`.
   - Persisted filters are not versioned.
 - Filter lifecycle:

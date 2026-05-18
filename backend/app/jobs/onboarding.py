@@ -3,9 +3,7 @@
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Literal
 
-from pydantic import BaseModel
 from app.db.session import SessionLocal
 from app.models.onboarding_extraction import OnboardingExtraction
 from app.llm.client import stream_structured_response
@@ -14,17 +12,7 @@ from app.llm.prompts import (
     ONBOARDING_SYSTEM_PROMPT,
     ONBOARDING_USER_PROMPT,
 )
-
-
-class StreamedFilter(BaseModel):
-    id: str
-    name: str
-    description: str
-    mode: Literal["warrants", "answers", "relevance"]
-
-
-class OnboardingFiltersResponse(BaseModel):
-    proposedFilters: list[StreamedFilter]
+from app.llm.schemas import OnboardingFiltersResponse, StreamedFilter
 
 
 def _normalize_filter(raw: dict) -> dict | None:
@@ -115,7 +103,7 @@ def extract_onboarding_filters(extraction_id: str) -> None:
         result = stream_structured_response(
             system_prompt=ONBOARDING_SYSTEM_PROMPT,
             user_prompt=user_prompt,
-            text_format=OnboardingFiltersResponse,
+            response_model=OnboardingFiltersResponse,
             on_text_delta=handle_delta,
             profile=FILTER_GENERATION_PROFILE,
         )

@@ -84,7 +84,7 @@ def complete_onboarding(body: OnboardingCompleteRequest, db: Session = Depends(g
         definition = {
             "name": name,
             "description": definition.get("description", ""),
-            "mode": definition.get("mode", "relevance"),
+            "mode": definition.get("mode", "topic"),
         }
 
         filt = Filter(

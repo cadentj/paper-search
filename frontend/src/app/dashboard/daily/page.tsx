@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { SummaryText } from "@/components/summary-text";
 import {
   Card,
   CardContent,
@@ -89,13 +90,12 @@ export default function DailyPage() {
   const handleQuickAddFilter = async () => {
     const text = quickFilterText.trim();
     if (!text) return;
-    const mode = quickFilterType === "claim" ? "warrants" as const : quickFilterType === "question" ? "answers" as const : "relevance" as const;
     await createFilter.mutateAsync({
       name: text.slice(0, 60),
       definition: {
         name: text.slice(0, 60),
         description: text,
-        mode,
+        mode: quickFilterType as "claim" | "question" | "topic",
       },
     });
     setQuickFilterText("");
@@ -232,36 +232,12 @@ export default function DailyPage() {
               <CardTitle className="text-lg">Daily Summary</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="max-w-none text-base leading-7 text-foreground whitespace-pre-line">
-                {run.summary}
-                {run.summary_citations && run.summary_citations.length > 0 && (
-                  <span className="ml-2 inline-flex flex-wrap items-center gap-1.5 align-baseline">
-                    {run.summary_citations.map((c, i) => {
-                      const citationMatch = (matches || []).find(
-                        (match) =>
-                          match.id === c.paperMatchId ||
-                          match.paper_arxiv_id === c.arxivId
-                      );
-                      return (
-                        <button
-                          key={`${c.arxivId}-${i}`}
-                          type="button"
-                          onClick={() =>
-                            citationMatch &&
-                            router.push(`/dashboard/papers/${citationMatch.paper_id}`)
-                          }
-                          disabled={!citationMatch}
-                          title={c.citedFor}
-                          aria-label={`Open citation ${i + 1}: ${c.arxivId}`}
-                          className="inline-flex h-6 items-center rounded-md border border-border px-2 text-xs font-medium leading-none text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-default disabled:opacity-60"
-                        >
-                          [{i + 1}] {c.arxivId}
-                        </button>
-                      );
-                    })}
-                  </span>
-                )}
-              </div>
+              <SummaryText
+                summary={run.summary}
+                citations={run.summary_citations}
+                matches={matches || []}
+                className="max-w-none whitespace-pre-wrap text-base leading-7 text-foreground"
+              />
             </CardContent>
           </Card>
         )}

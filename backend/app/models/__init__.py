@@ -2,7 +2,6 @@ from app.models.base import Base
 from app.models.filter import Filter
 from app.models.onboarding_extraction import OnboardingExtraction
 from app.models.paper import Paper
-from app.models.paper_html import PaperHtml
 from app.models.search_run import SearchRun
 from app.models.search_run_paper import SearchRunPaper
 from app.models.paper_match import PaperMatch
@@ -13,7 +12,6 @@ __all__ = [
     "Filter",
     "OnboardingExtraction",
     "Paper",
-    "PaperHtml",
     "SearchRun",
     "SearchRunPaper",
     "PaperMatch",

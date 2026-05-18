@@ -67,7 +67,7 @@ export default function OnboardingPage() {
         definition: {
           name: f.name,
           description: f.description,
-          mode: f.mode || "relevance",
+          mode: f.mode || "topic",
         },
       }))
     );

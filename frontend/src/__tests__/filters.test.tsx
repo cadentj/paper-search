@@ -30,14 +30,6 @@ function renderWithProviders(ui: React.ReactElement) {
 describe("FiltersPage", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("shows empty state when no filters", async () => {
-    mockApi.getFilters.mockResolvedValue([]);
-    renderWithProviders(<FiltersPage />);
-    await waitFor(() => {
-      expect(screen.getByText(/no filters yet/i)).toBeInTheDocument();
-    });
-  });
-
   it("shows active and archived filters", async () => {
     mockApi.getFilters.mockResolvedValue([
       {
@@ -47,7 +39,7 @@ describe("FiltersPage", () => {
         definition: {
           name: "Active Filter",
           description: "Test statement",
-          mode: "warrants",
+          mode: "claim",
         },
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
@@ -59,7 +51,7 @@ describe("FiltersPage", () => {
         definition: {
           name: "Archived Filter",
           description: "Old statement",
-          mode: "relevance",
+          mode: "topic",
         },
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",

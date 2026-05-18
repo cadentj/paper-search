@@ -7,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { SummaryText } from "@/components/summary-text";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSearchRuns, useSearchRunMatches, useSearchRun } from "@/hooks/use-queries";
@@ -108,26 +109,14 @@ export default function SearchPage() {
                       <p className="text-xs font-medium text-muted-foreground mb-1">
                         Summary
                       </p>
-                      <p className="text-sm whitespace-pre-line">
-                        {selectedRun.summary}
-                      </p>
+                      <SummaryText
+                        summary={selectedRun.summary}
+                        citations={selectedRun.summary_citations}
+                        matches={matches || []}
+                        className="whitespace-pre-wrap text-sm"
+                      />
                     </div>
                   )}
-
-                  {selectedRun.summary_citations &&
-                    selectedRun.summary_citations.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {selectedRun.summary_citations.map((c, i) => (
-                          <Badge
-                            key={i}
-                            variant="outline"
-                            className="text-xs"
-                          >
-                            {c.arxivId}: {c.citedFor}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
 
                   {matches && matches.length > 0 && (
                     <div className="space-y-2">

@@ -1,72 +1,117 @@
 """OpenRouter LLM client for structured outputs."""
 
 import asyncio
-import json
 import random
+import time
+from typing import TypeVar
 
-import httpx
-from openai import OpenAI
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    AsyncOpenAI,
+    OpenAI,
+)
+from pydantic import BaseModel
 from app.core.config import LLM_MAX_RETRIES, LLM_RETRY_BASE_SECONDS, settings
 from app.llm.config import JUDGE_PROFILE, LLMModelConfig, get_llm_config
 
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 TRANSIENT_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 LLM_REQUEST_TIMEOUT_SECONDS = 120.0
+ResponseModelT = TypeVar("ResponseModelT", bound=BaseModel)
 
 
-def _headers() -> dict:
+def _require_api_key() -> str:
     if not settings.OPENROUTER_API_KEY:
         raise ValueError("OPENROUTER_API_KEY is not set")
-
-    return {
-        "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-    }
+    return settings.OPENROUTER_API_KEY
 
 
-def _body(
-    system_prompt: str,
-    user_prompt: str,
-    response_format: dict | None,
+def _client() -> OpenAI:
+    return OpenAI(
+        base_url=OPENROUTER_BASE_URL,
+        api_key=_require_api_key(),
+        timeout=LLM_REQUEST_TIMEOUT_SECONDS,
+    )
+
+
+def _async_client() -> AsyncOpenAI:
+    return AsyncOpenAI(
+        base_url=OPENROUTER_BASE_URL,
+        api_key=_require_api_key(),
+        timeout=LLM_REQUEST_TIMEOUT_SECONDS,
+    )
+
+
+def _response_input(system_prompt: str, user_prompt: str) -> list[dict]:
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def _provider_body(model_config: LLMModelConfig) -> dict:
+    return {"provider": {"order": [model_config.provider]}}
+
+
+def _parse_structured_response(
+    response,
+    response_model: type[ResponseModelT],
     model_config: LLMModelConfig,
 ) -> dict:
-    body: dict = {
-        "model": model_config.model,
-        "provider": {"order": [model_config.provider]},
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    }
+    for output in getattr(response, "output", []):
+        for content_item in getattr(output, "content", []):
+            parsed = getattr(content_item, "parsed", None)
+            if parsed is None:
+                continue
+            content = parsed.model_dump() if hasattr(parsed, "model_dump") else parsed
+            return {
+                "content": content,
+                "model": getattr(response, "model", None) or model_config.model,
+                "response_id": getattr(response, "id", ""),
+            }
 
-    if response_format:
-        body["response_format"] = response_format
+    raise RuntimeError(
+        f"Structured LLM response did not include parsed {response_model.__name__}"
+    )
 
-    return body
+
+def _parse_call(
+    client: OpenAI,
+    system_prompt: str,
+    user_prompt: str,
+    model_config: LLMModelConfig,
+    response_model: type[ResponseModelT],
+):
+    return client.responses.parse(
+        model=model_config.model,
+        input=_response_input(system_prompt, user_prompt),
+        extra_body=_provider_body(model_config),
+        text_format=response_model,
+    )
 
 
-def _parse_response(data: dict, model_config: LLMModelConfig) -> dict:
-    choice = data["choices"][0]
-    content_str = choice["message"]["content"]
-
-    try:
-        content = json.loads(content_str)
-    except (json.JSONDecodeError, TypeError):
-        content = {"raw": content_str}
-
-    return {
-        "content": content,
-        "model": data.get("model", model_config.model),
-        "response_id": data.get("id", ""),
-    }
+async def _async_parse_call(
+    client: AsyncOpenAI,
+    system_prompt: str,
+    user_prompt: str,
+    model_config: LLMModelConfig,
+    response_model: type[ResponseModelT],
+):
+    return await client.responses.parse(
+        model=model_config.model,
+        input=_response_input(system_prompt, user_prompt),
+        extra_body=_provider_body(model_config),
+        text_format=response_model,
+    )
 
 
 def _is_transient_error(exc: Exception) -> bool:
-    if isinstance(exc, httpx.HTTPStatusError):
-        return exc.response.status_code in TRANSIENT_STATUS_CODES
-    return isinstance(exc, (httpx.TimeoutException, httpx.TransportError))
+    if isinstance(exc, APIStatusError):
+        return exc.status_code in TRANSIENT_STATUS_CODES
+    return isinstance(exc, (APIConnectionError, APITimeoutError))
 
 
 def _retry_delay(attempt: int) -> float:
@@ -77,31 +122,32 @@ def _retry_delay(attempt: int) -> float:
 def call_llm(
     system_prompt: str,
     user_prompt: str,
-    response_format: dict | None = None,
     *,
+    response_model: type[ResponseModelT],
     profile: str = JUDGE_PROFILE,
 ) -> dict:
     """Call OpenRouter with structured output support.
 
     Returns dict with keys: content, model, response_id
     """
-    headers = _headers()
     model_config = get_llm_config(profile)
-    body = _body(system_prompt, user_prompt, response_format, model_config)
     last_exc: Exception | None = None
 
-    with httpx.Client(timeout=LLM_REQUEST_TIMEOUT_SECONDS) as client:
+    with _client() as client:
         for attempt in range(LLM_MAX_RETRIES + 1):
             try:
-                resp = client.post(OPENROUTER_URL, headers=headers, json=body)
-                resp.raise_for_status()
-                return _parse_response(resp.json(), model_config)
+                response = _parse_call(
+                    client,
+                    system_prompt,
+                    user_prompt,
+                    model_config,
+                    response_model,
+                )
+                return _parse_structured_response(response, response_model, model_config)
             except Exception as exc:
                 last_exc = exc
                 if attempt >= LLM_MAX_RETRIES or not _is_transient_error(exc):
                     raise
-                import time
-
                 time.sleep(_retry_delay(attempt + 1))
 
     raise RuntimeError("LLM call failed") from last_exc
@@ -110,22 +156,25 @@ def call_llm(
 async def async_call_llm(
     system_prompt: str,
     user_prompt: str,
-    response_format: dict | None = None,
     *,
+    response_model: type[ResponseModelT],
     profile: str = JUDGE_PROFILE,
 ) -> dict:
     """Async OpenRouter call with retry/backoff for concurrent worker jobs."""
-    headers = _headers()
     model_config = get_llm_config(profile)
-    body = _body(system_prompt, user_prompt, response_format, model_config)
     last_exc: Exception | None = None
 
-    async with httpx.AsyncClient(timeout=LLM_REQUEST_TIMEOUT_SECONDS) as client:
+    async with _async_client() as client:
         for attempt in range(LLM_MAX_RETRIES + 1):
             try:
-                resp = await client.post(OPENROUTER_URL, headers=headers, json=body)
-                resp.raise_for_status()
-                return _parse_response(resp.json(), model_config)
+                response = await _async_parse_call(
+                    client,
+                    system_prompt,
+                    user_prompt,
+                    model_config,
+                    response_model,
+                )
+                return _parse_structured_response(response, response_model, model_config)
             except Exception as exc:
                 last_exc = exc
                 if attempt >= LLM_MAX_RETRIES or not _is_transient_error(exc):
@@ -135,51 +184,24 @@ async def async_call_llm(
     raise RuntimeError("LLM call failed") from last_exc
 
 
-def build_json_schema(name: str, schema: dict) -> dict:
-    """Build OpenRouter response_format for JSON schema."""
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": name,
-            "strict": True,
-            "schema": schema,
-        },
-    }
-
-
 def stream_structured_response(
     *,
     system_prompt: str,
     user_prompt: str,
-    text_format,
+    response_model: type[ResponseModelT],
     on_text_delta=None,
     profile: str = JUDGE_PROFILE,
 ) -> dict:
     """Stream an OpenRouter Responses API structured output via the OpenAI SDK."""
-    if not settings.OPENROUTER_API_KEY:
-        raise ValueError("OPENROUTER_API_KEY is not set")
-
     model_config = get_llm_config(profile)
-    client = OpenAI(
-        base_url=OPENROUTER_BASE_URL,
-        api_key=settings.OPENROUTER_API_KEY,
-        timeout=LLM_REQUEST_TIMEOUT_SECONDS,
-    )
-
-    text_buffer = ""
-
-    with client.responses.stream(
+    with _client() as client, client.responses.stream(
         model=model_config.model,
-        input=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        extra_body={"provider": {"order": [model_config.provider]}},
-        text_format=text_format,
+        input=_response_input(system_prompt, user_prompt),
+        extra_body=_provider_body(model_config),
+        text_format=response_model,
     ) as stream:
         for event in stream:
             if event.type == "response.output_text.delta":
-                text_buffer += event.delta
                 if on_text_delta:
                     on_text_delta(event.delta)
             elif event.type == "response.error":
@@ -187,16 +209,4 @@ def stream_structured_response(
 
         final_response = stream.get_final_response()
 
-    output_text = final_response.output[0].content[0]
-    parsed = getattr(output_text, "parsed", None)
-    if parsed is not None:
-        content = parsed.model_dump() if hasattr(parsed, "model_dump") else parsed
-    else:
-        raw_text = getattr(output_text, "text", None) or text_buffer
-        content = text_format.model_validate_json(raw_text).model_dump()
-
-    return {
-        "content": content,
-        "model": final_response.model or model_config.model,
-        "response_id": final_response.id,
-    }
+    return _parse_structured_response(final_response, response_model, model_config)

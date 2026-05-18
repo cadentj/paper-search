@@ -26,7 +26,6 @@ def db_engine(tmp_path):
     import app.models.filter
     import app.models.onboarding_extraction
     import app.models.paper
-    import app.models.paper_html
     import app.models.search_run
     import app.models.search_run_paper
     import app.models.paper_match

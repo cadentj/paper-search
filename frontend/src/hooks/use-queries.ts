@@ -192,7 +192,14 @@ export function useIdeaMap(paperId: string | null) {
     retry: false,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      if (status === "queued" || status === "running") return 1000;
+      if (
+        status === "queued" ||
+        status === "running" ||
+        status === "claims_running" ||
+        status === "warrants_running"
+      ) {
+        return 1000;
+      }
       return false;
     },
   });

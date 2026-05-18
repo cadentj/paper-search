@@ -5,12 +5,11 @@ Run from repo root:
     python scratch_openrouter_stream.py
 
 This intentionally bypasses the app client, so it can verify the SDK surface
-independently of the app's current httpx client.
+independently of the app's retry and response-normalization code.
 """
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from typing import List
@@ -80,38 +79,21 @@ def test_responses_stream(client: OpenAI, model: str, provider: str) -> None:
         print(final_response)
 
 
-def test_chat_stream(client: OpenAI, model: str, provider: str) -> None:
-    print("\n=== chat.completions stream + response_format ===")
-    schema = EntitiesModel.model_json_schema()
-    stream = client.chat.completions.create(
+def test_responses_parse(client: OpenAI, model: str, provider: str) -> None:
+    print("\n=== responses.parse + text_format ===")
+    response = client.responses.parse(
         model=model,
-        messages=[
+        input=[
             {"role": "system", "content": "Extract entities from the input text."},
             {
                 "role": "user",
                 "content": "The quick brown fox jumps over the lazy dog with piercing blue eyes.",
             },
         ],
-        response_format={
-            "type": "json_schema",
-            "json_schema": {
-                "name": "entities",
-                "strict": True,
-                "schema": schema,
-            },
-        },
         extra_body={"provider": {"order": [provider]}},
-        stream=True,
+        text_format=EntitiesModel,
     )
-
-    buffer = ""
-    for chunk in stream:
-        delta = chunk.choices[0].delta.content or ""
-        buffer += delta
-        print(delta, end="")
-
-    print("\nparsed:")
-    print(json.loads(buffer))
+    print(response)
 
 
 def main() -> None:
@@ -126,7 +108,7 @@ def main() -> None:
         api_key=api_key,
     )
 
-    for test in (test_responses_stream, test_chat_stream):
+    for test in (test_responses_stream, test_responses_parse):
         try:
             test(client, model_config.model, model_config.provider)
         except Exception as exc:

@@ -10,9 +10,7 @@ import {
   usePaperHtml,
   useIdeaMap,
   useGenerateIdeaMap,
-  useCreateFilter,
 } from "@/hooks/use-queries";
-import { Input } from "@/components/ui/input";
 import {
   Loader2,
   Sparkles,
@@ -20,7 +18,6 @@ import {
   ChevronRight,
   ArrowLeft,
   ExternalLink,
-  PlusCircle,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { IdeaMapClaim, IdeaMapWarrant } from "@/lib/api";
@@ -39,16 +36,25 @@ export default function PaperDetailPage({
 
   const [expandedClaims, setExpandedClaims] = useState<Set<string>>(new Set());
   const [highlightedWarrant, setHighlightedWarrant] = useState<string | null>(null);
-  const [claimFilterText, setClaimFilterText] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const createFilter = useCreateFilter();
 
   const isIdeaMapLoading =
-    ideaMap?.status === "queued" || ideaMap?.status === "running";
+    ideaMap?.status === "queued" ||
+    ideaMap?.status === "running" ||
+    ideaMap?.status === "claims_running" ||
+    ideaMap?.status === "warrants_running";
   const isIdeaMapComplete = ideaMap?.status === "completed";
   const isIdeaMapEmpty =
     isIdeaMapComplete && (!ideaMap.claims || ideaMap.claims.length === 0);
   const isIdeaMapSkipped = ideaMap?.status === "skipped";
+  const ideaMapClaims = ideaMap?.claims || [];
+  const shouldRenderIdeaMapClaims = ideaMapClaims.length > 0;
+  const ideaMapLoadingLabel =
+    ideaMap?.status === "claims_running"
+      ? "Finding core claims..."
+      : ideaMap?.status === "warrants_running"
+        ? "Finding warrants..."
+        : "Generating idea map...";
 
   const toggleClaim = (claimId: string) => {
     setExpandedClaims((prev) => {
@@ -110,19 +116,6 @@ export default function PaperDetailPage({
 
   const handleGenerate = () => {
     generateIdeaMap.mutate(paperId);
-  };
-
-  const handleAddClaimAsFilter = async (claimText: string) => {
-    const name = claimText.slice(0, 60);
-    await createFilter.mutateAsync({
-      name,
-      definition: {
-        name,
-        description: claimText,
-        mode: "warrants",
-      },
-    });
-    setClaimFilterText(null);
   };
 
   return (
@@ -190,11 +183,12 @@ export default function PaperDetailPage({
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Loader2 className="size-4 animate-spin" />
-                      Generating idea map...
+                      {ideaMapLoadingLabel}
                     </div>
-                    {[1, 2, 3].map((i) => (
-                      <Skeleton key={i} className="h-12 w-full" />
-                    ))}
+                    {!shouldRenderIdeaMapClaims &&
+                      [1, 2, 3].map((i) => (
+                        <Skeleton key={i} className="h-12 w-full" />
+                      ))}
                   </div>
                 )}
 
@@ -258,9 +252,8 @@ export default function PaperDetailPage({
                   </div>
                 )}
 
-                {isIdeaMapComplete &&
-                  !isIdeaMapEmpty &&
-                  ideaMap?.claims?.map((claim: IdeaMapClaim) => (
+                {shouldRenderIdeaMapClaims &&
+                  ideaMapClaims.map((claim: IdeaMapClaim) => (
                     <div key={claim.id} className="border rounded-lg">
                       <button
                         className="w-full text-left p-2 flex items-start gap-2 hover:bg-muted/50"
@@ -274,40 +267,25 @@ export default function PaperDetailPage({
                         <span className="text-xs font-medium leading-snug flex-1">
                           {claim.text}
                         </span>
-                        <button
-                          className="shrink-0 p-0.5 rounded hover:bg-muted"
-                          title="Add as filter"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setClaimFilterText(claimFilterText === claim.text ? null : claim.text);
-                          }}
+                        <Badge
+                          variant="secondary"
+                          className={`shrink-0 text-xs tabular-nums ${
+                            ideaMap?.status === "warrants_running"
+                              ? "animate-pulse"
+                              : ""
+                          }`}
                         >
-                          <PlusCircle className="size-3 text-muted-foreground" />
-                        </button>
+                          {claim.warrants.length}
+                        </Badge>
                       </button>
-                      {claimFilterText === claim.text && (
-                        <div className="px-2 pb-1 flex items-center gap-1">
-                          <Input
-                            defaultValue={claim.text}
-                            className="h-7 text-xs"
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") handleAddClaimAsFilter((e.target as HTMLInputElement).value);
-                              if (e.key === "Escape") setClaimFilterText(null);
-                            }}
-                          />
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-xs px-2"
-                            onClick={() => handleAddClaimAsFilter(claim.text)}
-                            disabled={createFilter.isPending}
-                          >
-                            Add
-                          </Button>
-                        </div>
-                      )}
                       {expandedClaims.has(claim.id) && (
                         <div className="px-2 pb-2 space-y-1">
+                          {claim.warrants.length === 0 && isIdeaMapLoading && (
+                            <div className="flex items-center gap-2 rounded p-1.5 text-xs text-muted-foreground">
+                              <Loader2 className="size-3 animate-spin" />
+                              Finding warrants...
+                            </div>
+                          )}
                           {claim.warrants.map((warrant: IdeaMapWarrant) => (
                             <button
                               key={warrant.id}
