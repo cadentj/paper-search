@@ -20,7 +20,16 @@ import {
   useSearchRunMatches,
   useCreateDailySearch,
   useSubmitFeedback,
+  useCreateFilter,
 } from "@/hooks/use-queries";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Loader2,
   Play,
@@ -30,6 +39,7 @@ import {
   ExternalLink,
   ChevronDown,
   ChevronRight,
+  PlusCircle,
 } from "lucide-react";
 import type { PaperMatch } from "@/lib/api";
 
@@ -54,6 +64,9 @@ export default function DailyPage() {
   const [expandedFilters, setExpandedFilters] = useState<Set<string>>(
     new Set()
   );
+  const [quickFilterText, setQuickFilterText] = useState("");
+  const [quickFilterType, setQuickFilterType] = useState("claim");
+  const createFilter = useCreateFilter();
 
   const isRunning =
     run?.status === "queued" || run?.status === "running";
@@ -88,6 +101,26 @@ export default function DailyPage() {
     },
     {} as Record<string, { name: string; matches: PaperMatch[] }>
   );
+
+  const handleQuickAddFilter = async () => {
+    const text = quickFilterText.trim();
+    if (!text) return;
+    const outputMode = quickFilterType === "claim" ? "warrants" as const : quickFilterType === "question" ? "answers" as const : "relevance" as const;
+    const instructions = quickFilterType === "claim"
+      ? "Search for evidence supporting or refuting this proposition."
+      : quickFilterType === "question"
+        ? "Search for papers that answer or partially answer this question."
+        : "Search for papers relevant to this topic.";
+    await createFilter.mutateAsync({
+      name: text.slice(0, 60),
+      definition: {
+        name: text.slice(0, 60),
+        statement: text,
+        search: { instructions, outputMode },
+      },
+    });
+    setQuickFilterText("");
+  };
 
   const toggleFilter = (filterId: string) => {
     setExpandedFilters((prev) => {
@@ -129,6 +162,35 @@ export default function DailyPage() {
                 Run Daily Search
               </>
             )}
+          </Button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Select value={quickFilterType} onValueChange={(v) => { if (v) setQuickFilterType(v); }}>
+            <SelectTrigger className="w-28 h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="claim">Claim</SelectItem>
+              <SelectItem value="question">Question</SelectItem>
+              <SelectItem value="topic">Topic</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            value={quickFilterText}
+            onChange={(e) => setQuickFilterText(e.target.value)}
+            placeholder="Quick add a filter..."
+            className="h-9"
+            onKeyDown={(e) => e.key === "Enter" && handleQuickAddFilter()}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleQuickAddFilter}
+            disabled={!quickFilterText.trim() || createFilter.isPending}
+          >
+            <PlusCircle className="mr-1 size-3" />
+            Add
           </Button>
         </div>
 
