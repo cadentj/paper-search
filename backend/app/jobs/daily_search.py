@@ -298,9 +298,7 @@ def _build_paper_payloads(papers: list[Paper]) -> list[PaperPayload]:
 def _filter_behavior(mode: str) -> str:
     if mode == "claim":
         return "Look for evidence that supports, refutes, or complicates the described claim."
-    if mode == "question":
-        return "Look for items that answer or partially answer the described question."
-    return "Look for items relevant to the described topic."
+    return "Look for items relevant to the described topic or question."
 
 
 def _item_id(source_type: str, source_id: str) -> str:

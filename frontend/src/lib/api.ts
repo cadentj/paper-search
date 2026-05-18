@@ -20,14 +20,14 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
 export interface FilterDefinition {
   name: string;
   description: string;
-  mode?: "claim" | "question" | "topic";
+  mode?: "claim" | "topic";
 }
 
 export interface ProposedFilter {
   id: string;
   name: string;
   description: string;
-  mode?: "claim" | "question" | "topic";
+  mode?: "claim" | "topic";
 }
 
 export interface FilterResponse {

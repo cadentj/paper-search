@@ -13,7 +13,7 @@ class StreamedFilter(StrictModel):
     id: str
     name: str
     description: str
-    mode: Literal["claim", "question", "topic"]
+    mode: Literal["claim", "topic"]
 
 
 class OnboardingFiltersResponse(StrictModel):
