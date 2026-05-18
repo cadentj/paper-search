@@ -17,6 +17,7 @@ class HtmlBlock:
 
 
 MAX_CITATION_RANGE_BLOCKS = 3
+MAX_PROMPT_BLOCKS = 250
 BACK_MATTER_RE = re.compile(
     r"\b(appendix|references|acknowledgements|acknowledgments|supplementary|supplemental)\b",
     re.IGNORECASE,
@@ -29,8 +30,13 @@ def parse_arxiv_html(html: str, *, exclude_back_matter: bool = False) -> list[Ht
 
 
 def prepare_arxiv_html_for_viewer(html: str, source_url: str | None = None) -> str:
-    """Inject stable generated ids and a base URL so arXiv assets resolve in srcDoc."""
+    """Inject canonical block markers and a base URL so arXiv assets resolve in srcDoc."""
     _, soup = _parse_arxiv_html_document(html, exclude_back_matter=False)
+    for header in soup.select(".arxiv-html-header"):
+        header.decompose()
+    beta_badge = soup.select_one("#beta-badge")
+    if beta_badge:
+        beta_badge.decompose()
     if source_url:
         head = soup.find("head")
         if head and not head.find("base"):
@@ -90,7 +96,7 @@ def citation_validation_diagnostics(blocks: list[HtmlBlock], citation: dict) -> 
     }
 
 
-def blocks_to_prompt_text(blocks: list[HtmlBlock], max_blocks: int = 250) -> str:
+def blocks_to_prompt_text(blocks: list[HtmlBlock], max_blocks: int = MAX_PROMPT_BLOCKS) -> str:
     """Convert blocks to a text representation for LLM prompts."""
     lines = []
     for b in blocks[:max_blocks]:
@@ -113,7 +119,6 @@ def _parse_arxiv_html_document(
     )
     blocks: list[HtmlBlock] = []
     current_section = ""
-    block_counter = 0
     in_back_matter = False
 
     content_tags = {
@@ -149,15 +154,10 @@ def _parse_arxiv_html_document(
         if exclude_back_matter and in_back_matter:
             continue
 
+        block_id = _canonical_block_id(len(blocks))
         existing_id = element.get("id", "")
-        if existing_id:
-            anchor = str(existing_id)
-        else:
-            anchor = f"block-{block_counter}"
-            element["id"] = anchor
-
-        block_id = anchor
-        block_counter += 1
+        html_anchor = f"#{existing_id}" if existing_id else ""
+        element["data-paper-block-id"] = block_id
 
         blocks.append(HtmlBlock(
             block_id=block_id,
@@ -165,7 +165,7 @@ def _parse_arxiv_html_document(
             tag=element.name,
             text=text,
             section_title=current_section,
-            html_anchor=f"#{anchor}",
+            html_anchor=html_anchor,
         ))
 
     return blocks, soup
@@ -200,10 +200,15 @@ def _block_preview(block: HtmlBlock) -> dict:
     return {
         "blockId": block.block_id,
         "orderIndex": block.order_index,
+        "htmlAnchor": block.html_anchor,
         "tag": block.tag,
         "sectionTitle": _preview(block.section_title),
         "text": _preview(block.text),
     }
+
+
+def _canonical_block_id(order_index: int) -> str:
+    return f"B{order_index:03d}"
 
 
 def _is_back_matter_heading(text: str) -> bool:

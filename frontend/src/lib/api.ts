@@ -64,17 +64,15 @@ export interface SearchRun {
   progress_current: number;
   progress_total: number;
   progress_message: string;
-  progress_log: ProgressLogEntry[];
+  progress_log: {
+    at: string;
+    stage: string;
+    message: string;
+  }[];
   started_at?: string;
   completed_at?: string;
   error?: string;
   created_at: string;
-}
-
-export interface ProgressLogEntry {
-  at: string;
-  stage: string;
-  message: string;
 }
 
 export interface SummaryCitation {

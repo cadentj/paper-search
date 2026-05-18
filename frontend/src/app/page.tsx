@@ -1,25 +1,29 @@
-"use client";
+import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { useOnboardingStatus } from "@/hooks/use-queries";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-export default function Home() {
-  const router = useRouter();
-  const { data, isLoading } = useOnboardingStatus();
+export const metadata: Metadata = {
+  title: "Paper Search",
+  description: "Keep up with relevant research papers",
+};
 
-  useEffect(() => {
-    if (isLoading) return;
-    if (data?.completed) {
-      router.replace("/dashboard/daily");
-    } else {
-      router.replace("/onboarding");
-    }
-  }, [data, isLoading, router]);
+async function getOnboardingCompleted() {
+  try {
+    const response = await fetch(`${API_URL}/onboarding/status`, {
+      cache: "no-store",
+    });
+    if (!response.ok) return false;
+    const status = (await response.json()) as { completed?: boolean };
+    return status.completed === true;
+  } catch {
+    return false;
+  }
+}
 
-  return (
-    <div className="flex min-h-screen items-center justify-center">
-      <p className="text-muted-foreground">Loading…</p>
-    </div>
-  );
+export default async function Home() {
+  if (await getOnboardingCompleted()) {
+    redirect("/dashboard/daily");
+  }
+  redirect("/onboarding");
 }

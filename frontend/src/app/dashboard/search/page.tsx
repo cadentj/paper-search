@@ -17,6 +17,19 @@ const TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
   hour: "numeric",
   minute: "2-digit",
 });
+const SEARCH_SKELETON_KEYS = [
+  "search-skeleton-1",
+  "search-skeleton-2",
+  "search-skeleton-3",
+];
+
+function RunCreatedTime({ value }: { value: string }) {
+  return (
+    <span suppressHydrationWarning>
+      {TIME_FORMATTER.format(new Date(value))}
+    </span>
+  );
+}
 
 export default function SearchPage() {
   const { data: runs, isLoading } = useSearchRuns();
@@ -41,12 +54,12 @@ export default function SearchPage() {
 
   return (
     <div className="flex-1 p-6 space-y-6 max-w-4xl">
-        <h1 className="text-2xl font-bold tracking-tight">Search History</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Search History</h1>
 
         {isLoading && (
           <div className="space-y-3">
-            {[1, 2, 3].map((i) => (
-              <Skeleton key={i} className="h-16 w-full" />
+            {SEARCH_SKELETON_KEYS.map((key) => (
+              <Skeleton key={key} className="h-16 w-full" />
             ))}
           </div>
         )}
@@ -88,7 +101,7 @@ export default function SearchPage() {
                         {run.run_date}
                       </CardTitle>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        {TIME_FORMATTER.format(new Date(run.created_at))}
+                        <RunCreatedTime value={run.created_at} />
                       </p>
                     </div>
                   </div>

@@ -91,9 +91,10 @@ Rules:
 - Extract 1-4 warrants for the given claim.
 - Each warrant must directly support the given claim and have exactly one citation.
 - If a warrant needs multiple citations, split it into multiple warrants under the same claim.
-- Cite only block ids that appear in the provided content.
+- Cite only canonical block ids that appear in square brackets in the provided content, such as B014.
 - Use startBlockId and endBlockId. For one-block citations, set them to the same id.
 - Citation ranges must be contiguous and no longer than 3 blocks.
+- Do not invent numeric ranges or derive ids from position. The only valid ids are the exact bracketed ids shown in the content.
 - Do not invent quotes or cite text that is not supported by the cited block range.
 - Include the sectionTitle if the block is within a section."""
 

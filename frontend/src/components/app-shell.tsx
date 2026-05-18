@@ -33,13 +33,13 @@ const NAV_ITEMS = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const router = useRouter();
+  const { push } = useRouter();
   const resetMutation = useResetOnboarding();
 
   const handleReset = async () => {
     if (!confirm("Reset all onboarding, filters, and search data?")) return;
     await resetMutation.mutateAsync();
-    router.push("/onboarding");
+    push("/onboarding");
   };
 
   return (

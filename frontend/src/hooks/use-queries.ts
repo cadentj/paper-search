@@ -25,9 +25,13 @@ export function useOnboardingExtraction(id: string | null) {
 }
 
 export function useCreateExtraction() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: { input_text: string }) =>
       api.createOnboardingExtraction(input),
+    onSuccess: (data) => {
+      qc.setQueryData(["onboarding", "extractions", data.id], data);
+    },
   });
 }
 
@@ -65,23 +69,6 @@ export function useCreateFilter() {
   return useMutation({
     mutationFn: (input: { name: string; definition: FilterDefinition }) =>
       api.createFilter(input),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["filters"] });
-    },
-  });
-}
-
-export function useUpdateFilter() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      id,
-      ...input
-    }: {
-      id: string;
-      name?: string;
-      definition?: FilterDefinition;
-    }) => api.updateFilter(id, input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["filters"] });
     },

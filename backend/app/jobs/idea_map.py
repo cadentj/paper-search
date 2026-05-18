@@ -6,11 +6,14 @@ import logging
 from queue import Empty, Queue
 from datetime import datetime, timezone
 
+from sqlalchemy.orm.attributes import flag_modified
+
 from app.db.session import SessionLocal
 from app.models.paper import Paper
 from app.models.idea_map import IdeaMap
 from app.core.config import LLM_MAX_CONCURRENCY
 from app.services.html_parser import (
+    MAX_PROMPT_BLOCKS,
     blocks_to_prompt_text,
     citation_validation_diagnostics,
     parse_arxiv_html,
@@ -77,13 +80,14 @@ def generate_idea_map(idea_map_id: str) -> None:
             db.commit()
             return
 
-        blocks_text = blocks_to_prompt_text(blocks)
-        block_map = {block.block_id: block for block in blocks}
+        prompt_blocks = blocks[:MAX_PROMPT_BLOCKS]
+        blocks_text = blocks_to_prompt_text(prompt_blocks)
+        block_map = {block.block_id: block for block in prompt_blocks}
         response_ids: list[str] = []
         llm_model = ""
 
         idea_map.status = "claims_running"
-        idea_map.claims = []
+        _set_claims(idea_map, [])
         idea_map.updated_at = datetime.now(timezone.utc)
         db.commit()
 
@@ -109,7 +113,10 @@ def generate_idea_map(idea_map_id: str) -> None:
             response_ids.append(claims_result["response_id"])
 
         if normalized_claims:
-            idea_map.claims = _merge_claims(list(idea_map.claims or []), normalized_claims)
+            _set_claims(
+                idea_map,
+                _merge_claims(list(idea_map.claims or []), normalized_claims),
+            )
             idea_map.updated_at = datetime.now(timezone.utc)
             db.commit()
 
@@ -138,6 +145,7 @@ def generate_idea_map(idea_map_id: str) -> None:
 
         warrant_queue: Queue[tuple[str, list[dict]]] = Queue()
         rejected_warrant_count = 0
+        rejected_warrant_keys: set[tuple[str, str]] = set()
         warrant_failures = 0
         valid_warrant_count = _count_warrants(idea_map.claims)
         max_workers = max(1, min(len(claims), LLM_MAX_CONCURRENCY))
@@ -168,13 +176,22 @@ def generate_idea_map(idea_map_id: str) -> None:
             while pending:
                 try:
                     claim_id, warrants = warrant_queue.get(timeout=0.2)
+                    logger.info(
+                        "idea_map run=%s paper=%s claim=%s streamed_warrants normalized_count=%s preview=%s",
+                        idea_map.id,
+                        paper.id,
+                        claim_id,
+                        len(warrants),
+                        _json_preview(warrants),
+                    )
                     rejected_warrant_count += _persist_warrants(
                         db,
                         idea_map,
-                        blocks,
+                        prompt_blocks,
                         block_map,
                         claim_id,
                         warrants,
+                        rejected_warrant_keys,
                     )
                     valid_warrant_count = _count_warrants(idea_map.claims)
                     _set_warrant_progress(
@@ -195,17 +212,38 @@ def generate_idea_map(idea_map_id: str) -> None:
                         llm_model = result["model"] or llm_model
                         if result["response_id"]:
                             response_ids.append(result["response_id"])
-                        final_warrants = [
-                            normalized for raw in result["content"].get("warrants", [])
-                            if (normalized := _normalize_warrant(raw))
-                        ]
+                        raw_warrants = result["content"].get("warrants", [])
+                        final_warrants = []
+                        dropped_warrants = 0
+                        for raw in raw_warrants:
+                            normalized = _normalize_warrant(
+                                raw,
+                                idea_map_id=idea_map.id,
+                                paper_id=paper.id,
+                                claim_id=claim.get("id", ""),
+                            )
+                            if normalized:
+                                final_warrants.append(normalized)
+                            else:
+                                dropped_warrants += 1
+                        logger.info(
+                            "idea_map run=%s paper=%s claim=%s warrant_llm_response raw_count=%s normalized_count=%s dropped_count=%s raw_preview=%s",
+                            idea_map.id,
+                            paper.id,
+                            claim.get("id", ""),
+                            len(raw_warrants),
+                            len(final_warrants),
+                            dropped_warrants,
+                            _json_preview(raw_warrants),
+                        )
                         rejected_warrant_count += _persist_warrants(
                             db,
                             idea_map,
-                            blocks,
+                            prompt_blocks,
                             block_map,
                             claim["id"],
                             final_warrants,
+                            rejected_warrant_keys,
                         )
                         valid_warrant_count = _count_warrants(idea_map.claims)
                     except Exception:
@@ -233,13 +271,22 @@ def generate_idea_map(idea_map_id: str) -> None:
                     claim_id, warrants = warrant_queue.get_nowait()
                 except Empty:
                     break
+                logger.info(
+                    "idea_map run=%s paper=%s claim=%s streamed_warrants normalized_count=%s preview=%s",
+                    idea_map.id,
+                    paper.id,
+                    claim_id,
+                    len(warrants),
+                    _json_preview(warrants),
+                )
                 rejected_warrant_count += _persist_warrants(
                     db,
                     idea_map,
-                    blocks,
+                    prompt_blocks,
                     block_map,
                     claim_id,
                     warrants,
+                    rejected_warrant_keys,
                 )
                 valid_warrant_count = _count_warrants(idea_map.claims)
                 _set_warrant_progress(
@@ -264,7 +311,7 @@ def generate_idea_map(idea_map_id: str) -> None:
             rejected_warrant_count,
             warrant_failures,
         )
-        idea_map.claims = list(idea_map.claims or [])
+        _set_claims(idea_map, list(idea_map.claims or []))
         idea_map.llm_model = llm_model
         idea_map.llm_response_id = ",".join(response_ids)
         idea_map.status = "completed"
@@ -307,9 +354,12 @@ def _stream_claims(
         if len(parsed_claims) <= last_count:
             return
 
-        idea_map.claims = _merge_claims(list(idea_map.claims or []), parsed_claims)
+        _set_claims(
+            idea_map,
+            _merge_claims(list(idea_map.claims or []), parsed_claims),
+        )
         idea_map.updated_at = datetime.now(timezone.utc)
-        if progress:
+        if progress is not None:
             progress.update(len(parsed_claims) - last_count)
             progress.set_postfix(claims=len(parsed_claims))
         last_count = len(parsed_claims)
@@ -340,6 +390,11 @@ def _set_warrant_progress(
 
 def _count_warrants(claims: list[dict] | None) -> int:
     return sum(len(claim.get("warrants", [])) for claim in claims or [])
+
+
+def _set_claims(idea_map: IdeaMap, claims: list[dict]) -> None:
+    idea_map.claims = claims
+    flag_modified(idea_map, "claims")
 
 
 def _stream_warrants_for_claim(
@@ -424,11 +479,35 @@ def _normalize_claim(raw: dict) -> dict | None:
     }
 
 
-def _normalize_warrant(raw: dict) -> dict | None:
+def _normalize_warrant(
+    raw: dict,
+    *,
+    idea_map_id: str | None = None,
+    paper_id: str | None = None,
+    claim_id: str | None = None,
+) -> dict | None:
     try:
         return IdeaMapWarrant.model_validate(raw).model_dump()
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "idea_map run=%s paper=%s claim=%s dropped_malformed_warrant error=%s raw=%s",
+            idea_map_id or "",
+            paper_id or "",
+            claim_id or "",
+            str(exc),
+            _json_preview(raw),
+        )
         return None
+
+
+def _json_preview(value: object, limit: int = 2000) -> str:
+    try:
+        text = json.dumps(value, ensure_ascii=True)
+    except TypeError:
+        text = str(value)
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}..."
 
 
 def _merge_claims(existing: list[dict], incoming: list[dict]) -> list[dict]:
@@ -457,6 +536,7 @@ def _persist_warrants(
     block_map,
     claim_id: str,
     warrants: list[dict],
+    rejected_warrant_keys: set[tuple[str, str]],
 ) -> int:
     if not warrants:
         return 0
@@ -487,6 +567,11 @@ def _persist_warrants(
             }
             valid_warrants.append(warrant)
         else:
+            warrant_id = str(warrant.get("id", ""))
+            rejected_key = (claim_id, warrant_id)
+            if rejected_key in rejected_warrant_keys:
+                continue
+            rejected_warrant_keys.add(rejected_key)
             rejected_count += 1
             logger.warning(
                 "idea_map run=%s paper=%s rejected_citation=%s",
@@ -496,7 +581,7 @@ def _persist_warrants(
                     {
                         "claimId": claim_id,
                         "claimText": _preview(target_claim.get("text", "")),
-                        "warrantId": warrant.get("id", ""),
+                        "warrantId": warrant_id,
                         "warrantText": _preview(warrant.get("text", "")),
                         "diagnostics": diagnostics,
                     },
@@ -511,7 +596,7 @@ def _persist_warrants(
         list(target_claim.get("warrants", [])),
         valid_warrants,
     )
-    idea_map.claims = claims
+    _set_claims(idea_map, claims)
     idea_map.updated_at = datetime.now(timezone.utc)
     db.commit()
     return rejected_count

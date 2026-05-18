@@ -3,7 +3,12 @@
 import pytest
 
 from app.services.arxiv import build_category_query, normalize_arxiv_id, parse_arxiv_feed
-from app.services.html_parser import parse_arxiv_html, validate_citation, blocks_to_prompt_text
+from app.services.html_parser import (
+    blocks_to_prompt_text,
+    parse_arxiv_html,
+    prepare_arxiv_html_for_viewer,
+    validate_citation,
+)
 
 
 class TestArxivProvider:
@@ -67,15 +72,19 @@ class TestHtmlParser:
     def test_parses_addressable_blocks_with_sections_and_stable_anchors(self):
         blocks = parse_arxiv_html(self.SAMPLE_HTML)
         assert len(blocks) > 0
-        for b in blocks:
-            assert b.block_id
+        for i, b in enumerate(blocks):
+            assert b.block_id == f"B{i:03d}"
             assert b.text
-            assert b.html_anchor.startswith("#")
             assert len(b.text) >= 10
         sections = [b.section_title for b in blocks if b.section_title]
         assert any("Introduction" in s for s in sections) or any("Methods" in s for s in sections)
-        ids_with_existing = [b for b in blocks if not b.block_id.startswith("block-")]
-        assert len(ids_with_existing) > 0
+        assert blocks[0].html_anchor == "#title"
+
+    def test_prepares_viewer_html_with_canonical_block_markers(self):
+        html = prepare_arxiv_html_for_viewer(self.SAMPLE_HTML)
+        assert 'data-paper-block-id="B000"' in html
+        assert 'data-paper-block-id="B001"' in html
+        assert 'id="title"' in html
 
 
 class TestCitationValidation:
@@ -89,22 +98,22 @@ class TestCitationValidation:
     def test_accepts_valid_block_ranges(self):
         blocks = parse_arxiv_html(self.SAMPLE_HTML)
         assert validate_citation(
-            blocks, {"startBlockId": "p1", "endBlockId": "p1"}
+            blocks, {"startBlockId": "B000", "endBlockId": "B000"}
         ) is True
         assert validate_citation(
-            blocks, {"startBlockId": "p1", "endBlockId": "p2"}
+            blocks, {"startBlockId": "B000", "endBlockId": "B001"}
         ) is True
 
     def test_rejects_invalid_block_ranges(self):
         blocks = parse_arxiv_html(self.SAMPLE_HTML)
         assert validate_citation(
-            blocks, {"startBlockId": "nonexistent", "endBlockId": "p2"}
+            blocks, {"startBlockId": "nonexistent", "endBlockId": "B001"}
         ) is False
         assert validate_citation(
-            blocks, {"startBlockId": "p1", "endBlockId": "nonexistent"}
+            blocks, {"startBlockId": "B000", "endBlockId": "nonexistent"}
         ) is False
         assert validate_citation(
-            blocks, {"startBlockId": "p2", "endBlockId": "p1"}
+            blocks, {"startBlockId": "B001", "endBlockId": "B000"}
         ) is False
 
 
@@ -117,7 +126,7 @@ class TestBlocksToPromptText:
         blocks = parse_arxiv_html(html)
         text = blocks_to_prompt_text(blocks, max_blocks=5)
         lines = [l for l in text.split("\n\n") if l.strip()]
-        assert "p0" in text
+        assert "B000" in text
         assert "paragraph" in text
         assert len(lines) <= 5
 

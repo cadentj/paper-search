@@ -5,6 +5,8 @@ import type { ReactNode } from "react";
 import type { PaperMatch, SummaryCitation } from "@/lib/api";
 
 const CITE_MARKER_RE = /<cite\s+arxivId=(["'])([^"']+)\1\s*\/>/g;
+const EMPTY_CITATIONS: SummaryCitation[] = [];
+const EMPTY_MATCHES: PaperMatch[] = [];
 
 function citationClassName(isLinked: boolean) {
   return [
@@ -17,8 +19,8 @@ function citationClassName(isLinked: boolean) {
 
 export function SummaryText({
   summary,
-  citations = [],
-  matches = [],
+  citations = EMPTY_CITATIONS,
+  matches = EMPTY_MATCHES,
   className,
 }: {
   summary: string;
@@ -29,6 +31,15 @@ export function SummaryText({
   const nodes: ReactNode[] = [];
   let cursor = 0;
   let citationIndex = 0;
+  const citationsByArxivId = new Map(
+    citations.map((citation) => [citation.arxivId, citation])
+  );
+  const matchesByArxivId = new Map<string, PaperMatch>();
+  matches.forEach((match) => {
+    if (match.paper_arxiv_id) {
+      matchesByArxivId.set(match.paper_arxiv_id, match);
+    }
+  });
 
   for (const match of summary.matchAll(CITE_MARKER_RE)) {
     const marker = match[0];
@@ -39,8 +50,8 @@ export function SummaryText({
       nodes.push(summary.slice(cursor, markerIndex));
     }
 
-    const citation = citations.find((c) => c.arxivId === arxivId);
-    const paperMatch = matches.find((m) => m.paper_arxiv_id === arxivId);
+    const citation = citationsByArxivId.get(arxivId);
+    const paperMatch = matchesByArxivId.get(arxivId);
     const label = `Open citation ${citationIndex + 1}: ${arxivId}`;
 
     if (paperMatch) {

@@ -64,7 +64,7 @@ export default function FiltersPage() {
   return (
     <div className="flex-1 p-6 space-y-6 max-w-4xl">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold tracking-tight">Filters</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Filters</h1>
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger
               render={
