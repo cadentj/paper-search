@@ -39,13 +39,25 @@ idea-map generation do not run inside the FastAPI process.
 Pull arXiv and LessWrong date manifests and shards from the public R2 buckets into the app database (required before counts and daily search work):
 
 ```bash
-# From repo root (installs core, backend, and scripts via uv workspace)
+# From repo root (installs core, backend, and scripts deps via uv workspace)
 uv sync
 mkdir -p backend/data
-uv run sync-public-index
+uv run --directory scripts python sync.py
 ```
 
 Re-run this when the published R2 indexes change. HTML for paper viewing is still fetched from R2 on demand.
+
+### Publish indexes (ingest)
+
+Scrape HTML for a date window, upload to R2, and publish the sharded index. Requires R2 write credentials in `.env`.
+
+```bash
+uv run --directory scripts python ingest_arxiv.py --end-date 2026-05-14 --days 7
+uv run --directory scripts python ingest_lesswrong.py --end-date 2026-05-14 --days 31 --cookie-file ~/.lesswrong-cookie.txt
+uv run --directory scripts python ingest_arxiv.py --step upload-html
+```
+
+Flat scripts under `scripts/`: `sync.py`, `r2.py` (shared utils), `ingest_arxiv.py`, `ingest_lesswrong.py`.
 
 ### 4. Start Backend
 

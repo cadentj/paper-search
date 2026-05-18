@@ -1,1 +1,0 @@
-"""paper-search CLI scripts."""
