@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterator
+
+from r2_index import (
+    date_index_key as _date_index_key,
+    json_body,
+    normalize_prefix,
+    upload_sharded_index,
+)
 
 DEFAULT_HTML_PREFIX = "data/"
 DEFAULT_INDEX_KEY = "data/index/papers-by-date.json"
@@ -12,19 +18,8 @@ DEFAULT_DATE_INDEX_PREFIX = "data/index/dates/"
 SCHEMA_VERSION = 3
 
 
-def normalize_prefix(prefix: str) -> str:
-    stripped = prefix.strip("/")
-    return f"{stripped}/" if stripped else ""
-
-
 def date_index_key(*, date: str, date_index_prefix: str) -> str:
-    return f"{normalize_prefix(date_index_prefix)}{date}.json"
-
-
-def json_body(payload: dict[str, Any], *, pretty: bool = False) -> str:
-    if pretty:
-        return json.dumps(payload, indent=2, sort_keys=False) + "\n"
-    return json.dumps(payload, separators=(",", ":"), sort_keys=False) + "\n"
+    return _date_index_key(date=date, date_index_prefix=date_index_prefix)
 
 
 def is_sharded_manifest(index: dict[str, Any]) -> bool:
@@ -256,31 +251,21 @@ def count_papers(index: dict[str, Any]) -> int:
     )
 
 
-def upload_sharded_index(
-    client,
-    *,
-    bucket: str,
-    index_key: str,
-    manifest: dict[str, Any],
-    date_shards: dict[str, dict[str, Any]],
-    pretty: bool = False,
-) -> None:
-    client.put_object(
-        Bucket=bucket,
-        Key=index_key,
-        Body=json_body(manifest, pretty=pretty).encode("utf-8"),
-        ContentType="application/json",
-        CacheControl="no-cache",
-    )
-    print(f"Uploaded s3://{bucket}/{index_key}")
-
-    for day, shard in date_shards.items():
-        key = manifest["dates"][day]["index_key"]
-        client.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=json_body(shard, pretty=pretty).encode("utf-8"),
-            ContentType="application/json",
-            CacheControl="public, max-age=31536000, immutable",
-        )
-    print(f"Uploaded {len(date_shards)} date shards")
+__all__ = [
+    "DEFAULT_DATE_INDEX_PREFIX",
+    "DEFAULT_HTML_PREFIX",
+    "DEFAULT_INDEX_KEY",
+    "SCHEMA_VERSION",
+    "apply_metadata_to_index",
+    "build_sharded_index_from_daily_papers",
+    "collect_papers_missing_abstract",
+    "count_papers",
+    "date_index_key",
+    "is_monolithic_index",
+    "is_sharded_manifest",
+    "iter_date_papers",
+    "json_body",
+    "split_monolithic_to_sharded",
+    "normalize_prefix",
+    "upload_sharded_index",
+]

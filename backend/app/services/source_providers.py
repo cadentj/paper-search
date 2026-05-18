@@ -44,6 +44,8 @@ class CandidateItem:
 class SourceFetchResult:
     items: list[CandidateItem]
     errors: list[str] = field(default_factory=list)
+    # Items still in the R2 index but with no excerpt — not sent to the LLM.
+    skipped_missing_text: dict[str, int] = field(default_factory=dict)
 
 
 class SourceProvider(Protocol):
@@ -77,11 +79,15 @@ class ArxivProvider:
 
     def candidates_for_date(self, run_date: date) -> SourceFetchResult:
         try:
-            records = fetch_public_cached_papers(run_date=run_date.isoformat())
+            records, skipped = fetch_public_cached_papers(run_date=run_date.isoformat())
         except Exception as exc:
             logger.exception("failed to fetch cached arXiv papers for %s", run_date)
             return SourceFetchResult(items=[], errors=[f"arXiv fetch failed: {exc}"])
-        return SourceFetchResult(items=[candidate_from_record(record) for record in records])
+        skipped_map = {"arxiv": skipped} if skipped else {}
+        return SourceFetchResult(
+            items=[candidate_from_record(record) for record in records],
+            skipped_missing_text=skipped_map,
+        )
 
     def html_for_paper(self, paper: Paper) -> dict[str, str | None]:
         paper_html = read_paper_html(paper.arxiv_id, html_url=paper.html_url)
@@ -113,11 +119,15 @@ class LessWrongProvider:
 
     def candidates_for_date(self, run_date: date) -> SourceFetchResult:
         try:
-            records = fetch_public_cached_posts(run_date=run_date.isoformat())
+            records, skipped = fetch_public_cached_posts(run_date=run_date.isoformat())
         except Exception as exc:
             logger.exception("failed to fetch cached LessWrong posts for %s", run_date)
             return SourceFetchResult(items=[], errors=[f"LessWrong fetch failed: {exc}"])
-        return SourceFetchResult(items=[candidate_from_record(record) for record in records])
+        skipped_map = {"lesswrong": skipped} if skipped else {}
+        return SourceFetchResult(
+            items=[candidate_from_record(record) for record in records],
+            skipped_missing_text=skipped_map,
+        )
 
     def html_for_paper(self, paper: Paper) -> dict[str, str | None]:
         try:
@@ -161,6 +171,7 @@ def candidates_for_sources(
 ) -> SourceFetchResult:
     items: list[CandidateItem] = []
     errors: list[str] = []
+    skipped_missing_text: dict[str, int] = {}
     for source_type in sorted(source_types):
         provider = provider_for(source_type)
         if not provider:
@@ -169,7 +180,13 @@ def candidates_for_sources(
         result = provider.candidates_for_date(run_date)
         items.extend(result.items)
         errors.extend(result.errors)
-    return SourceFetchResult(items=items, errors=errors)
+        for key, value in result.skipped_missing_text.items():
+            skipped_missing_text[key] = skipped_missing_text.get(key, 0) + value
+    return SourceFetchResult(
+        items=items,
+        errors=errors,
+        skipped_missing_text=skipped_missing_text,
+    )
 
 
 def candidate_from_record(record: dict) -> CandidateItem:

@@ -30,9 +30,8 @@ from arxiv_index import (
     DEFAULT_HTML_PREFIX,
     DEFAULT_INDEX_KEY,
     build_sharded_index_from_daily_papers,
-    json_body,
-    upload_sharded_index,
 )
+from r2_index import json_body, upload_sharded_index
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

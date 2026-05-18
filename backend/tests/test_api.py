@@ -28,10 +28,15 @@ class TestOnboarding:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] in ("queued", "running", "completed")
-        assert data["input_text"] == "I study mechanistic interpretability"
+        job_id = data["job_id"]
+        job = client.get(f"/jobs/{job_id}").json()
+        ext_id = job["subject_id"]
+        assert job["progress"]["stage"] in ("queued", "running", "completed", "failed")
 
-        ext_id = data["id"]
+        ext = client.get(f"/onboarding/extractions/{ext_id}").json()
+        assert ext["status"] in ("queued", "running", "completed", "failed")
+        assert ext["input_text"] == "I study mechanistic interpretability"
+
         resp2 = client.get(f"/onboarding/extractions/{ext_id}")
         assert resp2.status_code == 200
         assert resp2.json()["id"] == ext_id
@@ -148,15 +153,24 @@ class TestSearchRuns:
         resp = client.post("/search-runs/daily")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "queued"
-        assert data["stage"] == "queued"
-        assert data["progress_current"] == 0
-        assert data["progress_total"] == 1
-        assert "worker" in data["progress_message"]
-        assert data["run_date"] is not None
-        assert data["candidate_count"] is None
+        job_id = data["job_id"]
 
-        run_id = data["id"]
+        job_resp = client.get(f"/jobs/{job_id}")
+        assert job_resp.status_code == 200
+        job = job_resp.json()
+        assert job["status"] == "queued"
+        assert job["progress"]["stage"] == "queued"
+        assert job["progress"]["current"] == 0
+        assert job["progress"]["total"] == 1
+        assert "worker" in job["progress"]["message"]
+
+        resp = client.get("/search-runs/latest")
+        assert resp.status_code == 200
+        run_payload = resp.json()
+        assert run_payload["run_date"] is not None
+        assert run_payload["candidate_count"] is None
+
+        run_id = run_payload["id"]
         resp = client.get("/search-runs")
         assert resp.status_code == 200
         assert len(resp.json()) >= 1
@@ -184,8 +198,7 @@ class TestSearchRuns:
 
         latest = client.get("/search-runs/latest").json()
         assert latest["status"] == "failed"
-        assert latest["stage"] == "failed"
-        assert "Could not enqueue daily search" in latest["error"]
+        assert "Could not enqueue daily search" in (latest.get("error") or "")
 
 
 class TestPapers:

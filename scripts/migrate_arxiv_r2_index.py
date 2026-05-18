@@ -42,10 +42,9 @@ from arxiv_index import (
     count_papers,
     is_monolithic_index,
     is_sharded_manifest,
-    json_body,
     split_monolithic_to_sharded,
-    upload_sharded_index,
 )
+from r2_index import json_body, upload_sharded_index
 from arxiv_metadata import normalize_arxiv_id
 
 

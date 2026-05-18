@@ -8,9 +8,9 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sqlite3
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +19,12 @@ from typing import Any
 import boto3
 from bs4 import BeautifulSoup
 from botocore.config import Config
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from r2_index import date_index_key, json_body, normalize_prefix, upload_sharded_index
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -67,24 +73,14 @@ def main() -> None:
         return
 
     client = r2_client(args)
-    client.put_object(
-        Bucket=args.bucket,
-        Key=args.index_key,
-        Body=manifest_body.encode("utf-8"),
-        ContentType="application/json",
-        CacheControl="no-cache",
+    upload_sharded_index(
+        client,
+        bucket=args.bucket,
+        index_key=args.index_key,
+        manifest=manifest,
+        date_shards=date_shards,
+        pretty=args.pretty,
     )
-    print(f"Uploaded s3://{args.bucket}/{args.index_key}")
-    for day, shard in date_shards.items():
-        key = manifest["dates"][day]["index_key"]
-        client.put_object(
-            Bucket=args.bucket,
-            Key=key,
-            Body=json_body(shard, pretty=args.pretty).encode("utf-8"),
-            ContentType="application/json",
-            CacheControl="no-cache",
-        )
-    print(f"Uploaded {len(date_shards)} date shards")
 
 
 def parse_args() -> argparse.Namespace:
@@ -159,7 +155,7 @@ def build_index(
     date_shards: dict[str, dict[str, Any]] = {}
     for day in sorted(dates.keys(), reverse=True):
         posts = sorted(dates[day]["posts"], key=lambda item: item["posted_at"], reverse=True)
-        index_key = f"{normalized_date_prefix}{day}.json"
+        index_key = date_index_key(date=day, date_index_prefix=normalized_date_prefix)
         manifest_dates[day] = {"count": len(posts), "index_key": index_key}
         date_shards[day] = {
             "schema_version": 2,
@@ -242,11 +238,6 @@ def date_part(value: str) -> str:
         return value[:10]
 
 
-def normalize_prefix(prefix: str) -> str:
-    stripped = prefix.strip("/")
-    return f"{stripped}/" if stripped else ""
-
-
 def has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
     return column in {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
 
@@ -273,10 +264,6 @@ def first_words(value: str, count: int) -> str:
     if len(words) <= count:
         return " ".join(words)
     return " ".join(words[:count])
-
-
-def json_body(payload: dict[str, Any], *, pretty: bool) -> str:
-    return json.dumps(payload, indent=2 if pretty else None, separators=None if pretty else (",", ":")) + "\n"
 
 
 def write_index_files(

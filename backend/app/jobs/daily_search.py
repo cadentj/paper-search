@@ -183,6 +183,13 @@ def _upsert_candidate_papers(db, run: SearchRun, job: Job | None = None) -> list
     if job:
         for error in fetch_result.errors:
             _append_progress_log(job, "fetching_items", error)
+        for stype, count in sorted(fetch_result.skipped_missing_text.items()):
+            if count:
+                _append_progress_log(
+                    job,
+                    "fetching_items",
+                    f"skipped_missing_text[{stype}]={count} (no excerpt in index shard)",
+                )
     if active_sources and fetch_result.errors and not fetch_result.items:
         raise RuntimeError("; ".join(fetch_result.errors))
     daily_items = fetch_result.items

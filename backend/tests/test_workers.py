@@ -92,6 +92,38 @@ def _paper_fixture(arxiv_id: str, title: str) -> dict:
     }
 
 
+def _source_fetch_result_from_paper_dicts(papers: list[dict]):
+    from app.services.source_providers import CandidateItem, SourceFetchResult
+
+    items = [
+        CandidateItem(
+            source_type="arxiv",
+            source_id=p["arxiv_id"],
+            title=p["title"],
+            display_text=p.get("abstract") or "",
+            authors=list(p.get("authors") or []),
+            categories=list(p.get("categories") or []),
+            published_at=p.get("published_at"),
+            html_url=p.get("html_url"),
+            landing_url=p.get("landing_url"),
+            source_url=p.get("landing_url"),
+            arxiv_id=p["arxiv_id"],
+        )
+        for p in papers
+    ]
+    return SourceFetchResult(items=items)
+
+
+def _daily_job(db_session, run_id: str):
+    from app.models.job import Job
+
+    return (
+        db_session.query(Job)
+        .filter(Job.kind == "daily_search", Job.subject_id == run_id)
+        .first()
+    )
+
+
 def _extract_prompt_arxiv_id(user_prompt: str) -> str:
     for line in user_prompt.splitlines():
         if line.strip().startswith("Source ID:"):
@@ -136,22 +168,25 @@ def _fake_daily_async_llm(*, matched_arxiv_ids: set[str], assert_prompt=None, fa
 
 def _fake_summary_llm(*, matched_arxiv_id: str):
     calls = {"count": 0}
+    item_id = f"arxiv:{matched_arxiv_id}"
 
     def fake_call_llm(**kwargs):
         assert kwargs["profile"] == SUMMARY_PROFILE
         assert kwargs["response_model"] is SearchSummaryResponse
-        assert '<cite arxivId="' in kwargs["system_prompt"]
+        assert '<cite itemId="' in kwargs["system_prompt"]
         calls["count"] += 1
         return {
             "content": {
                 "summary": (
                     "One relevant paper matched today's filters "
-                    f'<cite arxivId="{matched_arxiv_id}"/>.'
+                    f'<cite itemId="{item_id}"/>.'
                 ),
                 "citations": [
                     {
                         "paperMatchId": "",
-                        "arxivId": matched_arxiv_id,
+                        "itemId": item_id,
+                        "sourceType": "arxiv",
+                        "sourceId": matched_arxiv_id,
                         "citedFor": "Relevant claim",
                     }
                 ],
@@ -201,7 +236,10 @@ class TestRunDailySearch:
         # Patch SessionLocal
         TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
         monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
-        monkeypatch.setattr("app.jobs.daily_search.fetch_local_cached_papers", lambda: daily_papers)
+        monkeypatch.setattr(
+            "app.jobs.daily_search.candidates_for_sources",
+            lambda sources, rd, p=daily_papers: _source_fetch_result_from_paper_dicts(p),
+        )
         monkeypatch.setattr(
             "app.jobs.daily_search.async_call_llm",
             _fake_daily_async_llm(matched_arxiv_ids={"2605.00001"}),
@@ -216,14 +254,16 @@ class TestRunDailySearch:
 
         db_session.expire_all()
         updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        job = _daily_job(db_session, run_id)
+        assert job is not None
         assert updated_run.status == "completed"
-        assert updated_run.stage == "completed"
+        assert job.progress["stage"] == "completed"
         assert updated_run.summary is not None
         assert updated_run.match_count is not None
         assert updated_run.candidate_count == len(daily_papers)
-        assert updated_run.progress_total == len(daily_papers)
-        assert updated_run.progress_current == updated_run.progress_total
-        assert len(updated_run.progress_log) >= 3
+        assert job.progress["total"] == len(daily_papers)
+        assert job.progress["current"] == job.progress["total"]
+        assert len(job.progress.get("log", [])) >= 3
 
     def test_ignores_archived_filters(self, db_session, db_engine, monkeypatch):
         from sqlalchemy.orm import sessionmaker
@@ -257,8 +297,10 @@ class TestRunDailySearch:
         TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
         monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
         monkeypatch.setattr(
-            "app.jobs.daily_search.fetch_local_cached_papers",
-            lambda: [_paper_fixture("2605.00004", "Fetched Paper")],
+            "app.jobs.daily_search.candidates_for_sources",
+            lambda sources, rd: _source_fetch_result_from_paper_dicts(
+                [_paper_fixture("2605.00004", "Fetched Paper")]
+            ),
         )
 
         from app.jobs.daily_search import run_daily_search
@@ -266,8 +308,10 @@ class TestRunDailySearch:
 
         db_session.expire_all()
         updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        job = _daily_job(db_session, run_id)
+        assert job is not None
         assert updated_run.status == "completed"
-        assert updated_run.stage == "completed"
+        assert job.progress["stage"] == "completed"
         assert updated_run.match_count == 0
 
     def test_searches_only_fetched_candidate_papers(self, db_session, db_engine, monkeypatch):
@@ -311,8 +355,10 @@ class TestRunDailySearch:
         TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
         monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
         monkeypatch.setattr(
-            "app.jobs.daily_search.fetch_local_cached_papers",
-            lambda: [_paper_fixture("2401.00001", "Included Paper")],
+            "app.jobs.daily_search.candidates_for_sources",
+            lambda sources, rd: _source_fetch_result_from_paper_dicts(
+                [_paper_fixture("2401.00001", "Included Paper")]
+            ),
         )
 
         def assert_prompt(user_prompt: str):
@@ -385,8 +431,10 @@ class TestRunDailySearch:
         TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
         monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
         monkeypatch.setattr(
-            "app.jobs.daily_search.fetch_local_cached_papers",
-            lambda: [_paper_fixture("2605.00003", "Current Paper")],
+            "app.jobs.daily_search.candidates_for_sources",
+            lambda sources, rd: _source_fetch_result_from_paper_dicts(
+                [_paper_fixture("2605.00003", "Current Paper")]
+            ),
         )
         monkeypatch.setattr("app.core.config.settings.OPENROUTER_API_KEY", "")
 
@@ -442,7 +490,10 @@ class TestRunDailySearch:
 
         TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
         monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
-        monkeypatch.setattr("app.jobs.daily_search.fetch_local_cached_papers", lambda: daily_papers)
+        monkeypatch.setattr(
+            "app.jobs.daily_search.candidates_for_sources",
+            lambda sources, rd, p=daily_papers: _source_fetch_result_from_paper_dicts(p),
+        )
         monkeypatch.setattr(
             "app.jobs.daily_search.async_call_llm",
             _fake_daily_async_llm(
@@ -460,11 +511,14 @@ class TestRunDailySearch:
 
         db_session.expire_all()
         updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        job = _daily_job(db_session, run_id)
+        assert job is not None
         assert updated_run.status == "completed"
-        assert updated_run.progress_current == 2
-        assert updated_run.progress_total == 2
+        assert job.progress["current"] == 2
+        assert job.progress["total"] == 2
         assert updated_run.match_count == 1
-        assert any("failed" in entry["message"] for entry in updated_run.progress_log)
+        log_msgs = [entry.get("message", "") for entry in job.progress.get("log", [])]
+        assert any("2605.00011" in m or "pair" in m.lower() for m in log_msgs)
 
     def test_all_pair_failures_mark_run_failed(self, db_session, db_engine, monkeypatch):
         from sqlalchemy.orm import sessionmaker
@@ -497,7 +551,10 @@ class TestRunDailySearch:
 
         TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
         monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
-        monkeypatch.setattr("app.jobs.daily_search.fetch_local_cached_papers", lambda: daily_papers)
+        monkeypatch.setattr(
+            "app.jobs.daily_search.candidates_for_sources",
+            lambda sources, rd, p=daily_papers: _source_fetch_result_from_paper_dicts(p),
+        )
         monkeypatch.setattr(
             "app.jobs.daily_search.async_call_llm",
             _fake_daily_async_llm(
@@ -511,13 +568,15 @@ class TestRunDailySearch:
         try:
             run_daily_search(run_id)
         except RuntimeError as exc:
-            assert "All 1 filter-paper evaluations failed" in str(exc)
+            assert "All 1 filter-item evaluations failed" in str(exc)
         else:
             raise AssertionError("Expected all pair failures to fail the run")
 
         db_session.expire_all()
         updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        job = _daily_job(db_session, run_id)
+        assert job is not None
         assert updated_run.status == "failed"
-        assert updated_run.stage == "failed"
-        assert updated_run.progress_current == 1
-        assert updated_run.progress_total == 1
+        assert job.progress["stage"] == "failed"
+        assert job.progress["current"] == 1
+        assert job.progress["total"] == 1

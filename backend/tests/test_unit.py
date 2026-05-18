@@ -123,13 +123,16 @@ class TestPublicArxivCache:
     def test_papers_for_date_reads_date_shard(self, monkeypatch):
         from app.services import public_arxiv_cache as cache
 
-        monkeypatch.setattr(
-            cache,
-            "fetch_date_index",
-            lambda index_key: {
+        def fake_shard(self, index_key: str) -> dict:
+            return {
                 "date": "2026-05-18",
                 "papers": [{"arxiv_id": "2605.01234", "title": "Shard"}],
-            },
+            }
+
+        monkeypatch.setattr(
+            cache.ShardedPublicIndexReader,
+            "fetch_date_shard",
+            fake_shard,
         )
 
         papers = cache.papers_for_date(
@@ -140,6 +143,88 @@ class TestPublicArxivCache:
             },
         )
         assert papers[0]["title"] == "Shard"
+
+    def test_fetch_public_cached_papers_skips_empty_abstract(self, monkeypatch):
+        from app.services import public_arxiv_cache as cache
+
+        monkeypatch.setattr(
+            cache,
+            "fetch_index",
+            lambda: {
+                "dates": {
+                    "2026-05-18": {
+                        "count": 2,
+                        "papers": [
+                            {
+                                "arxiv_id": "2605.01234",
+                                "title": "Has abstract",
+                                "abstract": "A",
+                                "categories": ["cs.AI"],
+                            },
+                            {
+                                "arxiv_id": "2605.09999",
+                                "title": "No abstract",
+                                "abstract": "",
+                                "categories": ["cs.AI"],
+                            },
+                        ],
+                    }
+                }
+            },
+        )
+        records, skipped = cache.fetch_public_cached_papers(run_date="2026-05-18")
+        assert skipped == 1
+        assert len(records) == 1
+        assert records[0]["arxiv_id"] == "2605.01234"
+
+
+class TestPublicLesswrongCache:
+    def test_fetch_skips_posts_without_preview(self, monkeypatch):
+        from app.services import public_lesswrong_cache as lw
+
+        monkeypatch.setattr(
+            lw,
+            "fetch_index",
+            lambda: {
+                "dates": {
+                    "2026-05-18": {
+                        "count": 2,
+                        "posts": [
+                            {
+                                "post_id": "abc",
+                                "title": "T",
+                                "text_preview": "hello world",
+                                "posted_at": "2026-05-18T12:00:00Z",
+                                "page_url": "https://www.lesswrong.com/posts/abc",
+                            },
+                            {
+                                "post_id": "def",
+                                "title": "No",
+                                "text_preview": "",
+                                "posted_at": "2026-05-18T13:00:00Z",
+                                "page_url": "https://www.lesswrong.com/posts/def",
+                            },
+                        ],
+                    }
+                }
+            },
+        )
+        posts, skipped = lw.fetch_public_cached_posts(run_date="2026-05-18")
+        assert skipped == 1
+        assert len(posts) == 1
+        assert posts[0]["source_id"] == "abc"
+
+
+class TestPublicR2IndexHelpers:
+    def test_has_searchable_text(self):
+        from app.services.public_r2_index import has_searchable_text
+
+        assert has_searchable_text({"abstract": "x"}, text_fields=("abstract",))
+        assert not has_searchable_text({"abstract": " "}, text_fields=("abstract",))
+        assert has_searchable_text(
+            {"text_preview": "", "excerpt": "hi"},
+            text_fields=("text_preview", "excerpt"),
+        )
 
 
 class TestHtmlParser:

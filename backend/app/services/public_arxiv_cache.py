@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-import threading
-import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
-from urllib.parse import quote, urljoin
-
-import httpx
-from bs4 import BeautifulSoup
 
 from app.core.config import settings
+from app.services.public_r2_index import (
+    R2SourceConfig,
+    ShardedPublicIndexReader,
+    has_searchable_text,
+    http_get_text,
+    public_url_for_base,
+)
 
 
 @dataclass(frozen=True)
@@ -21,13 +22,15 @@ class AvailableDate:
     count: int
 
 
-_index_cache: dict[str, Any] | None = None
-_index_cached_at = 0.0
-_date_index_cache: dict[str, dict[str, Any]] = {}
-_date_index_cached_at: dict[str, float] = {}
-_index_lock = threading.Lock()
-_http_client: httpx.Client | None = None
-_http_client_lock = threading.Lock()
+_ARXIV_READER = ShardedPublicIndexReader(
+    R2SourceConfig(
+        public_base_url=settings.ARXIV_HTML_PUBLIC_BASE_URL,
+        manifest_path=settings.ARXIV_HTML_INDEX_PATH,
+        ttl_seconds=settings.ARXIV_PUBLIC_INDEX_TTL_SECONDS,
+        items_key="papers",
+    ),
+    namespace="arxiv",
+)
 
 
 def available_dates() -> dict[str, Any]:
@@ -48,38 +51,34 @@ def fetch_public_cached_papers(
     run_date: str,
     categories: list[str] | None = None,
     limit: int | None = None,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], int]:
     index = fetch_index()
     date_payload = index.get("dates", {}).get(run_date)
     if not date_payload:
-        return []
+        return [], 0
 
     category_set = set(categories or _settings_categories())
-    papers = [
-        paper for paper in papers_for_date(run_date=run_date, date_payload=date_payload)
-        if _matches_categories(paper, category_set)
-    ]
+    raw_papers = papers_for_date(run_date=run_date, date_payload=date_payload)
+    skipped_missing_text = 0
+    papers: list[dict[str, Any]] = []
+    for paper in raw_papers:
+        if not has_searchable_text(paper, text_fields=("abstract",)):
+            skipped_missing_text += 1
+            continue
+        if not _matches_categories(paper, category_set):
+            continue
+        papers.append(paper)
+
     max_results = limit if limit is not None else settings.ARXIV_PUBLIC_DAILY_LIMIT
     if max_results and max_results > 0:
         papers = papers[:max_results]
 
-    return _hydrate_paper_records(papers)
+    records = [_paper_record(p) for p in papers]
+    return records, skipped_missing_text
 
 
 def papers_for_date(*, run_date: str, date_payload: dict[str, Any]) -> list[dict[str, Any]]:
-    inline_papers = date_payload.get("papers")
-    if isinstance(inline_papers, list):
-        return inline_papers
-
-    index_key = str(date_payload.get("index_key") or "")
-    if not index_key:
-        return []
-
-    date_index = fetch_date_index(index_key=index_key)
-    if str(date_index.get("date") or run_date) != run_date:
-        return []
-    papers = date_index.get("papers") or []
-    return papers if isinstance(papers, list) else []
+    return _ARXIV_READER.items_for_date(run_date=run_date, date_payload=date_payload)
 
 
 def fetch_public_paper_html(
@@ -94,137 +93,42 @@ def fetch_public_paper_html(
     if not url:
         return None
 
-    try:
-        response = _shared_client().get(url)
-        response.raise_for_status()
-    except httpx.HTTPError:
+    text = http_get_text(url)
+    if text is None:
         return None
-
-    return {"html": response.text, "source_url": str(response.url)}
+    return {"html": text, "source_url": url}
 
 
 def fetch_index() -> dict[str, Any]:
-    global _index_cache, _index_cached_at
-
-    now = time.monotonic()
-    with _index_lock:
-        if (
-            _index_cache is not None
-            and now - _index_cached_at < settings.ARXIV_PUBLIC_INDEX_TTL_SECONDS
-        ):
-            return _index_cache
-
-    index_url = public_url(settings.ARXIV_HTML_INDEX_PATH)
-    response = _shared_client().get(index_url)
-    response.raise_for_status()
-    payload = response.json()
-
-    with _index_lock:
-        _index_cache = payload
-        _index_cached_at = now
-    return payload
+    return _ARXIV_READER.fetch_manifest()
 
 
 def fetch_date_index(*, index_key: str) -> dict[str, Any]:
-    now = time.monotonic()
-    with _index_lock:
-        cached = _date_index_cache.get(index_key)
-        cached_at = _date_index_cached_at.get(index_key, 0.0)
-        if cached is not None and now - cached_at < settings.ARXIV_PUBLIC_INDEX_TTL_SECONDS:
-            return cached
-
-    response = _shared_client().get(public_url(index_key))
-    response.raise_for_status()
-    payload = response.json()
-
-    with _index_lock:
-        _date_index_cache[index_key] = payload
-        _date_index_cached_at[index_key] = now
-    return payload
+    return _ARXIV_READER.fetch_date_shard(index_key)
 
 
 def public_url(path_or_key: str) -> str:
-    base = settings.ARXIV_HTML_PUBLIC_BASE_URL.rstrip("/") + "/"
-    path = path_or_key.lstrip("/")
-    return urljoin(base, quote(path, safe="/:.-_"))
-
-
-def _shared_client() -> httpx.Client:
-    global _http_client
-
-    with _http_client_lock:
-        if _http_client is None:
-            _http_client = httpx.Client(
-                timeout=30.0,
-                follow_redirects=True,
-                limits=httpx.Limits(max_connections=32, max_keepalive_connections=16),
-            )
-        return _http_client
-
-
-def _hydrate_paper_records(index_papers: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        record
-        for paper in index_papers
-        if (record := _paper_record(paper)) is not None
-    ]
+    return public_url_for_base(settings.ARXIV_HTML_PUBLIC_BASE_URL, path_or_key)
 
 
 def _paper_record(paper: dict[str, Any]) -> dict[str, Any]:
     arxiv_id = str(paper.get("arxiv_id") or "")
     html_key = str(paper.get("html_key") or _html_key_for_arxiv_id(arxiv_id))
     html_url = public_url(html_key)
-    metadata = {
-        "title": paper.get("title") or arxiv_id,
-        "abstract": paper.get("abstract") or "",
-        "authors": list(paper.get("authors") or []),
-    }
-
-    if not metadata["abstract"]:
-        fetched = fetch_public_paper_html(arxiv_id=arxiv_id, html_url=html_url)
-        if fetched:
-            extracted = _extract_html_metadata(fetched["html"])
-            metadata = {
-                "title": metadata["title"] or extracted["title"] or arxiv_id,
-                "abstract": metadata["abstract"] or extracted["abstract"],
-                "authors": metadata["authors"] or extracted["authors"],
-            }
-
+    abstract = str(paper.get("abstract") or "").strip()
     return {
         "source_type": "arxiv",
         "source_id": arxiv_id,
         "arxiv_id": arxiv_id,
-        "title": metadata["title"] or arxiv_id,
-        "abstract": metadata["abstract"] or "No abstract was available in the R2 index or HTML.",
-        "authors": metadata["authors"],
+        "title": paper.get("title") or arxiv_id,
+        "abstract": abstract,
+        "authors": list(paper.get("authors") or []),
         "categories": list(paper.get("categories") or []),
         "published_at": _parse_datetime(paper.get("latest_version_date")),
         "html_url": html_url,
         "landing_url": f"https://arxiv.org/abs/{arxiv_id}",
         "source_url": f"https://arxiv.org/abs/{arxiv_id}",
         "source_metadata": {},
-    }
-
-
-def _extract_html_metadata(html: str) -> dict[str, Any]:
-    soup = BeautifulSoup(html, "lxml")
-    title_el = soup.select_one(".ltx_title_document") or soup.find("title")
-    authors = [
-        _normalize_text(author.get_text(" ", strip=True))
-        for author in soup.select(".ltx_authors .ltx_personname")
-    ]
-    abstract_el = soup.select_one(".ltx_abstract")
-    if abstract_el:
-        for heading in abstract_el.select(".ltx_title_abstract"):
-            heading.decompose()
-        abstract = _normalize_text(abstract_el.get_text(" ", strip=True))
-    else:
-        abstract = ""
-
-    return {
-        "title": _normalize_text(title_el.get_text(" ", strip=True)) if title_el else "",
-        "abstract": abstract,
-        "authors": [author for author in authors if author],
     }
 
 
@@ -253,7 +157,3 @@ def _parse_datetime(value: str | None) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
-
-
-def _normalize_text(value: str) -> str:
-    return " ".join(value.split())
