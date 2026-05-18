@@ -21,7 +21,7 @@ def list_filters(
     if status:
         query = query.filter(Filter.status == status)
     query = query.order_by(Filter.created_at.desc())
-    return query.all()
+    return [filt.to_pydantic() for filt in query.all()]
 
 
 @router.post("", response_model=FilterResponse)
@@ -38,7 +38,7 @@ def create_filter(body: FilterCreate, db: Session = Depends(get_db)):
     db.add(filt)
     db.commit()
     db.refresh(filt)
-    return filt
+    return filt.to_pydantic()
 
 
 @router.patch("/{filter_id}", response_model=FilterResponse)
@@ -56,7 +56,7 @@ def update_filter(filter_id: str, body: FilterUpdate, db: Session = Depends(get_
     filt.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(filt)
-    return filt
+    return filt.to_pydantic()
 
 
 @router.post("/{filter_id}/archive", response_model=FilterResponse)
@@ -70,7 +70,7 @@ def archive_filter(filter_id: str, db: Session = Depends(get_db)):
     filt.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(filt)
-    return filt
+    return filt.to_pydantic()
 
 
 @router.post("/{filter_id}/restore", response_model=FilterResponse)
@@ -84,4 +84,4 @@ def restore_filter(filter_id: str, db: Session = Depends(get_db)):
     filt.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(filt)
-    return filt
+    return filt.to_pydantic()

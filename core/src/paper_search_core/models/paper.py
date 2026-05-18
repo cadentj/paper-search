@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import JSON, Column, DateTime, Text, UniqueConstraint
 
 from paper_search_core.models.base import Base
+from paper_search_core.schemas.daily_search import PaperPayload, paper_item_id
 
 
 class Paper(Base):
@@ -36,3 +37,16 @@ class Paper(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+
+    def to_search_payload(self) -> PaperPayload:
+        source_type = self.source_type or "arxiv"
+        source_id = self.source_id or ""
+        return PaperPayload(
+            id=self.id,
+            title=self.title,
+            source_type=source_type,
+            source_id=source_id,
+            item_id=paper_item_id(source_type, source_id),
+            text=self.search_text or self.abstract,
+            authors=list(self.authors or []),
+        )

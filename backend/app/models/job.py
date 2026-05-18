@@ -5,6 +5,7 @@ from sqlalchemy import Column, DateTime, Index, JSON, Text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.models.base import Base
+from app.schemas.jobs import JobResponse
 
 
 ProgressJSON = JSON().with_variant(JSONB, "postgresql")
@@ -35,3 +36,6 @@ class Job(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+
+    def to_pydantic(self) -> JobResponse:
+        return JobResponse.model_validate(self)

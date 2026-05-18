@@ -4,6 +4,7 @@ from datetime import datetime, date, timezone
 from sqlalchemy import Column, Text, DateTime, Date, Integer, JSON
 
 from app.models.base import Base
+from app.schemas.search import SearchRunResponse
 
 
 class SearchRun(Base):
@@ -23,3 +24,9 @@ class SearchRun(Base):
     completed_at = Column(DateTime, nullable=True)
     error = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    def to_pydantic(self, *, job_id: str | None = None) -> SearchRunResponse:
+        resp = SearchRunResponse.model_validate(self)
+        if job_id is not None:
+            return resp.model_copy(update={"job_id": job_id})
+        return resp

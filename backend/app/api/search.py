@@ -153,43 +153,17 @@ def get_search_run_matches(
     for m in matches:
         paper = db.query(Paper).filter(Paper.id == m.paper_id).first()
         filt = db.query(Filter).filter(Filter.id == m.filter_id).first()
-
-        match_resp = PaperMatchResponse(
-            id=m.id,
-            search_run_id=m.search_run_id,
-            filter_id=m.filter_id,
-            paper_id=m.paper_id,
-            result=m.result,
-            llm_model=m.llm_model,
-            created_at=m.created_at,
-            paper_title=paper.title if paper else None,
-            paper_authors=paper.authors if paper else None,
-            paper_source_type=paper.source_type if paper else None,
-            paper_source_id=paper.source_id if paper else None,
-            paper_source_url=paper.source_url if paper else None,
-            paper_item_label=_paper_item_label(paper) if paper else None,
-            paper_abstract=paper.abstract if paper else None,
-            filter_name=filt.name if filt else None,
-        )
-        result.append(match_resp)
+        result.append(m.to_pydantic(paper=paper, filt=filt))
 
     result.sort(key=lambda x: x.created_at, reverse=True)
     return result
 
 
-def _paper_item_label(paper: Paper) -> str:
-    source_type = paper.source_type or "arxiv"
-    source_id = paper.source_id or paper.id
-    return f"{source_type}:{source_id}"
-
-
-def _search_run_payload(run: SearchRun, db: Session) -> dict:
-    payload = SearchRunResponse.model_validate(run).model_dump()
+def _search_run_payload(run: SearchRun, db: Session) -> SearchRunResponse:
     job = latest_job_for_subject(
         db,
         subject_type="search_run",
         subject_id=run.id,
         kind="daily_search",
     )
-    payload["job_id"] = job.id if job else None
-    return payload
+    return run.to_pydantic(job_id=job.id if job else None)

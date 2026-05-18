@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from app.core.config import LLM_MAX_CONCURRENCY
@@ -29,6 +28,8 @@ from app.llm.schemas import (
     FilterSearchResponse,
     SearchSummaryResponse,
 )
+from app.schemas.daily_search import FilterPayload, PairEvaluation
+from paper_search_core.schemas.daily_search import PaperPayload
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
@@ -36,58 +37,21 @@ PAIR_TIMEOUT_SECONDS = 30.0
 PAIRING_PHASE_TIMEOUT_SECONDS = 180.0
 
 
-@dataclass
-class FilterPayload:
-    id: str
-    name: str
-    definition: dict
-
-
-@dataclass
-class PaperPayload:
-    id: str
-    title: str
-    source_type: str
-    source_id: str
-    item_id: str
-    text: str
-    authors: list[str]
-
-
-@dataclass
-class PairEvaluation:
-    filter_id: str
-    filter_name: str
-    paper_id: str
-    paper_title: str
-    source_type: str
-    source_id: str
-    item_id: str
-    result: dict | None = None
-    model: str | None = None
-    response_id: str | None = None
-    error: str | None = None
-
-
-def _build_papers_text(papers: list[Paper | PaperPayload]) -> str:
+def _build_papers_text(papers: list[PaperPayload]) -> str:
     lines = []
     for p in papers:
-        source_type = getattr(p, "source_type", "arxiv") or "arxiv"
-        source_id = getattr(p, "source_id", None) or ""
-        item_id = getattr(p, "item_id", f"{source_type}:{source_id}")
-        text = getattr(p, "text", None) or getattr(p, "abstract", "")
         lines.append(
-            f"Item ID: {item_id}\n"
-            f"Source Type: {source_type}\n"
-            f"Source ID: {source_id}\n"
+            f"Item ID: {p.item_id}\n"
+            f"Source Type: {p.source_type}\n"
+            f"Source ID: {p.source_id}\n"
             f"Title: {p.title}\n"
             f"Authors: {', '.join(p.authors) if p.authors else 'Unknown'}\n"
-            f"Excerpt: {text}\n"
+            f"Excerpt: {p.text}\n"
         )
     return "\n---\n".join(lines)
 
 
-def _build_paper_text(paper: Paper | PaperPayload) -> str:
+def _build_paper_text(paper: PaperPayload) -> str:
     return _build_papers_text([paper])
 
 
@@ -232,40 +196,10 @@ def _link_candidate_papers(db, run: SearchRun, job: Job | None = None) -> list[P
     return papers
 
 
-def _build_filter_payloads(filters: list[Filter]) -> list[FilterPayload]:
-    return [
-        FilterPayload(
-            id=filt.id,
-            name=filt.name,
-            definition=dict(filt.definition or {}),
-        )
-        for filt in filters
-    ]
-
-
-def _build_paper_payloads(papers: list[Paper]) -> list[PaperPayload]:
-    return [
-        PaperPayload(
-            id=paper.id,
-            title=paper.title,
-            source_type=paper.source_type or "arxiv",
-            source_id=paper.source_id or "",
-            item_id=_item_id(paper.source_type or "arxiv", paper.source_id or ""),
-            text=paper.search_text or paper.abstract,
-            authors=list(paper.authors or []),
-        )
-        for paper in papers
-    ]
-
-
 def _filter_behavior(mode: str) -> str:
     if mode == "claim":
         return "Look for evidence that supports, refutes, or complicates the described claim."
     return "Look for items relevant to the described topic or question."
-
-
-def _item_id(source_type: str, source_id: str) -> str:
-    return f"{source_type}:{source_id}"
 
 
 async def _evaluate_filter_paper(
@@ -438,8 +372,8 @@ def run_daily_search(search_run_id: str, job_id: str | None = None) -> None:
         )
 
         active_filters = db.query(Filter).filter(Filter.status == "active").all()
-        filter_payloads = _build_filter_payloads(active_filters)
-        paper_payloads = _build_paper_payloads(papers)
+        filter_payloads = [f.to_search_payload() for f in active_filters]
+        paper_payloads = [p.to_search_payload() for p in papers]
         pair_total = len(filter_payloads) * len(paper_payloads)
 
         if not filter_payloads or not paper_payloads:

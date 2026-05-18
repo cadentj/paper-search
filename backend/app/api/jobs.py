@@ -15,8 +15,6 @@ from app.models.onboarding_extraction import OnboardingExtraction
 from app.models.paper import Paper
 from app.models.paper_match import PaperMatch
 from app.models.search_run import SearchRun
-from app.schemas.documents import DocumentResponse
-from app.schemas.filters import FilterResponse
 from app.schemas.jobs import (
     DailySearchJobResponse,
     DocumentProcessingJobResponse,
@@ -25,9 +23,7 @@ from app.schemas.jobs import (
     OnboardingExtractionJobResponse,
     OnboardingGenerationJobResponse,
 )
-from app.schemas.onboarding import OnboardingExtractionResponse
-from app.schemas.papers import IdeaMapResponse
-from app.schemas.search import PaperMatchResponse, SearchRunResponse
+from app.schemas.search import PaperMatchResponse
 
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -39,7 +35,7 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    return job
+    return job.to_pydantic()
 
 
 def _get_job(db: Session, job_id: str, kind: str) -> Job:
@@ -56,7 +52,7 @@ def _is_done(job: Job) -> bool:
 
 
 def _serialize_job(job: Job) -> JobResponse:
-    return JobResponse.model_validate(job)
+    return job.to_pydantic()
 
 
 def _encode_cursor(value: datetime, item_id: str) -> str:
@@ -87,32 +83,10 @@ def _apply_cursor(query, model, column, cursor: str | None):
     return query.filter(or_(column > value, and_(column == value, model.id > item_id)))
 
 
-def _paper_item_label(paper: Paper) -> str:
-    source_type = paper.source_type or "arxiv"
-    source_id = paper.source_id or paper.id
-    return f"{source_type}:{source_id}"
-
-
 def _paper_match_response(db: Session, match: PaperMatch) -> PaperMatchResponse:
     paper = db.query(Paper).filter(Paper.id == match.paper_id).first()
     filt = db.query(Filter).filter(Filter.id == match.filter_id).first()
-    return PaperMatchResponse(
-        id=match.id,
-        search_run_id=match.search_run_id,
-        filter_id=match.filter_id,
-        paper_id=match.paper_id,
-        result=match.result,
-        llm_model=match.llm_model,
-        created_at=match.created_at,
-        paper_title=paper.title if paper else None,
-        paper_authors=paper.authors if paper else None,
-        paper_source_type=paper.source_type if paper else None,
-        paper_source_id=paper.source_id if paper else None,
-        paper_source_url=paper.source_url if paper else None,
-        paper_item_label=_paper_item_label(paper) if paper else None,
-        paper_abstract=paper.abstract if paper else None,
-        filter_name=filt.name if filt else None,
-    )
+    return match.to_pydantic(paper=paper, filt=filt)
 
 
 @router.get("/daily-search/{job_id}", response_model=DailySearchJobResponse)
@@ -137,11 +111,9 @@ def get_daily_search_job(
         latest = matches[-1]
         next_cursor = _encode_cursor(latest.created_at, latest.id)
 
-    subject = SearchRunResponse.model_validate(run).model_dump()
-    subject["job_id"] = job.id
     return DailySearchJobResponse(
         job=_serialize_job(job),
-        subject=SearchRunResponse.model_validate(subject),
+        subject=run.to_pydantic(job_id=job.id),
         items=[_paper_match_response(db, match) for match in matches],
         next_cursor=next_cursor,
         done=_is_done(job),
@@ -154,11 +126,9 @@ def get_idea_map_job(job_id: str, db: Session = Depends(get_db)):
     idea_map = db.query(IdeaMap).filter(IdeaMap.id == job.subject_id).first()
     if not idea_map:
         raise HTTPException(status_code=404, detail="Idea map not found")
-    subject = IdeaMapResponse.model_validate(idea_map).model_dump()
-    subject["job_id"] = job.id
     return IdeaMapJobResponse(
         job=_serialize_job(job),
-        subject=IdeaMapResponse.model_validate(subject),
+        subject=idea_map.to_pydantic(job_id=job.id),
         items=[],
         next_cursor=None,
         done=_is_done(job),
@@ -193,7 +163,7 @@ def get_onboarding_generation_job(
     return OnboardingGenerationJobResponse(
         job=_serialize_job(job),
         subject=_serialize_job(job),
-        items=[FilterResponse.model_validate(item) for item in filters],
+        items=[item.to_pydantic() for item in filters],
         next_cursor=next_cursor,
         done=_is_done(job),
     )
@@ -210,11 +180,9 @@ def get_onboarding_extraction_job(job_id: str, db: Session = Depends(get_db)):
     ).first()
     if not extraction:
         raise HTTPException(status_code=404, detail="Extraction not found")
-    subject = OnboardingExtractionResponse.model_validate(extraction).model_dump()
-    subject["job_id"] = job.id
     return OnboardingExtractionJobResponse(
         job=_serialize_job(job),
-        subject=OnboardingExtractionResponse.model_validate(subject),
+        subject=extraction.to_pydantic(job_id=job.id),
         items=[],
         next_cursor=None,
         done=_is_done(job),
@@ -230,11 +198,9 @@ def get_document_processing_job(job_id: str, db: Session = Depends(get_db)):
     document = db.query(Document).filter(Document.id == job.subject_id).first()
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
-    subject = DocumentResponse.model_validate(document).model_dump()
-    subject["job_id"] = job.id
     return DocumentProcessingJobResponse(
         job=_serialize_job(job),
-        subject=DocumentResponse.model_validate(subject),
+        subject=document.to_pydantic(job_id=job.id),
         items=[],
         next_cursor=None,
         done=_is_done(job),

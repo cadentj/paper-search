@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Boolean, Column, DateTime, JSON, Text
 
 from app.models.base import Base
+from app.schemas.data_sources import DataSourceResponse
 
 
 class DataSource(Base):
@@ -17,3 +18,6 @@ class DataSource(Base):
 
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    def to_pydantic(self) -> DataSourceResponse:
+        return DataSourceResponse.model_validate(self)

@@ -120,7 +120,7 @@ def promote_draft_filters(
     db.commit()
     for filt in ordered_filters:
         db.refresh(filt)
-    return ordered_filters
+    return [filt.to_pydantic() for filt in ordered_filters]
 
 
 @router.post("/extractions", response_model=JobStartResponse)
@@ -220,16 +220,14 @@ def complete_onboarding(body: OnboardingCompleteRequest, db: Session = Depends(g
     for f in created_filters:
         db.refresh(f)
 
-    return created_filters
+    return [filt.to_pydantic() for filt in created_filters]
 
 
-def _extraction_payload(extraction: OnboardingExtraction, db: Session) -> dict:
-    payload = OnboardingExtractionResponse.model_validate(extraction).model_dump()
+def _extraction_payload(extraction: OnboardingExtraction, db: Session) -> OnboardingExtractionResponse:
     job = latest_job_for_subject(
         db,
         subject_type="onboarding_extraction",
         subject_id=extraction.id,
         kind="onboarding_extraction",
     )
-    payload["job_id"] = job.id if job else None
-    return payload
+    return extraction.to_pydantic(job_id=job.id if job else None)

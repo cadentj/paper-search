@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Shared SQLAlchemy models and index record mapping for paper-search"
 requires-python = ">=3.11"
 dependencies = [
+    "pydantic>=2.0.0",
     "sqlalchemy>=2.0.0",
 ]
 

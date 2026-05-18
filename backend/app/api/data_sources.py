@@ -14,7 +14,7 @@ router = APIRouter(prefix="/data-sources", tags=["data-sources"])
 @router.get("", response_model=list[DataSourceResponse])
 def get_data_sources(db: Session = Depends(get_db)):
     ensure_default_data_sources(db)
-    return list_data_sources(db)
+    return [source.to_pydantic() for source in list_data_sources(db)]
 
 
 @router.patch("/{source_type}", response_model=DataSourceResponse)
@@ -35,4 +35,4 @@ def update_data_source(
     source.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(source)
-    return source
+    return source.to_pydantic()

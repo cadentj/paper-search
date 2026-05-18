@@ -109,8 +109,10 @@ async def upload_document(
         db.commit()
         raise HTTPException(status_code=503, detail=document.error) from exc
 
-    payload = DocumentResponse.model_validate(document).model_dump()
-    return DocumentUploadResponse(**payload, job_id=job_record.id)
+    return DocumentUploadResponse(
+        **document.to_pydantic().model_dump(),
+        job_id=job_record.id,
+    )
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)
@@ -121,13 +123,11 @@ def get_document(document_id: str, db: Session = Depends(get_db)):
     return _document_payload(document, db)
 
 
-def _document_payload(document: Document, db: Session) -> dict:
-    payload = DocumentResponse.model_validate(document).model_dump()
+def _document_payload(document: Document, db: Session) -> DocumentResponse:
     job = latest_job_for_subject(
         db,
         subject_type="document",
         subject_id=document.id,
         kind="document_processing",
     )
-    payload["job_id"] = job.id if job else None
-    return payload
+    return document.to_pydantic(job_id=job.id if job else None)

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, Text, DateTime, JSON
 
 from app.models.base import Base
+from app.schemas.onboarding import OnboardingExtractionResponse
 
 
 class OnboardingExtraction(Base):
@@ -22,3 +23,9 @@ class OnboardingExtraction(Base):
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     completed_at = Column(DateTime, nullable=True)
+
+    def to_pydantic(self, *, job_id: str | None = None) -> OnboardingExtractionResponse:
+        resp = OnboardingExtractionResponse.model_validate(self)
+        if job_id is not None:
+            return resp.model_copy(update={"job_id": job_id})
+        return resp

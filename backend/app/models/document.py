@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, DateTime, Integer, Text
 
 from app.models.base import Base
+from app.schemas.documents import DocumentResponse
 
 
 class Document(Base):
@@ -27,3 +28,9 @@ class Document(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+
+    def to_pydantic(self, *, job_id: str | None = None) -> DocumentResponse:
+        resp = DocumentResponse.model_validate(self)
+        if job_id is not None:
+            return resp.model_copy(update={"job_id": job_id})
+        return resp
