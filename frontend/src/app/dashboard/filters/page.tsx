@@ -80,19 +80,25 @@ export default function FiltersPage() {
               </DialogHeader>
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label>Name</Label>
+                  <Label htmlFor="filter-name">Name</Label>
                   <Input
+                    id="filter-name"
+                    name="filter-name"
+                    autoComplete="off"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="Filter name"
+                    placeholder="Example: Mechanistic interpretability…"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Description</Label>
+                  <Label htmlFor="filter-description">Description</Label>
                   <Textarea
+                    id="filter-description"
+                    name="filter-description"
+                    autoComplete="off"
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    placeholder="The question, topic, or claim to search for"
+                    placeholder="The question, topic, or claim to search for…"
                     rows={4}
                   />
                 </div>
@@ -146,7 +152,7 @@ export default function FiltersPage() {
           <div className="space-y-3">
             <button
               type="button"
-              className="flex items-center gap-2 text-lg font-semibold text-muted-foreground"
+              className="flex items-center gap-2 text-lg font-semibold text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               onClick={() => setArchivedOpen((open) => !open)}
               aria-expanded={archivedOpen}
             >

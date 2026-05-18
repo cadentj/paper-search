@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -22,12 +22,15 @@ import {
 import { ProposedFilter } from "@/lib/api";
 import { Loader2, X, RotateCcw, Pencil, Check } from "lucide-react";
 
+const EMPTY_PROPOSED_FILTERS: ProposedFilter[] = [];
+
 export default function OnboardingPage() {
   const router = useRouter();
   const [inputText, setInputText] = useState("");
   const [extractionId, setExtractionId] = useState<string | null>(null);
   const [editedFilters, setEditedFilters] = useState<ProposedFilter[]>([]);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const seenProposedFilterIds = useRef<Set<string>>(new Set());
 
   const createExtraction = useCreateExtraction();
   const { data: extraction } = useOnboardingExtraction(extractionId);
@@ -37,7 +40,7 @@ export default function OnboardingPage() {
   const isExtracting =
     extraction?.status === "queued" || extraction?.status === "running";
   const isComplete = extraction?.status === "completed";
-  const proposedFilters = extraction?.proposed_filters || [];
+  const proposedFilters = extraction?.proposed_filters ?? EMPTY_PROPOSED_FILTERS;
 
   const handleSubmit = async () => {
     if (!inputText.trim()) return;
@@ -47,13 +50,26 @@ export default function OnboardingPage() {
     setExtractionId(result.id);
   };
 
-  if (proposedFilters.length > editedFilters.length) {
+  useEffect(() => {
+    if (!extractionId) {
+      seenProposedFilterIds.current.clear();
+      return;
+    }
+
+    const additions = proposedFilters.filter(
+      (filter) => !seenProposedFilterIds.current.has(filter.id)
+    );
+    proposedFilters.forEach((filter) =>
+      seenProposedFilterIds.current.add(filter.id)
+    );
+
+    if (additions.length === 0) return;
     setEditedFilters((prev) => {
       const existingIds = new Set(prev.map((f) => f.id));
-      const additions = proposedFilters.filter((f) => !existingIds.has(f.id));
-      return additions.length ? [...prev, ...additions] : prev;
+      const unseenAdditions = additions.filter((f) => !existingIds.has(f.id));
+      return unseenAdditions.length ? [...prev, ...unseenAdditions] : prev;
     });
-  }
+  }, [extractionId, proposedFilters]);
 
   const handleRemoveFilter = (idx: number) => {
     setEditedFilters((prev) => prev.filter((_, i) => i !== idx));
@@ -103,7 +119,10 @@ export default function OnboardingPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <Textarea
-                placeholder="I'm interested in mechanistic interpretability of language models, particularly circuit discovery and sparse autoencoders. I'm tracking hypotheses about whether..."
+                aria-label="Research interests"
+                name="research-interests"
+                autoComplete="off"
+                placeholder="I'm interested in mechanistic interpretability of language models, particularly circuit discovery and sparse autoencoders. I'm tracking hypotheses about whether…"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 rows={8}
@@ -122,7 +141,7 @@ export default function OnboardingPage() {
                   {isExtracting ? (
                     <>
                       <Loader2 className="mr-2 size-4 animate-spin" />
-                      Generating filters...
+                      Generating filters…
                     </>
                   ) : (
                     "Generate Search Filters"
@@ -166,6 +185,9 @@ export default function OnboardingPage() {
                     {editingIdx === idx ? (
                       <div className="space-y-3">
                         <Input
+                          aria-label="Filter name"
+                          name={`filter-${f.id}-name`}
+                          autoComplete="off"
                           value={f.name}
                           onChange={(e) => {
                             const updated = [...editedFilters];
@@ -175,9 +197,12 @@ export default function OnboardingPage() {
                             };
                             setEditedFilters(updated);
                           }}
-                          placeholder="Filter name"
+                          placeholder="Filter name…"
                         />
                         <Textarea
+                          aria-label="Filter description"
+                          name={`filter-${f.id}-description`}
+                          autoComplete="off"
                           value={f.description}
                           onChange={(e) => {
                             const updated = [...editedFilters];
@@ -187,7 +212,7 @@ export default function OnboardingPage() {
                             };
                             setEditedFilters(updated);
                           }}
-                          placeholder="Description"
+                          placeholder="Description…"
                           rows={3}
                         />
                         <Button
@@ -210,6 +235,7 @@ export default function OnboardingPage() {
                             variant="ghost"
                             size="icon"
                             className="size-7"
+                            aria-label={`Edit ${f.name}`}
                             onClick={() => setEditingIdx(idx)}
                           >
                             <Pencil className="size-3" />
@@ -218,6 +244,7 @@ export default function OnboardingPage() {
                             variant="ghost"
                             size="icon"
                             className="size-7"
+                            aria-label={`Remove ${f.name}`}
                             onClick={() => handleRemoveFilter(idx)}
                           >
                             <X className="size-3" />

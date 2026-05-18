@@ -3,10 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import SearchPage from "@/app/dashboard/search/page";
 
-const mockRouterPush = vi.hoisted(() => vi.fn());
-
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: mockRouterPush, back: vi.fn(), replace: vi.fn() }),
   usePathname: () => "/dashboard/search",
 }));
 
@@ -72,13 +69,11 @@ describe("SearchPage", () => {
     renderWithProviders(<SearchPage />);
     fireEvent.click(await screen.findByRole("button", { name: /2024-01-15/i }));
 
-    const citation = await screen.findByRole("button", {
+    const citation = await screen.findByRole("link", {
       name: /open citation 1: 2401.00001/i,
     });
     expect(screen.getByText(/reasoning work stood out/i)).toBeInTheDocument();
     expect(screen.queryByText(/2401.00001: reasoning evidence/i)).not.toBeInTheDocument();
-
-    fireEvent.click(citation);
-    expect(mockRouterPush).toHaveBeenCalledWith("/dashboard/papers/p1");
+    expect(citation).toHaveAttribute("href", "/dashboard/papers/p1");
   });
 });

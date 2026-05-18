@@ -51,10 +51,10 @@ export default function PaperDetailPage({
   const shouldRenderIdeaMapClaims = ideaMapClaims.length > 0;
   const ideaMapLoadingLabel =
     ideaMap?.status === "claims_running"
-      ? "Finding core claims..."
+      ? "Finding core claims…"
       : ideaMap?.status === "warrants_running"
-        ? "Finding warrants..."
-        : "Generating idea map...";
+        ? "Finding warrants…"
+        : "Generating idea map…";
 
   const toggleClaim = (claimId: string) => {
     setExpandedClaims((prev) => {
@@ -101,7 +101,13 @@ export default function PaperDetailPage({
                 target.style.scrollMarginTop = "24px";
                 target.classList.add("ps-highlight");
               });
-              start.scrollIntoView({ behavior: "smooth", block: "center" });
+              const prefersReducedMotion = window.matchMedia(
+                "(prefers-reduced-motion: reduce)"
+              ).matches;
+              start.scrollIntoView({
+                behavior: prefersReducedMotion ? "auto" : "smooth",
+                block: "center",
+              });
             }
           }
         } catch {
@@ -121,12 +127,17 @@ export default function PaperDetailPage({
   return (
     <div className="flex-1 flex flex-col h-screen">
         <div className="flex items-center gap-3 p-4 border-b">
-          <Button variant="ghost" size="sm" onClick={() => router.back()}>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Go back"
+            onClick={() => router.back()}
+          >
             <ArrowLeft className="size-4" />
           </Button>
           <div className="flex-1 min-w-0">
             <h1 className="text-sm font-semibold truncate">
-              {paper?.title || "Loading..."}
+              {paper?.title || "Loading…"}
             </h1>
             {paper?.authors && (
               <p className="text-xs text-muted-foreground truncate">
@@ -135,16 +146,20 @@ export default function PaperDetailPage({
             )}
           </div>
           {paper?.arxiv_id && (
-            <a
-              href={`https://arxiv.org/abs/${paper.arxiv_id}`}
-              target="_blank"
-              rel="noopener noreferrer"
+            <Button
+              variant="outline"
+              size="sm"
+              render={
+                <a
+                  href={`https://arxiv.org/abs/${paper.arxiv_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                />
+              }
             >
-              <Button variant="outline" size="sm">
-                <ExternalLink className="mr-1 size-3" />
-                arXiv
-              </Button>
-            </a>
+              <ExternalLink className="mr-1 size-3" />
+              arXiv
+            </Button>
           )}
         </div>
 
@@ -256,7 +271,9 @@ export default function PaperDetailPage({
                   ideaMapClaims.map((claim: IdeaMapClaim) => (
                     <div key={claim.id} className="border rounded-lg">
                       <button
-                        className="w-full text-left p-2 flex items-start gap-2 hover:bg-muted/50"
+                        type="button"
+                        className="flex w-full items-start gap-2 p-2 text-left hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        aria-expanded={expandedClaims.has(claim.id)}
                         onClick={() => toggleClaim(claim.id)}
                       >
                         {expandedClaims.has(claim.id) ? (
@@ -283,13 +300,14 @@ export default function PaperDetailPage({
                           {claim.warrants.length === 0 && isIdeaMapLoading && (
                             <div className="flex items-center gap-2 rounded p-1.5 text-xs text-muted-foreground">
                               <Loader2 className="size-3 animate-spin" />
-                              Finding warrants...
+                              Finding warrants…
                             </div>
                           )}
                           {claim.warrants.map((warrant: IdeaMapWarrant) => (
                             <button
                               key={warrant.id}
-                              className={`w-full text-left rounded p-1.5 text-xs transition-colors ${
+                              type="button"
+                              className={`w-full rounded p-1.5 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                                 highlightedWarrant === warrant.id
                                   ? "bg-yellow-100 border border-yellow-300"
                                   : "hover:bg-muted/50"
@@ -321,6 +339,7 @@ export default function PaperDetailPage({
               <iframe
                 ref={iframeRef}
                 srcDoc={htmlData.html}
+                title={paper?.title || "Paper HTML"}
                 className="flex-1 w-full border-0"
                 sandbox="allow-same-origin"
               />
@@ -330,22 +349,26 @@ export default function PaperDetailPage({
                   <p className="text-sm text-muted-foreground">
                     HTML not cached yet.
                   </p>
-                  <a
-                    href={htmlData.source_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    render={
+                      <a
+                        href={htmlData.source_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      />
+                    }
                   >
-                    <Button variant="outline" size="sm">
-                      <ExternalLink className="mr-1 size-3" />
-                      View on arXiv
-                    </Button>
-                  </a>
+                    <ExternalLink className="mr-1 size-3" />
+                    View on arXiv
+                  </Button>
                 </div>
               </div>
             ) : (
               <div className="flex-1 flex items-center justify-center">
                 <p className="text-sm text-muted-foreground">
-                  {paper?.abstract || "Loading paper..."}
+                  {paper?.abstract || "Loading paper…"}
                 </p>
               </div>
             )}

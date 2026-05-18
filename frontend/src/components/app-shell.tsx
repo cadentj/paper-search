@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   Newspaper,
   Search,
@@ -53,7 +54,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton
                       isActive={pathname === item.href}
-                      onClick={() => router.push(item.href)}
+                      render={<Link href={item.href} />}
                     >
                       <item.icon className="size-4" />
                       <span>{item.label}</span>
@@ -73,7 +74,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             disabled={resetMutation.isPending}
           >
             <RotateCcw className="mr-2 size-3" />
-            {resetMutation.isPending ? "Resetting..." : "Dev Reset"}
+            {resetMutation.isPending ? "Resetting…" : "Dev Reset"}
           </Button>
         </SidebarFooter>
       </Sidebar>

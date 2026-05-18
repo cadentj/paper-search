@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import type { PaperMatch, SummaryCitation } from "@/lib/api";
 
@@ -26,7 +26,6 @@ export function SummaryText({
   matches?: PaperMatch[];
   className?: string;
 }) {
-  const router = useRouter();
   const nodes: ReactNode[] = [];
   let cursor = 0;
   let citationIndex = 0;
@@ -46,16 +45,15 @@ export function SummaryText({
 
     if (paperMatch) {
       nodes.push(
-        <button
+        <Link
           key={`${arxivId}-${markerIndex}`}
-          type="button"
-          onClick={() => router.push(`/dashboard/papers/${paperMatch.paper_id}`)}
+          href={`/dashboard/papers/${paperMatch.paper_id}`}
           title={citation?.citedFor}
           aria-label={label}
           className={citationClassName(true)}
         >
           {arxivId}
-        </button>
+        </Link>
       );
     } else {
       nodes.push(

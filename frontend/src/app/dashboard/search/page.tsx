@@ -13,6 +13,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useSearchRuns, useSearchRunMatches, useSearchRun } from "@/hooks/use-queries";
 import { ChevronDown, ChevronRight, Calendar, FileText } from "lucide-react";
 
+const TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  hour: "numeric",
+  minute: "2-digit",
+});
+
 export default function SearchPage() {
   const { data: runs, isLoading } = useSearchRuns();
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -62,7 +67,9 @@ export default function SearchPage() {
             <Card key={run.id}>
               <CardHeader className="pb-2">
                 <button
-                  className="flex items-center justify-between w-full text-left"
+                  type="button"
+                  className="flex w-full items-center justify-between text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-expanded={selectedRunId === run.id}
                   onClick={() =>
                     setSelectedRunId(
                       selectedRunId === run.id ? null : run.id
@@ -81,7 +88,7 @@ export default function SearchPage() {
                         {run.run_date}
                       </CardTitle>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        {new Date(run.created_at).toLocaleTimeString()}
+                        {TIME_FORMATTER.format(new Date(run.created_at))}
                       </p>
                     </div>
                   </div>

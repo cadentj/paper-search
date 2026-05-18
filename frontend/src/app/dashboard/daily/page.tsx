@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { SummaryText } from "@/components/summary-text";
 import {
@@ -47,7 +47,6 @@ const STANCE_COLORS: Record<string, string> = {
 };
 
 export default function DailyPage() {
-  const router = useRouter();
   const { data: latestRun } = useLatestSearchRun();
   const runId = latestRun?.id || null;
   const { data: run } = useSearchRun(runId);
@@ -59,7 +58,8 @@ export default function DailyPage() {
     new Set()
   );
   const [quickFilterText, setQuickFilterText] = useState("");
-  const [quickFilterType, setQuickFilterType] = useState("claim");
+  const [quickFilterType, setQuickFilterType] =
+    useState<"claim" | "question" | "topic">("claim");
   const createFilter = useCreateFilter();
 
   const isRunning =
@@ -77,14 +77,20 @@ export default function DailyPage() {
     await archiveFilter.mutateAsync(filterId);
   };
 
-  const matchesByFilter = (matches || []).reduce(
-    (acc, m) => {
-      const key = m.filter_id;
-      if (!acc[key]) acc[key] = { name: m.filter_name || "Unknown", matches: [] };
-      acc[key].matches.push(m);
-      return acc;
-    },
-    {} as Record<string, { name: string; matches: PaperMatch[] }>
+  const matchesByFilter = useMemo(
+    () =>
+      (matches || []).reduce(
+        (acc, m) => {
+          const key = m.filter_id;
+          if (!acc[key]) {
+            acc[key] = { name: m.filter_name || "Unknown", matches: [] };
+          }
+          acc[key].matches.push(m);
+          return acc;
+        },
+        {} as Record<string, { name: string; matches: PaperMatch[] }>
+      ),
+    [matches]
   );
 
   const handleQuickAddFilter = async () => {
@@ -95,7 +101,7 @@ export default function DailyPage() {
       definition: {
         name: text.slice(0, 60),
         description: text,
-        mode: quickFilterType as "claim" | "question" | "topic",
+        mode: quickFilterType,
       },
     });
     setQuickFilterText("");
@@ -121,7 +127,7 @@ export default function DailyPage() {
                   ? `${run.match_count || 0} matches from ${run.candidate_count || 0} papers`
                   : run.status === "failed"
                     ? "Search failed"
-                    : "Search in progress..."}
+                    : "Search in progress…"}
               </p>
             )}
           </div>
@@ -132,7 +138,7 @@ export default function DailyPage() {
             {isRunning ? (
               <>
                 <Loader2 className="mr-2 size-4 animate-spin" />
-                Searching...
+                Searching…
               </>
             ) : (
               <>
@@ -144,8 +150,15 @@ export default function DailyPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Select value={quickFilterType} onValueChange={(v) => { if (v) setQuickFilterType(v); }}>
-            <SelectTrigger className="w-28 h-9">
+          <Select
+            value={quickFilterType}
+            onValueChange={(v) => {
+              if (v === "claim" || v === "question" || v === "topic") {
+                setQuickFilterType(v);
+              }
+            }}
+          >
+            <SelectTrigger className="w-28 h-9" aria-label="Filter type">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -155,9 +168,12 @@ export default function DailyPage() {
             </SelectContent>
           </Select>
           <Input
+            aria-label="Quick add filter"
+            name="quick-filter"
+            autoComplete="off"
             value={quickFilterText}
             onChange={(e) => setQuickFilterText(e.target.value)}
-            placeholder="Quick add a filter..."
+            placeholder="Quick add a filter…"
             className="h-9"
             onKeyDown={(e) => e.key === "Enter" && handleQuickAddFilter()}
           />
@@ -188,7 +204,7 @@ export default function DailyPage() {
               <div>
                 <div className="mb-2 flex items-center justify-between gap-3 text-sm">
                   <span className="text-muted-foreground">
-                    {run?.progress_message || "Creating daily search..."}
+                    {run?.progress_message || "Creating daily search…"}
                   </span>
                   <span className="font-medium tabular-nums">
                     {progressPercent}%
@@ -196,7 +212,7 @@ export default function DailyPage() {
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-muted">
                   <div
-                    className="h-full rounded-full bg-primary transition-all"
+                    className="h-full rounded-full bg-primary transition-[width]"
                     style={{ width: `${progressPercent}%` }}
                   />
                 </div>
@@ -260,7 +276,8 @@ export default function DailyPage() {
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
                     <button
-                      className="flex items-center gap-2 text-left"
+                      type="button"
+                      className="flex items-center gap-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       onClick={() => toggleFilter(filterId)}
                       aria-expanded={expandedFilters.has(filterId)}
                     >
@@ -297,14 +314,12 @@ export default function DailyPage() {
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1">
-                            <button
-                              className="text-base font-medium hover:underline text-left"
-                              onClick={() =>
-                                router.push(`/dashboard/papers/${match.paper_id}`)
-                              }
+                            <Link
+                              href={`/dashboard/papers/${match.paper_id}`}
+                              className="text-left text-base font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             >
                               {match.paper_title}
-                            </button>
+                            </Link>
                             <div className="flex items-center gap-2 mt-1">
                               <span
                                 className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STANCE_COLORS[match.stance] || "bg-gray-100 text-gray-800"}`}
@@ -319,6 +334,7 @@ export default function DailyPage() {
                                   href={`https://arxiv.org/abs/${match.paper_arxiv_id}`}
                                   target="_blank"
                                   rel="noopener noreferrer"
+                                  aria-label={`Open ${match.paper_arxiv_id} on arXiv`}
                                   className="text-xs text-muted-foreground hover:text-foreground"
                                 >
                                   <ExternalLink className="size-3" />

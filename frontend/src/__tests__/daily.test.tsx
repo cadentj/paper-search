@@ -3,10 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import DailyPage from "@/app/dashboard/daily/page";
 
-const mockRouterPush = vi.hoisted(() => vi.fn());
-
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: mockRouterPush, back: vi.fn(), replace: vi.fn() }),
   usePathname: () => "/dashboard/daily",
 }));
 
@@ -119,15 +116,14 @@ describe("DailyPage", () => {
       expect(screen.getByText(/daily summary/i)).toBeInTheDocument();
       expect(screen.getByText(/today we found interesting papers/i)).toBeInTheDocument();
       expect(
-        screen.getByRole("button", { name: /open citation 1: 2401.00001/i })
+        screen.getByRole("link", { name: /open citation 1: 2401.00001/i })
       ).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /LLM Reasoning/i })).toBeInTheDocument();
     });
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /open citation 1: 2401.00001/i })
-    );
-    expect(mockRouterPush).toHaveBeenCalledWith("/dashboard/papers/p1");
+    expect(
+      screen.getByRole("link", { name: /open citation 1: 2401.00001/i })
+    ).toHaveAttribute("href", "/dashboard/papers/p1");
     expect(screen.queryByText(/reasoning evidence/i)).not.toBeInTheDocument();
 
     expect(screen.queryByText("CoT Paper")).not.toBeInTheDocument();
