@@ -17,6 +17,7 @@ def ensure_runtime_schema(engine) -> None:
         "source_id": "TEXT",
         "source_url": "TEXT",
         "source_metadata": "JSON NOT NULL DEFAULT '{}'",
+        "search_text": "TEXT NOT NULL DEFAULT ''",
     }
     search_run_columns = {
         column["name"] for column in inspector.get_columns("search_runs")
@@ -34,6 +35,7 @@ def ensure_runtime_schema(engine) -> None:
                 "SET source_type = COALESCE(source_type, 'arxiv'), "
                 "source_id = COALESCE(source_id, arxiv_id), "
                 "source_url = COALESCE(source_url, landing_url), "
-                "source_metadata = COALESCE(source_metadata, '{}')"
+                "source_metadata = COALESCE(source_metadata, '{}'), "
+                "search_text = COALESCE(NULLIF(search_text, ''), abstract, '')"
             )
         )

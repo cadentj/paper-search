@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import ValidationInfo, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -18,12 +18,10 @@ class Settings(BaseSettings):
     ARXIV_CATEGORIES: str = "cs.AI,cs.CL,cs.LG"
     ARXIV_HTML_PUBLIC_BASE_URL: str
     ARXIV_HTML_INDEX_PATH: str = "data/index/papers-by-date.json"
-    ARXIV_PUBLIC_INDEX_TTL_SECONDS: int = 300
     ARXIV_PUBLIC_DAILY_LIMIT: int = 0
     LESSWRONG_EXCERPT_WORDS: int = 250
-    LESSWRONG_HTML_PUBLIC_BASE_URL: str = ""
+    LESSWRONG_HTML_PUBLIC_BASE_URL: str
     LESSWRONG_HTML_INDEX_PATH: str = "data/index/posts-by-date.json"
-    LESSWRONG_PUBLIC_INDEX_TTL_SECONDS: int = 300
     DOCUMENT_STORAGE_DIR: str = "data/documents"
     DOCUMENT_MAX_SIZE_BYTES: int = 1_000_000
     DOCUMENT_MAX_PAGES: int = 10
@@ -37,12 +35,12 @@ class Settings(BaseSettings):
     def is_development(self) -> bool:
         return self.APP_ENV == "development" or self.ENABLE_DEV_RESET
 
-    @field_validator("ARXIV_HTML_PUBLIC_BASE_URL")
+    @field_validator("ARXIV_HTML_PUBLIC_BASE_URL", "LESSWRONG_HTML_PUBLIC_BASE_URL")
     @classmethod
-    def require_arxiv_html_public_base_url(cls, value: str) -> str:
+    def require_public_base_url(cls, value: str, info: ValidationInfo) -> str:
         value = value.strip()
         if not value:
-            raise ValueError("ARXIV_HTML_PUBLIC_BASE_URL must be set")
+            raise ValueError(f"{info.field_name} must be set")
         return value
 
     model_config = {

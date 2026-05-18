@@ -213,6 +213,7 @@ def _upsert_candidate_papers(db, run: SearchRun, job: Job | None = None) -> list
             existing.source_id = source_id
             existing.title = item.title
             existing.abstract = _stored_abstract(item)
+            existing.search_text = item.display_text or ""
             existing.authors = item.authors
             existing.categories = item.categories
             existing.published_at = item.published_at
@@ -230,6 +231,7 @@ def _upsert_candidate_papers(db, run: SearchRun, job: Job | None = None) -> list
                 source_id=source_id,
                 title=item.title,
                 abstract=_stored_abstract(item),
+                search_text=item.display_text or "",
                 authors=item.authors,
                 categories=item.categories,
                 published_at=item.published_at,
@@ -241,8 +243,6 @@ def _upsert_candidate_papers(db, run: SearchRun, job: Job | None = None) -> list
                 updated_at=now,
             )
             db.add(paper)
-
-        setattr(paper, "_transient_text", item.display_text or paper.abstract)
 
         if paper.id in candidate_paper_ids:
             continue
@@ -288,7 +288,7 @@ def _build_paper_payloads(papers: list[Paper]) -> list[PaperPayload]:
             source_type=paper.source_type or "arxiv",
             source_id=paper.source_id or paper.arxiv_id or "",
             item_id=_item_id(paper.source_type or "arxiv", paper.source_id or paper.arxiv_id or ""),
-            text=getattr(paper, "_transient_text", None) or paper.abstract,
+            text=paper.search_text or paper.abstract,
             authors=list(paper.authors or []),
         )
         for paper in papers

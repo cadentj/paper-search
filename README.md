@@ -34,18 +34,29 @@ docker compose up -d redis
 This starts Redis on port 6379. Daily searches, onboarding extraction, and
 idea-map generation do not run inside the FastAPI process.
 
-### 3. Start Backend
+### 3. Sync daily index into SQLite
+
+Pull arXiv and LessWrong date manifests and shards from the public R2 buckets into the app database (required before counts and daily search work):
 
 ```bash
 cd backend
 pip install -e ".[dev]"
 mkdir -p data
+uv run python ../scripts/sync_public_index.py
+```
+
+Re-run this when the published R2 indexes change. HTML for paper viewing is still fetched from R2 on demand.
+
+### 4. Start Backend
+
+```bash
+cd backend
 uvicorn app.main:app --reload --port 8000
 ```
 
 The API runs at http://localhost:8000 with hot-reload enabled.
 
-### 4. Start Worker
+### 5. Start Worker
 
 Start the worker in a separate terminal:
 
@@ -57,7 +68,7 @@ REDIS_URL=redis://localhost:6379/0 uv run python -m app.worker
 The development worker uses RQ's non-forking `SimpleWorker`, which avoids
 macOS Objective-C fork crashes and keeps logs in the worker terminal.
 
-### 5. Start Frontend
+### 6. Start Frontend
 
 ```bash
 cd frontend
@@ -70,7 +81,7 @@ Frontend runs at http://localhost:3000 and connects to the API at http://localho
 Make sure the backend process has `REDIS_URL=redis://localhost:6379/0` when
 running outside Docker. Inside Docker, use `redis://redis:6379/0`.
 
-### 6. Use the App
+### 7. Use the App
 
 1. Open http://localhost:3000
 2. Complete onboarding by entering your research interests

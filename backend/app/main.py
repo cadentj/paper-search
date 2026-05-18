@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -10,12 +12,31 @@ from app.api.search import router as search_router
 from app.api.papers import router as papers_router
 from app.api.dev import router as dev_router
 from app.models import Base
-from app.db.session import engine
+from app.db.session import SessionLocal, engine
 from app.db.schema import ensure_runtime_schema
+from app.models.source_daily import SourceDailyRollup
+from app.services.daily_dates import DEFAULT_DAILY_SEARCH_DATE
 
+
+logger = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
 ensure_runtime_schema(engine)
+
+_db = SessionLocal()
+try:
+    if (
+        _db.query(SourceDailyRollup)
+        .filter(SourceDailyRollup.run_date == DEFAULT_DAILY_SEARCH_DATE)
+        .count()
+        == 0
+    ):
+        logger.warning(
+            "No synced daily index for %s — run: cd backend && uv run python ../scripts/sync_public_index.py",
+            DEFAULT_DAILY_SEARCH_DATE,
+        )
+finally:
+    _db.close()
 
 app = FastAPI(title="Paper Search API", version="0.1.0")
 

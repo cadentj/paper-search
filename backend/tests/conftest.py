@@ -1,7 +1,16 @@
 """Test fixtures for backend tests."""
 
 import os
+
 import pytest
+
+# Fill required public base URLs when .env leaves them empty.
+for _key, _default in (
+    ("ARXIV_HTML_PUBLIC_BASE_URL", "https://example.com/arxiv/"),
+    ("LESSWRONG_HTML_PUBLIC_BASE_URL", "https://example.com/lesswrong/"),
+):
+    if not os.environ.get(_key, "").strip():
+        os.environ[_key] = _default
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
@@ -31,8 +40,12 @@ def db_engine(tmp_path):
     import app.models.search_run_paper
     import app.models.paper_match
     import app.models.idea_map
+    import app.models.source_daily
 
     Base.metadata.create_all(bind=engine)
+    from app.db.schema import ensure_runtime_schema
+
+    ensure_runtime_schema(engine)
     yield engine
     engine.dispose()
 

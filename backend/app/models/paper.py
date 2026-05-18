@@ -19,6 +19,7 @@ class Paper(Base):
 
     title = Column(Text, nullable=False)
     abstract = Column(Text, nullable=False)
+    search_text = Column(Text, nullable=False, default="")
     authors = Column(JSON, nullable=False, default=list)
     categories = Column(JSON, nullable=True)
     published_at = Column(DateTime, nullable=True)
