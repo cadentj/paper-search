@@ -2,24 +2,12 @@
 
 import pytest
 
-from app.services.html_parser import (
+from app.utils.html_parser import (
     blocks_to_prompt_text,
     parse_arxiv_html,
     prepare_arxiv_html_for_viewer,
     validate_citation,
 )
-
-
-class TestPublicR2IndexHelpers:
-    def test_has_searchable_text(self):
-        from app.services.public_r2_index import has_searchable_text
-
-        assert has_searchable_text({"abstract": "x"}, text_fields=("abstract",))
-        assert not has_searchable_text({"abstract": " "}, text_fields=("abstract",))
-        assert has_searchable_text(
-            {"text_preview": "", "excerpt": "hi"},
-            text_fields=("text_preview", "excerpt"),
-        )
 
 
 class TestHtmlParser:

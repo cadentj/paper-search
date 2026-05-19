@@ -8,7 +8,7 @@ from app.api.http_errors import raise_http_from_service
 from app.db.session import get_db
 from app.schemas.papers import PaperResponse, IdeaMapResponse
 from app.schemas.jobs import JobStartResponse
-from app.services.source_providers import provider_for
+from app.services.sources import KNOWN_SOURCE_TYPES, paper_html
 from app.services import papers as papers_service
 
 router = APIRouter(prefix="/papers", tags=["papers"])
@@ -66,10 +66,9 @@ def get_paper_html(paper_id: str, db: Session = Depends(get_db)):
         paper = papers_service.get_paper(db, paper_id)
     except Exception as exc:
         raise_http_from_service(exc)
-    provider = provider_for(paper.source_type or "arxiv")
-    if not provider:
+    if (paper.source_type or "arxiv") not in KNOWN_SOURCE_TYPES:
         return {"html": None, "source_url": paper.source_url}
-    return provider.html_for_paper(paper)
+    return paper_html(paper)
 
 
 @router.post("/{paper_id}/idea-map", response_model=JobStartResponse)

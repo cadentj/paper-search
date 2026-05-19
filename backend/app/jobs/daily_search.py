@@ -12,8 +12,7 @@ from app.models.search_run import SearchRun
 from app.models.job import Job
 from app.services import filters as filter_service
 from app.services import search_runs
-from app.services.source_providers import papers_for_sources
-from app.services.source_settings import enabled_source_types
+from app.services.sources import enabled_source_types, papers_for_sources
 from app.llm.client import async_call_llm
 from app.llm.config import JUDGE_PROFILE
 from app.llm.prompts import (

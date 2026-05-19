@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.api.http_errors import raise_http_from_service
 from app.db.session import get_db
 from app.schemas.data_sources import DataSourceResponse, UpdateDataSourceRequest
-from app.services.source_settings import ensure_default_data_sources, list_data_sources, update_data_source
+from app.services.sources import ensure_default_data_sources, list_data_sources, update_data_source
 
 router = APIRouter(prefix="/data-sources", tags=["data-sources"])
 

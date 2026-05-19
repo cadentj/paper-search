@@ -25,7 +25,7 @@ from app.services.errors import Conflict, NotFound, ValidationFailed
 from app.services.job_enqueue import commit_entities, enqueue_job, persist_then_enqueue
 from app.services.jobs import get_or_create_job_for_subject
 from app.services.jobs import create_job, latest_job_for_subject, set_job_status
-from app.services.source_settings import enabled_source_types, ensure_default_data_sources
+from app.services.sources import enabled_source_types, ensure_default_data_sources
 
 ACTIVE_SUMMARY_JOB_STATUSES = {"queued", "running"}
 

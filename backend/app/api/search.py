@@ -16,8 +16,11 @@ from app.schemas.search import (
 )
 from app.schemas.jobs import JobStartResponse
 from paper_search_core.daily_dates import DAILY_SEARCH_DATE_SET
-from app.services.source_providers import counts_by_source_for_date
-from app.services.source_settings import enabled_source_types, ensure_default_data_sources
+from app.services.sources import (
+    counts_by_source_for_date,
+    enabled_source_types,
+    ensure_default_data_sources,
+)
 from app.services import search_runs
 
 router = APIRouter(prefix="/search-runs", tags=["search"])

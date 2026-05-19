@@ -3,6 +3,8 @@
 from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
+
+import httpx
 from queue import Empty, Queue
 from datetime import datetime, timezone
 
@@ -15,13 +17,12 @@ from app.models.idea_map import IdeaMap
 from app.services import papers as papers_service
 from app.services.jobs import job_progress, set_job_status
 from app.core.config import LLM_MAX_CONCURRENCY
-from app.services.html_parser import (
+from app.utils.html_parser import (
     MAX_PROMPT_BLOCKS,
     blocks_to_prompt_text,
     citation_validation_diagnostics,
     parse_arxiv_html,
 )
-from app.services.public_r2_index import http_get_text
 from app.llm.client import stream_structured_response
 from app.llm.config import IDEA_MAP_PROFILE
 from app.llm.prompts import (
@@ -66,7 +67,16 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
             html_url = paper.html_url or paper.source_url
             idea_map.source_url = html_url
 
-            html_content = http_get_text(paper.html_url) if paper.html_url else None
+            html_content = None
+            if paper.html_url:
+                try:
+                    response = httpx.get(
+                        paper.html_url, timeout=30.0, follow_redirects=True
+                    )
+                    response.raise_for_status()
+                    html_content = response.text
+                except httpx.HTTPError:
+                    html_content = None
             if not html_content:
                 idea_map.status = "skipped"
                 idea_map.dropped_reason = f"HTML not found for {paper.source_id}"
