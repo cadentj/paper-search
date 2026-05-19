@@ -95,18 +95,22 @@ def _load_documents(db: Session, jobs: list[SQLAJob]) -> dict[str, SQLADocument]
 def serialize_job_for_overview(db: Session, job: SQLAJob) -> Job:
     if job.kind == "daily_search":
         run = job_views.get_search_run_for_job(db, job)
-        return job_views.serialize_daily_search_job(db, job, run)
-    if job.kind == "idea_map":
+        if run:
+            return job_views.serialize_daily_search_job(db, job, run)
+    elif job.kind == "idea_map":
         idea_map = job_views.get_idea_map_for_job(db, job)
-        return job_views.serialize_idea_map_job(db, job, idea_map)
-    if job.kind == "onboarding_generation":
+        if idea_map:
+            return job_views.serialize_idea_map_job(db, job, idea_map)
+    elif job.kind == "onboarding_generation":
         return job_views.serialize_onboarding_generation_job(db, job)
-    if job.kind == "onboarding_extraction":
+    elif job.kind == "onboarding_extraction":
         extraction = job_views.get_extraction_for_job(db, job)
-        return job_views.serialize_onboarding_extraction_job(db, job, extraction)
-    if job.kind == "document_processing":
+        if extraction:
+            return job_views.serialize_onboarding_extraction_job(db, job, extraction)
+    elif job.kind == "document_processing":
         document = job_views.get_document_for_job(db, job)
-        return job_views.serialize_document_job(job, document)
+        if document:
+            return job_views.serialize_document_job(job, document)
     return job.to_pydantic()
 
 
@@ -162,13 +166,8 @@ def _hydrate_entry(
         label = "Scholar import"
         href = "/dashboard/settings"
 
-    try:
-        serialized_job = serialize_job_for_overview(db, job)
-    except Exception:
-        serialized_job = job.to_pydantic()
-
     return JobOverviewEntry(
-        job=serialized_job,
+        job=serialize_job_for_overview(db, job),
         label=label,
         detail=detail,
         href=href,

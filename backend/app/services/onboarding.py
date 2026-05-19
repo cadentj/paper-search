@@ -224,7 +224,6 @@ def start_profile_import(
             job_record, run_scholar_import, profile_import.id, job_record.id
         ),
         on_failure=on_failure,
-        store_queue_job_id=False,
     )
     return profile_import.id, job_record.id
 

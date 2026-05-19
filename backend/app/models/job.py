@@ -18,7 +18,6 @@ class Job(BaseModel):
     subject_type: str | None = None
     subject_id: str | None = None
     queue_name: str | None = None
-    queue_job_id: str | None = None
     progress: dict = Field(default_factory=dict)
     error: str | None = None
     started_at: datetime | None = None
@@ -38,7 +37,6 @@ class SQLAJob(Base):
     subject_type = Column(Text, nullable=True)
     subject_id = Column(Text, nullable=True)
     queue_name = Column(Text, nullable=True)
-    queue_job_id = Column(Text, nullable=True)
     progress = Column(ProgressJSON, nullable=False, default=dict)
     error = Column(Text, nullable=True)
 

@@ -74,7 +74,6 @@ export interface Job {
   subject_type?: string | null;
   subject_id?: string | null;
   queue_name?: string | null;
-  queue_job_id?: string | null;
   progress: JobProgress;
   error?: string | null;
   started_at?: string | null;

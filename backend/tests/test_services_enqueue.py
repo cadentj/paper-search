@@ -15,15 +15,12 @@ def test_enqueue_job_success(db_session, monkeypatch):
     )
     db_session.commit()
 
-    class FakeRqJob:
-        id = "rq-123"
-
     enqueue_job(
         db_session,
         job=job,
-        enqueue=lambda: FakeRqJob(),
+        enqueue=lambda: None,
     )
-    assert job.queue_job_id == "rq-123"
+    assert job.status == "queued"
 
 
 def test_enqueue_job_failure_marks_failed(db_session):
@@ -62,16 +59,13 @@ def test_persist_then_enqueue_commits_entities(db_session, monkeypatch):
     )
     db_session.add(job)
 
-    class FakeRqJob:
-        id = "rq-456"
-
     persist_then_enqueue(
         db_session,
         job=job,
         entities=(),
-        enqueue=lambda: FakeRqJob(),
+        enqueue=lambda: None,
         on_failure=lambda sess, err: None,
     )
     refreshed = db_session.query(SQLAJob).filter(SQLAJob.id == job.id).first()
     assert refreshed is not None
-    assert refreshed.queue_job_id == "rq-456"
+    assert refreshed.status == "queued"

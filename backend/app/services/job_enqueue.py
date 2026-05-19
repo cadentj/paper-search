@@ -23,17 +23,17 @@ def enqueue_job(
     job: SQLAJob,
     enqueue: Callable[[], object],
     on_failure: Callable[[Session, str], None] | None = None,
-    store_queue_job_id: bool = True,
     log_context: str = "",
 ) -> None:
     try:
-        rq_job = enqueue()
-        if store_queue_job_id:
-            job.queue_job_id = getattr(rq_job, "id", None)
+        enqueue()
         db.commit()
         if log_context:
             logger.info(
-                "%s enqueued job=%s queue=%s", log_context, job.id, job.queue_job_id
+                "%s enqueued job=%s queue=%s",
+                log_context,
+                job.id,
+                job.queue_name,
             )
     except Exception as exc:
         error = str(exc)
@@ -51,7 +51,6 @@ def persist_then_enqueue(
     enqueue: Callable[[], object],
     on_failure: Callable[[Session, str], None],
     entities: tuple = (),
-    store_queue_job_id: bool = True,
     log_context: str = "",
 ) -> None:
     commit_entities(db, job, *entities)
@@ -60,7 +59,6 @@ def persist_then_enqueue(
         job=job,
         enqueue=enqueue,
         on_failure=on_failure,
-        store_queue_job_id=store_queue_job_id,
         log_context=log_context,
     )
 

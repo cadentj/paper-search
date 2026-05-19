@@ -20,17 +20,14 @@ from app.services.search_runs import search_run_payload, summary_payload
 DONE_STATUSES = {"completed", "failed", "skipped"}
 
 
-def get_job(db: Session, job_id: str) -> SQLAJob:
-    job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
-    if not job:
-        raise LookupError("Job not found")
-    return job
+def get_job(db: Session, job_id: str) -> SQLAJob | None:
+    return db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
 
 
-def get_job_of_kind(db: Session, job_id: str, kind: str) -> SQLAJob:
+def get_job_of_kind(db: Session, job_id: str, kind: str) -> SQLAJob | None:
     job = get_job(db, job_id)
-    if job.kind != kind:
-        raise ValueError(f"Job is not a {kind} job")
+    if not job or job.kind != kind:
+        return None
     return job
 
 
@@ -143,36 +140,34 @@ def serialize_document_job(job: SQLAJob, document: SQLADocument) -> Job:
     return with_progress(job, current=current, total=total)
 
 
-def get_search_run_for_job(db: Session, job: SQLAJob) -> SQLASearchRun:
-    run = db.query(SQLASearchRun).filter(SQLASearchRun.id == job.subject_id).first()
-    if not run:
-        raise LookupError("Search run not found")
-    return run
+def get_search_run_for_job(db: Session, job: SQLAJob) -> SQLASearchRun | None:
+    if not job.subject_id:
+        return None
+    return db.query(SQLASearchRun).filter(SQLASearchRun.id == job.subject_id).first()
 
 
-def get_idea_map_for_job(db: Session, job: SQLAJob) -> SQLAIdeaMap:
-    idea_map = db.query(SQLAIdeaMap).filter(SQLAIdeaMap.id == job.subject_id).first()
-    if not idea_map:
-        raise LookupError("Idea map not found")
-    return idea_map
+def get_idea_map_for_job(db: Session, job: SQLAJob) -> SQLAIdeaMap | None:
+    if not job.subject_id:
+        return None
+    return db.query(SQLAIdeaMap).filter(SQLAIdeaMap.id == job.subject_id).first()
 
 
-def get_extraction_for_job(db: Session, job: SQLAJob) -> SQLAOnboardingExtraction:
-    extraction = (
+def get_extraction_for_job(
+    db: Session, job: SQLAJob
+) -> SQLAOnboardingExtraction | None:
+    if not job.subject_id:
+        return None
+    return (
         db.query(SQLAOnboardingExtraction)
         .filter(SQLAOnboardingExtraction.id == job.subject_id)
         .first()
     )
-    if not extraction:
-        raise LookupError("Extraction not found")
-    return extraction
 
 
-def get_document_for_job(db: Session, job: SQLAJob) -> SQLADocument:
-    document = db.query(SQLADocument).filter(SQLADocument.id == job.subject_id).first()
-    if not document:
-        raise LookupError("Document not found")
-    return document
+def get_document_for_job(db: Session, job: SQLAJob) -> SQLADocument | None:
+    if not job.subject_id:
+        return None
+    return db.query(SQLADocument).filter(SQLADocument.id == job.subject_id).first()
 
 
 def list_matches_for_run_ordered(

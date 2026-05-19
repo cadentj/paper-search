@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any
+from redis import Redis
+from rq import Queue
 
-from app.jobs.queue import get_queue
+from app.config import settings
+
+
 from app.models.job import SQLAJob
 
 INTERACTIVE = "interactive"
@@ -29,11 +33,8 @@ def queue_for_kind(kind: str) -> str:
         raise ValueError(f"Unknown job kind for queue routing: {kind}") from exc
 
 
-def resolve_queue_name(job: SQLAJob) -> str:
-    return job.queue_name or queue_for_kind(job.kind)
-
-
 def enqueue_for_job(
     job: SQLAJob, func: Callable[..., Any], *args: Any, **kwargs: Any
 ) -> object:
-    return get_queue(resolve_queue_name(job)).enqueue(func, *args, **kwargs)
+    queue = Queue(job.queue_name, connection=Redis.from_url(settings.REDIS_URL))
+    return queue.enqueue(func, *args, **kwargs)

@@ -136,6 +136,5 @@ def start_feedback_processing(db: Session) -> str:
             job_record, process_all_feedback, job_record.id
         ),
         on_failure=lambda sess, error: mark_job_failed(sess, job_record, error),
-        store_queue_job_id=False,
     )
     return job_record.id

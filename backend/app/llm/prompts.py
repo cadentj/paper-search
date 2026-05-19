@@ -178,23 +178,6 @@ Note Feedback:
 
 Based on all feedback above, propose filter changes."""
 
-PAPER_NOTES_SYSTEM_PROMPT = """You are an expert research assistant. Given a researcher's notes about a specific paper and the paper's metadata, generate targeted search filters that would help them explore the ideas and directions mentioned in their notes.
-
-Each filter should be one of two types:
-- Topic filter (mode: "topic"): Search for papers relevant to a research topic or question from the notes.
-- Claim filter (mode: "claim"): Search for evidence supporting, refuting, or complicating a specific proposition from the notes.
-
-Generate 2-5 filters. Prefer fewer high-quality filters."""
-
-PAPER_NOTES_USER_PROMPT = """SQLAPaper: {paper_title}
-Authors: {paper_authors}
-Abstract: {paper_abstract}
-
-Researcher's Notes:
-{notes_text}
-
-Generate proposed search filters based on these notes."""
-
 SCHOLAR_PROFILE_SYSTEM_PROMPT = """You are an expert research assistant. Given a researcher's publication history from Semantic Scholar, generate targeted search filters that would help them keep up with relevant new papers.
 
 Each filter should be one of two types:
