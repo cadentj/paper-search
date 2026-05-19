@@ -21,6 +21,22 @@ from paper_search_core.daily_dates import DEFAULT_DAILY_SEARCH_DATE
 
 logger = logging.getLogger(__name__)
 
+
+class JobPollingAccessLogFilter(logging.Filter):
+    """Suppress noisy frontend polling access logs for job progress endpoints."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if not isinstance(args, tuple) or len(args) < 3:
+            return True
+
+        method = str(args[1])
+        path = str(args[2]).split("?", 1)[0]
+        return not (method in {"GET", "OPTIONS"} and path.startswith("/jobs/"))
+
+
+logging.getLogger("uvicorn.access").addFilter(JobPollingAccessLogFilter())
+
 DailySearchSummaryJob.model_rebuild(
     _types_namespace={"DailySearchSummary": DailySearchSummary}
 )

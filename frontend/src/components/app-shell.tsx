@@ -2,14 +2,12 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import {
   Newspaper,
   Filter,
   Settings,
 } from "lucide-react";
-import { api } from "@/lib/api";
-import type { FeedbackStatus } from "@/lib/api";
+import { useFeedbackStatus } from "@/hooks/use-queries";
 import {
   Sidebar,
   SidebarContent,
@@ -44,13 +42,7 @@ function isDailyReportPath(pathname: string) {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const [feedbackStatus, setFeedbackStatus] = useState<FeedbackStatus | null>(null);
-
-  useEffect(() => {
-    api.getFeedbackStatus()
-      .then(setFeedbackStatus)
-      .catch(() => {});
-  }, [pathname]);
+  const { data: feedbackStatus } = useFeedbackStatus();
 
   const hasPendingFeedback = feedbackStatus
     ? feedbackStatus.pending_votes > 0 || feedbackStatus.pending_notes > 0

@@ -205,10 +205,10 @@ def mark_running(db: Session, run: SQLASearchRun, job: SQLAJob) -> None:
     db.commit()
 
 
-def set_pair_progress(db: Session, job: SQLAJob, *, total: int) -> None:
+def set_pair_progress(db: Session, job: SQLAJob, *, total: int, current: int = 0) -> None:
     from app.services.jobs import job_progress
 
-    job.progress = job_progress(total=max(total, 1))
+    job.progress = job_progress(current=current, total=max(total, 1))
     db.commit()
 
 
@@ -285,4 +285,3 @@ def match_payloads_for_run(db: Session, search_run_id: str):
         )
         for match, paper, filter in rows
     ]
-

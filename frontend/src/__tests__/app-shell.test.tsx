@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AppShell } from "@/components/app-shell";
 
 const mockPathname = vi.hoisted(() => ({ current: "/dashboard/filters" }));
@@ -29,10 +30,16 @@ describe("AppShell navigation", () => {
 
   it("shows Filters, Daily with nested Report and All Papers, and Settings", () => {
     mockPathname.current = "/dashboard/daily/report";
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
     render(
-      <AppShell>
-        <div>Content</div>
-      </AppShell>
+      <QueryClientProvider client={queryClient}>
+        <AppShell>
+          <div>Content</div>
+        </AppShell>
+      </QueryClientProvider>
     );
 
     const links = screen.getAllByRole("link");

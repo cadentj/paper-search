@@ -41,9 +41,15 @@ def _arxiv_paper_html(paper: SQLAPaper) -> dict[str, str | None]:
     if raw is None:
         return {"html": None, "source_url": paper.source_url or paper.html_url}
     return {
-        "html": prepare_arxiv_html_for_viewer(raw, paper.html_url),
+        "html": prepare_arxiv_html_for_viewer(raw, _arxiv_asset_base_url(paper)),
         "source_url": paper.source_url or paper.html_url,
     }
+
+
+def _arxiv_asset_base_url(paper: SQLAPaper) -> str | None:
+    if not paper.source_id:
+        return None
+    return f"https://arxiv.org/html/{paper.source_id}"
 
 
 def paper_html(paper: SQLAPaper) -> dict[str, str | None]:

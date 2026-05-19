@@ -41,12 +41,34 @@ import type { DailySearchSummary, Job, Paper, PaperMatch, ClaimFilterResult } fr
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-type MatchGroup = { name: string; matches: PaperMatch[] };
+type MatchGroup = {
+  name: string;
+  mode?: string | null;
+  matches: PaperMatch[];
+};
 
-const EMPTY_PAPER_MATCHES: PaperMatch[] = [];
 const SOURCE_LABELS: Record<string, string> = {
   arxiv: "papers",
   lesswrong: "posts",
+};
+
+function FilterModeBadge({ mode }: { mode?: string | null }) {
+  const normalizedMode = mode === "claim" ? "claim" : "topic";
+  return (
+    <Badge variant={normalizedMode === "claim" ? "default" : "secondary"}>
+      {normalizedMode === "claim" ? "Claim" : "Topic"}
+    </Badge>
+  );
+}
+type DailyHeaderDateStatus = {
+  hasSelectedDate: boolean;
+  count?: number;
+  breakdown?: Record<string, number>;
+};
+type DailyHeaderRunAction = {
+  isRunning: boolean;
+  isCreating: boolean;
+  onRunSearch: () => void;
 };
 
 function parseIndexDate(value: string): Date {
@@ -107,30 +129,20 @@ function DatePicker({
 
 export function DailyHeader({
   selectedDate,
-  dateCount,
-  dateBreakdown,
+  dateStatus,
   minDate,
   maxDate,
-  hasSelectedDate,
   availableDateSet,
   onDateChange,
-  showRunSearch = false,
-  isRunning = false,
-  isCreating = false,
-  onRunSearch,
+  runAction,
 }: {
   selectedDate: string;
-  dateCount?: number;
-  dateBreakdown?: Record<string, number>;
+  dateStatus: DailyHeaderDateStatus;
   minDate?: string;
   maxDate?: string;
-  hasSelectedDate: boolean;
   availableDateSet: Set<string>;
   onDateChange: (value: string) => void;
-  showRunSearch?: boolean;
-  isRunning?: boolean;
-  isCreating?: boolean;
-  onRunSearch?: () => void;
+  runAction?: DailyHeaderRunAction;
 }) {
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -143,18 +155,24 @@ export function DailyHeader({
           maxDate={maxDate}
           onDateChange={onDateChange}
         />
-        {dateCount !== undefined && (
+        {dateStatus.count !== undefined && (
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger>
-                <Badge variant={hasSelectedDate ? "secondary" : "destructive"}>
-                  {hasSelectedDate ? `${dateCount} items` : "No date"}
+                <Badge
+                  variant={
+                    dateStatus.hasSelectedDate ? "secondary" : "destructive"
+                  }
+                >
+                  {dateStatus.hasSelectedDate
+                    ? `${dateStatus.count} items`
+                    : "No date"}
                 </Badge>
               </TooltipTrigger>
-              {hasSelectedDate && dateBreakdown && (
+              {dateStatus.hasSelectedDate && dateStatus.breakdown && (
                 <TooltipContent>
                   <div className="space-y-0.5">
-                    {Object.entries(dateBreakdown).map(([source, count]) => (
+                    {Object.entries(dateStatus.breakdown).map(([source, count]) => (
                       <div key={source}>
                         {count} {SOURCE_LABELS[source] || source}
                       </div>
@@ -165,12 +183,16 @@ export function DailyHeader({
             </Tooltip>
           </TooltipProvider>
         )}
-        {showRunSearch && onRunSearch && (
+        {runAction && (
           <Button
-            onClick={onRunSearch}
-            disabled={isCreating || isRunning || !hasSelectedDate}
+            onClick={runAction.onRunSearch}
+            disabled={
+              runAction.isCreating ||
+              runAction.isRunning ||
+              !dateStatus.hasSelectedDate
+            }
           >
-            {isRunning ? (
+            {runAction.isRunning ? (
               <>
                 <Loader2 className="mr-2 size-4 animate-spin" />
                 Searching…
@@ -207,13 +229,19 @@ export function SearchProgress({
     : status === "queued" || isCreating
       ? "Daily Search Queued"
       : "Daily Search Running";
+  const progressTotal = Math.max(job?.progress?.total ?? 1, 1);
+  const progressCurrent = Math.min(job?.progress?.current ?? 0, progressTotal);
+  const progressText =
+    !isSummarizing && progressTotal > 1
+      ? `${progressCurrent.toLocaleString()} / ${progressTotal.toLocaleString()} evaluations`
+      : null;
   const message = isSummarizing
     ? "Writing daily summary…"
     : matchCount > 0
-      ? `${matchCount} matches found so far`
+      ? `${matchCount} matches found so far${progressText ? ` · ${progressText}` : ""}`
       : status === "queued" || isCreating
         ? "Waiting to start…"
-        : "Searching items…";
+        : progressText || "Searching items…";
 
   return (
     <Card>
@@ -286,7 +314,7 @@ export function MatchesSection({
       <h2 className="text-lg font-semibold">Item Matches</h2>
       {Object.entries(matchesByFilter).map(([filterId, group]) => (
         <Card key={filterId}>
-          <CardHeader className="pb-2">
+          <CardHeader>
             <div className="flex items-center justify-between">
               <button
                 type="button"
@@ -300,6 +328,7 @@ export function MatchesSection({
                   <ChevronRight className="size-4" />
                 )}
                 <CardTitle className="text-base">{group.name}</CardTitle>
+                <FilterModeBadge mode={group.mode} />
                 <Badge variant="secondary">{group.matches.length}</Badge>
               </button>
               <Button
@@ -580,7 +609,7 @@ export function DailyAllPapersContent({
       >
         {loading && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" /> Loading papers...
+            <Loader2 className="size-4 animate-spin" /> Loading papers…
           </div>
         )}
         {data && !loading && data.papers.length === 0 && (

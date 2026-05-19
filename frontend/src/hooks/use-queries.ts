@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, FilterDefinition, FilterResponse, PaperMatch } from "@/lib/api";
+import { api, DailySchedule, FilterDefinition, FilterResponse, PaperMatch } from "@/lib/api";
 
 const ACTIVE_JOB_STATUSES = new Set(["queued", "running"]);
 
@@ -269,6 +269,41 @@ export function useUpdateDataSource() {
   });
 }
 
+export function useDailySchedule() {
+  return useQuery({
+    queryKey: ["settings", "daily-schedule"],
+    queryFn: api.getDailySchedule,
+  });
+}
+
+export function useUpdateDailySchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: DailySchedule) => api.updateDailySchedule(data),
+    onSuccess: (schedule) => {
+      qc.setQueryData(["settings", "daily-schedule"], schedule);
+    },
+  });
+}
+
+export function useFeedbackStatus() {
+  return useQuery({
+    queryKey: ["feedback", "status"],
+    queryFn: api.getFeedbackStatus,
+  });
+}
+
+export function useProcessFeedback() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.processFeedback,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["feedback", "status"] });
+      qc.invalidateQueries({ queryKey: ["filters"] });
+    },
+  });
+}
+
 // Search runs
 export function useSearchRuns() {
   return useQuery({
@@ -364,6 +399,24 @@ export function usePaperHtml(id: string | null) {
     queryKey: ["papers", id, "html"],
     queryFn: () => api.getPaperHtml(id!),
     enabled: !!id,
+  });
+}
+
+export function usePaperNotes(paperId: string | null) {
+  return useQuery({
+    queryKey: ["papers", paperId, "notes"],
+    queryFn: () => api.getPaperNotes(paperId!),
+    enabled: !!paperId,
+  });
+}
+
+export function useUpdatePaperNotes(paperId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (text: string) => api.updatePaperNotes(paperId, text),
+    onSuccess: (note) => {
+      qc.setQueryData(["papers", paperId, "notes"], note);
+    },
   });
 }
 

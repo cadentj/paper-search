@@ -66,6 +66,13 @@ viewing is still fetched from R2 on demand.
 ### Development commands
 
 ```bash
+scripts/dev-worker-logs
+```
+
+Follows worker-only logs, hiding Redis, backend, and one-off sync container
+output.
+
+```bash
 scripts/dev-interrupt-worker
 ```
 

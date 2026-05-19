@@ -2,11 +2,11 @@
 
 import {
   createContext,
-  useContext,
+  use,
+  useCallback,
   useEffect,
   useMemo,
-  useRef,
-  useState,
+  useReducer,
   type ReactNode,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -29,11 +29,65 @@ import {
   DEFAULT_DAILY_SEARCH_DATE,
   isDailySearchDate,
 } from "@/lib/daily-dates";
-import type { DailySearchSummary, Job, PaperMatch } from "@/lib/api";
+import type { DailySearchSummary, Job, PaperMatch, SearchRun } from "@/lib/api";
 
-type MatchGroup = { name: string; matches: PaperMatch[] };
+type MatchGroup = {
+  name: string;
+  mode?: string | null;
+  matches: PaperMatch[];
+};
 
 const EMPTY_PAPER_MATCHES: PaperMatch[] = [];
+
+type DailyState = {
+  activeJobId: string | null;
+  activeSummaryJobId: string | null;
+  summaryStartedForRunId: string | null;
+  expandedFilters: Set<string>;
+  selectedPaperId: string | null;
+  selectedDate: string;
+};
+
+type DailyAction =
+  | { type: "search-started"; jobId: string }
+  | { type: "summary-requested"; runId: string }
+  | { type: "summary-failed"; runId: string }
+  | { type: "summary-started"; jobId: string }
+  | { type: "set-date"; value: string }
+  | { type: "set-selected-paper"; id: string | null }
+  | { type: "toggle-filter"; filterId: string };
+
+function dailyReducer(state: DailyState, action: DailyAction): DailyState {
+  switch (action.type) {
+    case "search-started":
+      return {
+        ...state,
+        activeJobId: action.jobId,
+        activeSummaryJobId: null,
+        summaryStartedForRunId: null,
+      };
+    case "summary-requested":
+      return { ...state, summaryStartedForRunId: action.runId };
+    case "summary-failed":
+      if (state.summaryStartedForRunId !== action.runId) return state;
+      return { ...state, summaryStartedForRunId: null };
+    case "summary-started":
+      return { ...state, activeSummaryJobId: action.jobId };
+    case "set-date":
+      return { ...state, selectedDate: action.value, selectedPaperId: null };
+    case "set-selected-paper":
+      return { ...state, selectedPaperId: action.id };
+    case "toggle-filter": {
+      const expandedFilters = new Set(state.expandedFilters);
+      if (expandedFilters.has(action.filterId)) {
+        expandedFilters.delete(action.filterId);
+      } else {
+        expandedFilters.add(action.filterId);
+      }
+      return { ...state, expandedFilters };
+    }
+  }
+}
 
 type DailyContextValue = {
   effectiveSelectedDate: string;
@@ -54,7 +108,7 @@ type DailyContextValue = {
   progressPercent: number;
   matches: PaperMatch[];
   summary: DailySearchSummary | null;
-  run: ReturnType<typeof useSearchRun>["data"];
+  run: SearchRun | null | undefined;
   matchesByFilter: Record<string, MatchGroup>;
   expandedFilters: Set<string>;
   toggleFilter: (filterId: string) => void;
@@ -64,7 +118,7 @@ type DailyContextValue = {
 const DailyContext = createContext<DailyContextValue | null>(null);
 
 export function useDaily() {
-  const ctx = useContext(DailyContext);
+  const ctx = use(DailyContext);
   if (!ctx) {
     throw new Error("useDaily must be used within DailyProvider");
   }
@@ -74,14 +128,16 @@ export function useDaily() {
 export function DailyProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { data: latestRun } = useLatestSearchRun();
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const [activeSummaryJobId, setActiveSummaryJobId] = useState<string | null>(null);
-  const summaryStartedForRunRef = useRef<string | null>(null);
-  const [expandedFilters, setExpandedFilters] = useState<Set<string>>(new Set());
-  const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
-  const [selectedDate, setSelectedDate] = useState(DEFAULT_DAILY_SEARCH_DATE);
+  const [state, dispatch] = useReducer(dailyReducer, {
+    activeJobId: null,
+    activeSummaryJobId: null,
+    summaryStartedForRunId: null,
+    expandedFilters: new Set<string>(),
+    selectedPaperId: null,
+    selectedDate: DEFAULT_DAILY_SEARCH_DATE,
+  });
 
-  const effectiveSelectedDate = selectedDate || DEFAULT_DAILY_SEARCH_DATE;
+  const effectiveSelectedDate = state.selectedDate || DEFAULT_DAILY_SEARCH_DATE;
   const { data: candidateCount } = useDailyCandidateCount(effectiveSelectedDate);
   const hasSelectedDate = isDailySearchDate(effectiveSelectedDate);
 
@@ -89,7 +145,7 @@ export function DailyProvider({ children }: { children: ReactNode }) {
     latestRun?.status === "queued" || latestRun?.status === "running"
       ? latestRun.job_id || null
       : null;
-  const currentJobId = activeJobId || recoveredJobId;
+  const currentJobId = state.activeJobId || recoveredJobId;
   const { data: dailyJob } = useDailySearchJob(currentJobId);
   const activeJob = dailyJob?.job ?? null;
   const typedRun = dailyJob?.subject ?? null;
@@ -98,7 +154,9 @@ export function DailyProvider({ children }: { children: ReactNode }) {
     activeJob?.status === "queued" || activeJob?.status === "running";
   const { data: fetchedRun } = useSearchRun(runId, false);
   const run = typedRun || fetchedRun || latestRun || null;
-  const { data: summaryJobData } = useDailySearchSummaryJob(activeSummaryJobId);
+  const { data: summaryJobData } = useDailySearchSummaryJob(
+    state.activeSummaryJobId
+  );
   const { data: runSummary } = useSearchRunSummary(
     runId,
     run?.status === "completed"
@@ -121,14 +179,15 @@ export function DailyProvider({ children }: { children: ReactNode }) {
     if (!dailyJob?.done || !runId) return;
     if (run?.status === "completed" || run?.status === "failed") return;
     if (activeJob?.status !== "completed") return;
-    if (activeSummaryJobId || isStartingSummary) return;
-    if (summaryStartedForRunRef.current === runId) return;
+    if (state.activeSummaryJobId || isStartingSummary) return;
+    if (state.summaryStartedForRunId === runId) return;
 
-    summaryStartedForRunRef.current = runId;
+    dispatch({ type: "summary-requested", runId });
     startSummary(runId, {
-      onSuccess: (data) => setActiveSummaryJobId(data.job_id),
+      onSuccess: (data) =>
+        dispatch({ type: "summary-started", jobId: data.job_id }),
       onError: () => {
-        summaryStartedForRunRef.current = null;
+        dispatch({ type: "summary-failed", runId });
       },
     });
   }, [
@@ -136,7 +195,8 @@ export function DailyProvider({ children }: { children: ReactNode }) {
     runId,
     run?.status,
     activeJob?.status,
-    activeSummaryJobId,
+    state.activeSummaryJobId,
+    state.summaryStartedForRunId,
     isStartingSummary,
     startSummary,
   ]);
@@ -179,7 +239,14 @@ export function DailyProvider({ children }: { children: ReactNode }) {
         (acc, match) => {
           const key = match.filter_id;
           if (!acc[key]) {
-            acc[key] = { name: match.filter_name || "Unknown", matches: [] };
+            acc[key] = {
+              name: match.filter_name || "Unknown",
+              mode: match.filter_mode,
+              matches: [],
+            };
+          }
+          if (!acc[key].mode && match.filter_mode) {
+            acc[key].mode = match.filter_mode;
           }
           acc[key].matches.push(match);
           return acc;
@@ -189,57 +256,83 @@ export function DailyProvider({ children }: { children: ReactNode }) {
     [matches]
   );
 
-  const handleRunSearch = () =>
+  const handleRunSearch = useCallback(() => {
     createSearch.mutate(
       { run_date: effectiveSelectedDate },
       {
         onSuccess: (data) => {
-          setActiveJobId(data.job_id);
-          setActiveSummaryJobId(null);
-          summaryStartedForRunRef.current = null;
+          dispatch({ type: "search-started", jobId: data.job_id });
         },
       }
     );
+  }, [createSearch, effectiveSelectedDate]);
 
-  const handleDateChange = (value: string) => {
-    setSelectedDate(value);
-    setSelectedPaperId(null);
-  };
+  const handleDateChange = useCallback(
+    (value: string) => dispatch({ type: "set-date", value }),
+    []
+  );
 
-  const toggleFilter = (filterId: string) => {
-    setExpandedFilters((prev) => {
-      const next = new Set(prev);
-      if (next.has(filterId)) next.delete(filterId);
-      else next.add(filterId);
-      return next;
-    });
-  };
+  const setSelectedPaperId = useCallback(
+    (id: string | null) => dispatch({ type: "set-selected-paper", id }),
+    []
+  );
 
-  const value: DailyContextValue = {
-    effectiveSelectedDate,
-    selectedDateCount: candidateCount?.count,
-    selectedDateBreakdown: candidateCount?.counts_by_source,
-    hasSelectedDate,
-    handleDateChange,
-    selectedPaperId,
-    setSelectedPaperId,
-    isRunning,
-    isCreating: createSearch.isPending,
-    handleRunSearch,
-    isJobRunning,
-    isSummaryRunning,
-    createSearchPending: createSearch.isPending,
-    activeJob,
-    summaryJob,
-    progressPercent,
-    matches,
-    summary,
-    run,
-    matchesByFilter,
-    expandedFilters,
-    toggleFilter,
-    archiveFilter,
-  };
+  const toggleFilter = useCallback(
+    (filterId: string) => dispatch({ type: "toggle-filter", filterId }),
+    []
+  );
+
+  const value: DailyContextValue = useMemo(
+    () => ({
+      effectiveSelectedDate,
+      selectedDateCount: candidateCount?.count,
+      selectedDateBreakdown: candidateCount?.counts_by_source,
+      hasSelectedDate,
+      handleDateChange,
+      selectedPaperId: state.selectedPaperId,
+      setSelectedPaperId,
+      isRunning,
+      isCreating: createSearch.isPending,
+      handleRunSearch,
+      isJobRunning,
+      isSummaryRunning,
+      createSearchPending: createSearch.isPending,
+      activeJob,
+      summaryJob,
+      progressPercent,
+      matches,
+      summary,
+      run,
+      matchesByFilter,
+      expandedFilters: state.expandedFilters,
+      toggleFilter,
+      archiveFilter,
+    }),
+    [
+      effectiveSelectedDate,
+      candidateCount?.count,
+      candidateCount?.counts_by_source,
+      hasSelectedDate,
+      handleDateChange,
+      state.selectedPaperId,
+      state.expandedFilters,
+      setSelectedPaperId,
+      isRunning,
+      createSearch.isPending,
+      handleRunSearch,
+      isJobRunning,
+      isSummaryRunning,
+      activeJob,
+      summaryJob,
+      progressPercent,
+      matches,
+      summary,
+      run,
+      matchesByFilter,
+      toggleFilter,
+      archiveFilter,
+    ]
+  );
 
   return <DailyContext.Provider value={value}>{children}</DailyContext.Provider>;
 }

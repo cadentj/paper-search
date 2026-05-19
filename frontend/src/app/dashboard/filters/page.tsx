@@ -1,7 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import {
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,15 +35,22 @@ import {
 import {
   useArchiveFilter,
   useCreateOnboardingGeneration,
-  useDocumentProcessingJob,
+  useFeedbackStatus,
   useFilters,
   useOnboardingGenerationJob,
+  useProcessFeedback,
   usePromoteDraftFilters,
   useRestoreFilter,
   useUpdateFilter,
   useUploadDocument,
 } from "@/hooks/use-queries";
-import { api, DocumentUploadResponse, FilterResponse } from "@/lib/api";
+import {
+  api,
+  DocumentProcessingJobResponse,
+  DocumentUploadResponse,
+  FeedbackStatus,
+  FilterResponse,
+} from "@/lib/api";
 import {
   Archive,
   Check,
@@ -56,6 +70,48 @@ const MAX_INPUT_CHARS = 2000;
 const BLOCKING_DOCUMENT_STATUSES = new Set(["queued", "processing"]);
 
 type UploadedDocument = DocumentUploadResponse;
+type ScholarImportStep =
+  | "input"
+  | "verifying"
+  | "verified"
+  | "importing"
+  | "polling"
+  | "done"
+  | "error";
+type ScholarProfile = {
+  author_id: string;
+  name: string;
+  affiliations: string[];
+  paper_count: number | null;
+};
+type ScholarImportState = {
+  url: string;
+  step: ScholarImportStep;
+  profile: ScholarProfile | null;
+  error: string | null;
+};
+type ScholarImportAction =
+  | { type: "set-url"; url: string }
+  | { type: "verify-start" }
+  | { type: "verify-success"; profile: ScholarProfile }
+  | { type: "import-start" }
+  | { type: "polling" }
+  | { type: "done" }
+  | { type: "error"; error: string };
+type FilterPageState = {
+  inputText: string;
+  documents: UploadedDocument[];
+  uploadError: string | null;
+  generationJobId: string | null;
+  archivedOpen: boolean;
+};
+type FilterPageAction =
+  | { type: "set-input-text"; value: string }
+  | { type: "add-documents"; documents: UploadedDocument[] }
+  | { type: "remove-document"; id: string }
+  | { type: "set-upload-error"; error: string | null }
+  | { type: "generation-started"; jobId: string }
+  | { type: "toggle-archived" };
 
 function documentStatusLabel(status: string) {
   switch (status) {
@@ -74,44 +130,80 @@ function documentStatusLabel(status: string) {
   }
 }
 
-function DocumentChip({
-  document,
-  onRemove,
-  onUpdate,
-}: {
-  document: UploadedDocument;
-  onRemove: (id: string) => void;
-  onUpdate: (document: UploadedDocument) => void;
+function documentJobRefetchInterval(query: {
+  state: { data?: DocumentProcessingJobResponse };
 }) {
-  const isActive = BLOCKING_DOCUMENT_STATUSES.has(document.status);
-  const { data: documentJob } = useDocumentProcessingJob(
-    isActive ? document.job_id : null
+  return query.state.data?.done ? false : 1000;
+}
+
+function FilterModeBadge({
+  mode,
+}: {
+  mode?: FilterResponse["definition"]["mode"];
+}) {
+  const normalizedMode = mode === "claim" ? "claim" : "topic";
+  return (
+    <Badge variant={normalizedMode === "claim" ? "default" : "secondary"}>
+      {normalizedMode === "claim" ? "Claim" : "Topic"}
+    </Badge>
   );
-  const latestDocument = documentJob?.subject;
-  const displayDocument = latestDocument
-    ? { ...document, ...latestDocument, job_id: document.job_id }
-    : document;
+}
 
-  useEffect(() => {
-    if (
-      latestDocument &&
-      (latestDocument.status !== document.status ||
-        latestDocument.updated_at !== document.updated_at)
-    ) {
-      onUpdate({ ...document, ...latestDocument, job_id: document.job_id });
-    }
-  }, [
-    document,
-    document.job_id,
-    document.status,
-    document.updated_at,
-    latestDocument,
-    onUpdate,
-  ]);
+function scholarImportReducer(
+  state: ScholarImportState,
+  action: ScholarImportAction
+): ScholarImportState {
+  switch (action.type) {
+    case "set-url":
+      return { ...state, url: action.url };
+    case "verify-start":
+      return { ...state, step: "verifying", error: null };
+    case "verify-success":
+      return { ...state, step: "verified", profile: action.profile };
+    case "import-start":
+      return { ...state, step: "importing", error: null };
+    case "polling":
+      return { ...state, step: "polling" };
+    case "done":
+      return { ...state, step: "done" };
+    case "error":
+      return { ...state, step: "error", error: action.error };
+  }
+}
 
-  const isRunning =
-    displayDocument.status === "queued" ||
-    displayDocument.status === "processing";
+function filterPageReducer(
+  state: FilterPageState,
+  action: FilterPageAction
+): FilterPageState {
+  switch (action.type) {
+    case "set-input-text":
+      return { ...state, inputText: action.value };
+    case "add-documents":
+      return { ...state, documents: [...state.documents, ...action.documents] };
+    case "remove-document":
+      return {
+        ...state,
+        documents: state.documents.filter(
+          (uploadedDocument) => uploadedDocument.id !== action.id
+        ),
+      };
+    case "set-upload-error":
+      return { ...state, uploadError: action.error };
+    case "generation-started":
+      return { ...state, generationJobId: action.jobId, inputText: "" };
+    case "toggle-archived":
+      return { ...state, archivedOpen: !state.archivedOpen };
+  }
+}
+
+function DocumentChip({
+  uploadedDocument,
+  onRemove,
+}: {
+  uploadedDocument: UploadedDocument;
+  onRemove: (id: string) => void;
+}) {
+  const isRunning = BLOCKING_DOCUMENT_STATUSES.has(uploadedDocument.status);
 
   return (
     <div className="flex min-w-0 items-center gap-2 rounded-md border bg-background px-2 py-1 text-sm">
@@ -121,25 +213,25 @@ function DocumentChip({
         <FileText className="size-3.5 shrink-0 text-muted-foreground" />
       )}
       <span className="min-w-0 flex-1 truncate">
-        {displayDocument.original_filename}
+        {uploadedDocument.original_filename}
       </span>
       <Badge
         variant={
-          displayDocument.status === "failed"
+          uploadedDocument.status === "failed"
             ? "destructive"
-            : displayDocument.status === "ready"
+            : uploadedDocument.status === "ready"
               ? "secondary"
               : "outline"
         }
       >
-        {documentStatusLabel(displayDocument.status)}
+        {documentStatusLabel(uploadedDocument.status)}
       </Badge>
       <Button
         variant="ghost"
         size="icon"
         className="size-6 shrink-0"
-        aria-label={`Remove ${displayDocument.original_filename}`}
-        onClick={() => onRemove(document.id)}
+        aria-label={`Remove ${uploadedDocument.original_filename}`}
+        onClick={() => onRemove(uploadedDocument.id)}
       >
         <X className="size-3" />
       </Button>
@@ -150,15 +242,15 @@ function DocumentChip({
 function DraftFilterCard({ filter }: { filter: FilterResponse }) {
   const updateFilter = useUpdateFilter();
   const archiveFilter = useArchiveFilter();
-  const [isEditing, setIsEditing] = useState(false);
-  const [name, setName] = useState(filter.name);
-  const [description, setDescription] = useState(
-    filter.definition.description || ""
-  );
+  const [draft, setDraft] = useState<{
+    name: string;
+    description: string;
+  } | null>(null);
 
   const save = async () => {
-    const nextName = name.trim();
-    const nextDescription = description.trim();
+    if (!draft) return;
+    const nextName = draft.name.trim();
+    const nextDescription = draft.description.trim();
     if (!nextName || !nextDescription) return;
     await updateFilter.mutateAsync({
       id: filter.id,
@@ -171,23 +263,33 @@ function DraftFilterCard({ filter }: { filter: FilterResponse }) {
         },
       },
     });
-    setIsEditing(false);
+    setDraft(null);
   };
 
   return (
     <Card>
       <CardContent>
-        {isEditing ? (
+        {draft ? (
           <div className="space-y-3">
             <Input
               aria-label="Filter name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
+              value={draft.name}
+              onChange={(event) =>
+                setDraft((current) =>
+                  current ? { ...current, name: event.target.value } : current
+                )
+              }
             />
             <Textarea
               aria-label="Filter description"
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
+              value={draft.description}
+              onChange={(event) =>
+                setDraft((current) =>
+                  current
+                    ? { ...current, description: event.target.value }
+                    : current
+                )
+              }
               rows={3}
             />
             <div className="flex gap-2">
@@ -202,7 +304,7 @@ function DraftFilterCard({ filter }: { filter: FilterResponse }) {
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => setIsEditing(false)}
+                onClick={() => setDraft(null)}
               >
                 Cancel
               </Button>
@@ -211,7 +313,10 @@ function DraftFilterCard({ filter }: { filter: FilterResponse }) {
         ) : (
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 space-y-1">
-              <p className="font-medium">{filter.name}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-medium">{filter.name}</p>
+                <FilterModeBadge mode={filter.definition.mode} />
+              </div>
               <p className="text-sm text-muted-foreground">
                 {filter.definition.description}
               </p>
@@ -222,11 +327,12 @@ function DraftFilterCard({ filter }: { filter: FilterResponse }) {
                 size="icon"
                 className="size-7"
                 aria-label={`Edit ${filter.name}`}
-                onClick={() => {
-                  setName(filter.name);
-                  setDescription(filter.definition.description || "");
-                  setIsEditing(true);
-                }}
+                onClick={() =>
+                  setDraft({
+                    name: filter.name,
+                    description: filter.definition.description || "",
+                  })
+                }
               >
                 <Pencil className="size-3" />
               </Button>
@@ -247,26 +353,32 @@ function DraftFilterCard({ filter }: { filter: FilterResponse }) {
   );
 }
 
-function ScholarImportSection({ hasScholarFilters }: { hasScholarFilters: boolean }) {
-  const [url, setUrl] = useState("");
-  const [step, setStep] = useState<"input" | "verifying" | "verified" | "importing" | "polling" | "done" | "error">("input");
-  const [profile, setProfile] = useState<{ author_id: string; name: string; affiliations: string[]; paper_count: number | null } | null>(null);
-  const [importId, setImportId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+function ScholarImportSection({
+  hasScholarFilters,
+}: {
+  hasScholarFilters: boolean;
+}) {
   const queryClient = useQueryClient();
+  const importIdRef = useRef<string | null>(null);
+  const [state, dispatch] = useReducer(scholarImportReducer, {
+    url: "",
+    step: "input",
+    profile: null,
+    error: null,
+  });
 
   useEffect(() => {
-    if (step !== "polling" || !importId) return;
+    if (state.step !== "polling" || !importIdRef.current) return;
+    const importId = importIdRef.current;
     const interval = setInterval(async () => {
       try {
         const status = await api.getScholarImportStatus(importId);
         if (status.status === "completed") {
-          setStep("done");
+          dispatch({ type: "done" });
           queryClient.invalidateQueries({ queryKey: ["filters"] });
           clearInterval(interval);
         } else if (status.status === "failed") {
-          setError(status.error || "Import failed");
-          setStep("error");
+          dispatch({ type: "error", error: status.error || "Import failed" });
           clearInterval(interval);
         }
       } catch {
@@ -274,38 +386,40 @@ function ScholarImportSection({ hasScholarFilters }: { hasScholarFilters: boolea
       }
     }, 3000);
     return () => clearInterval(interval);
-  }, [step, importId, queryClient]);
+  }, [state.step, queryClient]);
 
-  if (hasScholarFilters || step === "done") return null;
+  if (hasScholarFilters || state.step === "done") return null;
 
   const handleVerify = async () => {
-    if (!url.trim()) return;
-    setStep("verifying");
-    setError(null);
+    if (!state.url.trim()) return;
+    dispatch({ type: "verify-start" });
     try {
-      const result = await api.verifyScholarProfile(url);
-      setProfile(result);
-      setStep("verified");
+      const profile = await api.verifyScholarProfile(state.url);
+      dispatch({ type: "verify-success", profile });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Verification failed");
-      setStep("error");
+      dispatch({
+        type: "error",
+        error: err instanceof Error ? err.message : "Verification failed",
+      });
     }
   };
 
   const handleImport = async () => {
-    if (!profile) return;
-    setStep("importing");
+    if (!state.profile) return;
+    dispatch({ type: "import-start" });
     try {
       const result = await api.startScholarImport({
-        url,
-        author_id: profile.author_id,
-        display_name: profile.name,
+        url: state.url,
+        author_id: state.profile.author_id,
+        display_name: state.profile.name,
       });
-      setImportId(result.id);
-      setStep("polling");
+      importIdRef.current = result.id;
+      dispatch({ type: "polling" });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed");
-      setStep("error");
+      dispatch({
+        type: "error",
+        error: err instanceof Error ? err.message : "Import failed",
+      });
     }
   };
 
@@ -319,47 +433,63 @@ function ScholarImportSection({ hasScholarFilters }: { hasScholarFilters: boolea
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex gap-2">
-              <Input
-                placeholder="Paste Semantic Scholar profile URL..."
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                disabled={step === "verifying" || step === "importing" || step === "polling"}
-              />
-              {step === "input" || step === "error" ? (
-                <Button size="sm" onClick={handleVerify} disabled={!url.trim()}>
-                  Verify
-                </Button>
-              ) : null}
+          <Input
+            placeholder="Paste Semantic Scholar profile URL..."
+            value={state.url}
+            onChange={(event) =>
+              dispatch({ type: "set-url", url: event.target.value })
+            }
+            disabled={
+              state.step === "verifying" ||
+              state.step === "importing" ||
+              state.step === "polling"
+            }
+          />
+          {(state.step === "input" || state.step === "error") && (
+            <Button
+              size="sm"
+              onClick={handleVerify}
+              disabled={!state.url.trim()}
+            >
+              Verify
+            </Button>
+          )}
+        </div>
+        {state.error && <p className="text-sm text-destructive">{state.error}</p>}
+        {state.step === "verifying" && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            Verifying profile…
+          </div>
+        )}
+        {state.step === "verified" && state.profile && (
+          <div className="space-y-2">
+            <div className="text-sm">
+              <p className="font-medium">{state.profile.name}</p>
+              {state.profile.affiliations.length > 0 && (
+                <p className="text-muted-foreground">
+                  {state.profile.affiliations.join(", ")}
+                </p>
+              )}
+              {state.profile.paper_count != null && (
+                <p className="text-muted-foreground">
+                  {state.profile.paper_count} papers
+                </p>
+              )}
             </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            {step === "verifying" && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" />
-                Verifying profile...
-              </div>
-            )}
-            {step === "verified" && profile && (
-              <div className="space-y-2">
-                <div className="text-sm">
-                  <p className="font-medium">{profile.name}</p>
-                  {profile.affiliations.length > 0 && (
-                    <p className="text-muted-foreground">{profile.affiliations.join(", ")}</p>
-                  )}
-                  {profile.paper_count != null && (
-                    <p className="text-muted-foreground">{profile.paper_count} papers</p>
-                  )}
-                </div>
-                <Button size="sm" onClick={handleImport}>
-                  Import & Generate Filters
-                </Button>
-              </div>
-            )}
-            {(step === "importing" || step === "polling") && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" />
-                {step === "importing" ? "Starting import..." : "Generating filters from publications..."}
-              </div>
-            )}
+            <Button size="sm" onClick={handleImport}>
+              Import & Generate Filters
+            </Button>
+          </div>
+        )}
+        {(state.step === "importing" || state.step === "polling") && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            {state.step === "importing"
+              ? "Starting import…"
+              : "Generating filters from publications…"}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -395,7 +525,10 @@ function ProposalCard({
         <div className="flex items-center gap-2">
           <Badge variant={badgeVariant}>{actionLabel}</Badge>
         </div>
-        <p className="font-medium">{filter.name}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="font-medium">{filter.name}</p>
+          <FilterModeBadge mode={filter.definition.mode} />
+        </div>
         {filter.proposed_action !== "delete" && (
           <p className="text-sm text-muted-foreground">
             {filter.definition.description}
@@ -426,51 +559,451 @@ function ProposalCard({
   );
 }
 
+function ResearchContextForm({
+  inputText,
+  progressText,
+  status,
+  fileInputRef,
+  onInputTextChange,
+  onSend,
+}: {
+  inputText: string;
+  progressText: string | null;
+  status: {
+    isGenerating: boolean;
+    isUploading: boolean;
+    isCreating: boolean;
+    canSend: boolean;
+  };
+  fileInputRef: RefObject<HTMLInputElement | null>;
+  onInputTextChange: (value: string) => void;
+  onSend: () => void;
+}) {
+  return (
+    <FieldGroup>
+      <Field>
+        <FieldLabel htmlFor="filter-context">Research context</FieldLabel>
+        <InputGroup>
+          <InputGroupTextarea
+            id="filter-context"
+            value={inputText}
+            maxLength={MAX_INPUT_CHARS}
+            rows={5}
+            placeholder="Add a research direction, question, claim, or context from your current work..."
+            onChange={(event) => onInputTextChange(event.target.value)}
+            disabled={status.isGenerating}
+          />
+          <InputGroupAddon align="block-end" className="gap-2">
+            <InputGroupButton
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Upload PDF"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={status.isUploading}
+            >
+              {status.isUploading ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Plus className="size-4" />
+              )}
+            </InputGroupButton>
+            <InputGroupText>
+              {inputText.length}/{MAX_INPUT_CHARS}
+            </InputGroupText>
+            {progressText ? <InputGroupText>{progressText}</InputGroupText> : null}
+            <InputGroupButton
+              variant="default"
+              size="sm"
+              className="ml-auto"
+              onClick={onSend}
+              disabled={!status.canSend}
+            >
+              {status.isGenerating || status.isCreating ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Send className="size-4" />
+              )}
+              Send
+            </InputGroupButton>
+          </InputGroupAddon>
+        </InputGroup>
+        <FieldDescription>
+          PDFs must be 1 MB or smaller and 10 pages or fewer. OCR-only work is
+          skipped until it is ready.
+        </FieldDescription>
+      </Field>
+    </FieldGroup>
+  );
+}
+
+function DraftFiltersSection({
+  filters,
+  isGenerating,
+  isPromoting,
+  onAcceptDrafts,
+}: {
+  filters: FilterResponse[];
+  isGenerating: boolean;
+  isPromoting: boolean;
+  onAcceptDrafts: () => void;
+}) {
+  if (filters.length === 0 && !isGenerating) return null;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Draft Filters</h2>
+          <p className="text-sm text-muted-foreground">
+            Drafts are ignored by daily search until accepted.
+          </p>
+        </div>
+        <Button
+          onClick={onAcceptDrafts}
+          disabled={filters.length === 0 || isPromoting}
+        >
+          {isPromoting ? (
+            <Loader2 className="mr-2 size-4 animate-spin" />
+          ) : (
+            <Check className="mr-2 size-4" />
+          )}
+          Accept Drafts ({filters.length})
+        </Button>
+      </div>
+      {filters.length > 0 ? (
+        <div className="space-y-3">
+          {filters.map((filter) => (
+            <DraftFilterCard key={filter.id} filter={filter} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function FeedbackCard({
+  status,
+  isProcessing,
+  onProcess,
+}: {
+  status?: FeedbackStatus;
+  isProcessing: boolean;
+  onProcess: () => void;
+}) {
+  if (!status || (status.pending_votes === 0 && status.pending_notes === 0)) {
+    return null;
+  }
+
+  return (
+    <Card>
+      <CardContent className="pt-4 flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium">Pending Feedback</p>
+          <p className="text-xs text-muted-foreground">
+            {status.pending_votes} vote{status.pending_votes !== 1 ? "s" : ""}
+            {status.pending_notes > 0 &&
+              `, ${status.pending_notes} note${
+                status.pending_notes !== 1 ? "s" : ""
+              }`}
+          </p>
+        </div>
+        <Button size="sm" onClick={onProcess} disabled={isProcessing}>
+          {isProcessing ? (
+            <Loader2 className="mr-1 size-3 animate-spin" />
+          ) : null}
+          Process Feedback
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ProposalSection({
+  filters,
+  allFilters,
+  onAccept,
+  onReject,
+}: {
+  filters: FilterResponse[];
+  allFilters: FilterResponse[];
+  onAccept: (filterId: string) => void;
+  onReject: (filterId: string) => void;
+}) {
+  if (filters.length === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      <h2 className="text-lg font-semibold">Proposals ({filters.length})</h2>
+      {filters.map((filter) => (
+        <ProposalCard
+          key={filter.id}
+          filter={filter}
+          targetFilter={
+            filter.target_filter_id
+              ? allFilters.find((target) => target.id === filter.target_filter_id)
+              : undefined
+          }
+          onAccept={() => onAccept(filter.id)}
+          onReject={() => onReject(filter.id)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ActiveFiltersSection({
+  filters,
+  isArchiving,
+  onArchive,
+}: {
+  filters: FilterResponse[];
+  isArchiving: boolean;
+  onArchive: (filterId: string) => void;
+}) {
+  if (filters.length === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      <h2 className="text-lg font-semibold">Active ({filters.length})</h2>
+      {filters.map((filter) => (
+        <Card key={filter.id}>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <div className="min-w-0 space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <CardTitle className="text-sm">{filter.name}</CardTitle>
+                  <FilterModeBadge mode={filter.definition?.mode} />
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {filter.definition?.description}
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onArchive(filter.id)}
+                disabled={isArchiving}
+              >
+                <Archive className="mr-1 size-3" />
+                Archive
+              </Button>
+            </div>
+          </CardHeader>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function ArchivedFiltersSection({
+  filters,
+  isOpen,
+  isRestoring,
+  onToggle,
+  onRestore,
+}: {
+  filters: FilterResponse[];
+  isOpen: boolean;
+  isRestoring: boolean;
+  onToggle: () => void;
+  onRestore: (filterId: string) => void;
+}) {
+  if (filters.length === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      <button
+        type="button"
+        className="flex items-center gap-2 text-lg font-semibold text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={onToggle}
+        aria-expanded={isOpen}
+      >
+        {isOpen ? (
+          <ChevronDown className="size-4" />
+        ) : (
+          <ChevronRight className="size-4" />
+        )}
+        Archived ({filters.length})
+      </button>
+      {isOpen &&
+        filters.map((filter) => (
+          <Card key={filter.id} className="opacity-60">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <div className="min-w-0 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CardTitle className="text-sm">{filter.name}</CardTitle>
+                    <FilterModeBadge mode={filter.definition?.mode} />
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {filter.definition?.description}
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onRestore(filter.id)}
+                  disabled={isRestoring}
+                >
+                  <RotateCcw className="mr-1 size-3" />
+                  Restore
+                </Button>
+              </div>
+            </CardHeader>
+          </Card>
+        ))}
+    </div>
+  );
+}
+
+function EmptyFiltersState({ isVisible }: { isVisible: boolean }) {
+  if (!isVisible) return null;
+
+  return (
+    <Card>
+      <CardContent className="pt-6 text-center">
+        <p className="text-muted-foreground">
+          No filters yet. Add research context above to generate filters.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function FiltersPage() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [inputText, setInputText] = useState("");
-  const [documents, setDocuments] = useState<UploadedDocument[]>([]);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [generationJobId, setGenerationJobId] = useState<string | null>(null);
-  const [archivedOpen, setArchivedOpen] = useState(false);
+  const [state, dispatch] = useReducer(filterPageReducer, {
+    inputText: "",
+    documents: [],
+    uploadError: null,
+    generationJobId: null,
+    archivedOpen: false,
+  });
 
   const uploadDocument = useUploadDocument();
   const createGeneration = useCreateOnboardingGeneration();
   const promoteDraftFilters = usePromoteDraftFilters();
   const archiveFilter = useArchiveFilter();
   const restoreFilter = useRestoreFilter();
-  const { data: generationState } = useOnboardingGenerationJob(generationJobId);
+  const processFeedback = useProcessFeedback();
+  const { data: feedbackStatus } = useFeedbackStatus();
+  const { data: generationState } = useOnboardingGenerationJob(
+    state.generationJobId
+  );
   const generationJob = generationState?.job;
   const { data: draftFilters = [] } = useFilters("draft");
-  const { data: allFilters } = useFilters();
+  const { data: allFilters = [] } = useFilters();
 
-  const [processingFeedback, setProcessingFeedback] = useState(false);
-  const [feedbackStatus, setFeedbackStatus] = useState<{ pending_votes: number; pending_notes: number; pending_proposals: number } | null>(null);
+  const documentJobs = useQueries({
+    queries: state.documents.map((uploadedDocument) => ({
+      queryKey: ["jobs", "document-processing", uploadedDocument.job_id],
+      queryFn: () => api.getDocumentProcessingJob(uploadedDocument.job_id),
+      enabled: BLOCKING_DOCUMENT_STATUSES.has(uploadedDocument.status),
+      refetchInterval: documentJobRefetchInterval,
+    })),
+  });
 
-  const activeFilters = allFilters?.filter((f) => f.status === "active") || [];
-  const archivedFilters =
-    allFilters?.filter((f) => f.status === "archived") || [];
-  const proposalFilters = allFilters?.filter(
-    (f) => f.proposed_action && ["pending_create", "pending_revision", "pending_deletion"].includes(f.status)
-  ) || [];
-  const hasScholarFilters = allFilters?.some((f) => f.source === "scholar") || false;
+  const displayDocuments = useMemo(
+    () =>
+      state.documents.map((uploadedDocument, index) => {
+        const latestDocument = documentJobs[index]?.data?.subject;
+        return latestDocument
+          ? {
+              ...uploadedDocument,
+              ...latestDocument,
+              job_id: uploadedDocument.job_id,
+            }
+          : uploadedDocument;
+      }),
+    [state.documents, documentJobs]
+  );
+
+  const activeFilters = allFilters.filter((filter) => filter.status === "active");
+  const archivedFilters = allFilters.filter(
+    (filter) => filter.status === "archived"
+  );
+  const proposalFilters = allFilters.filter(
+    (filter) =>
+      filter.proposed_action &&
+      ["pending_create", "pending_revision", "pending_deletion"].includes(
+        filter.status
+      )
+  );
+  const hasScholarFilters = allFilters.some(
+    (filter) => filter.source === "scholar"
+  );
+  const readyDocuments = displayDocuments.filter(
+    (uploadedDocument) => uploadedDocument.status === "ready"
+  );
+  const blockingDocuments = displayDocuments.filter((uploadedDocument) =>
+    BLOCKING_DOCUMENT_STATUSES.has(uploadedDocument.status)
+  );
+  const processedCount = displayDocuments.filter(
+    (uploadedDocument) =>
+      !BLOCKING_DOCUMENT_STATUSES.has(uploadedDocument.status)
+  ).length;
+  const isGenerating =
+    generationJob?.status === "queued" || generationJob?.status === "running";
+  const canSend =
+    !isGenerating &&
+    !uploadDocument.isPending &&
+    !createGeneration.isPending &&
+    blockingDocuments.length === 0 &&
+    state.inputText.length <= MAX_INPUT_CHARS &&
+    (state.inputText.trim().length > 0 || readyDocuments.length > 0);
+
+  const progressText = useMemo(() => {
+    if (displayDocuments.length === 0) return null;
+    return `${processedCount}/${displayDocuments.length} PDFs processed`;
+  }, [displayDocuments.length, processedCount]);
 
   useEffect(() => {
-    api.getFeedbackStatus().then(setFeedbackStatus).catch(() => {});
-  }, []);
+    if (!generationState?.items.length) return;
+    queryClient.setQueryData<FilterResponse[]>(
+      ["filters", "draft"],
+      (current = []) => {
+        const byId = new Map(current.map((filter) => [filter.id, filter]));
+        generationState.items.forEach((filter) => byId.set(filter.id, filter));
+        return Array.from(byId.values());
+      }
+    );
+  }, [generationState, queryClient]);
 
-  const handleProcessFeedback = async () => {
-    setProcessingFeedback(true);
+  const handleFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    dispatch({ type: "set-upload-error", error: null });
     try {
-      await api.processFeedback();
-      queryClient.invalidateQueries({ queryKey: ["filters"] });
-      api.getFeedbackStatus().then(setFeedbackStatus).catch(() => {});
-    } catch {
-      // ignore
+      const uploads = await Promise.all(
+        Array.from(files).map((file) => uploadDocument.mutateAsync(file))
+      );
+      dispatch({ type: "add-documents", documents: uploads });
+    } catch (error) {
+      dispatch({
+        type: "set-upload-error",
+        error: error instanceof Error ? error.message : "Upload failed",
+      });
     } finally {
-      setProcessingFeedback(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
     }
+  };
+
+  const handleSend = async () => {
+    if (!canSend) return;
+    const result = await createGeneration.mutateAsync({
+      input_text: state.inputText,
+      document_ids: readyDocuments.map((uploadedDocument) => uploadedDocument.id),
+    });
+    dispatch({ type: "generation-started", jobId: result.job_id });
+  };
+
+  const handleAcceptDrafts = async () => {
+    if (draftFilters.length === 0) return;
+    await promoteDraftFilters.mutateAsync(
+      draftFilters.map((filter) => filter.id)
+    );
   };
 
   const handleAcceptProposal = async (filterId: string) => {
@@ -491,88 +1024,6 @@ export default function FiltersPage() {
     }
   };
 
-  const readyDocuments = documents.filter(
-    (document) => document.status === "ready"
-  );
-  const blockingDocuments = documents.filter((document) =>
-    BLOCKING_DOCUMENT_STATUSES.has(document.status)
-  );
-  const processedCount = documents.filter(
-    (document) => !BLOCKING_DOCUMENT_STATUSES.has(document.status)
-  ).length;
-  const isGenerating =
-    generationJob?.status === "queued" || generationJob?.status === "running";
-  const canSend =
-    !isGenerating &&
-    !uploadDocument.isPending &&
-    !createGeneration.isPending &&
-    blockingDocuments.length === 0 &&
-    inputText.length <= MAX_INPUT_CHARS &&
-    (inputText.trim().length > 0 || readyDocuments.length > 0);
-
-  const progressText = useMemo(() => {
-    if (documents.length === 0) return null;
-    return `${processedCount}/${documents.length} PDFs processed`;
-  }, [documents.length, processedCount]);
-
-  useEffect(() => {
-    if (!generationState) return;
-    if (generationState.items.length > 0) {
-      queryClient.setQueryData<FilterResponse[]>(
-        ["filters", "draft"],
-        (current = []) => {
-          const byId = new Map(current.map((filter) => [filter.id, filter]));
-          generationState.items.forEach((filter) => byId.set(filter.id, filter));
-          return Array.from(byId.values());
-        }
-      );
-    }
-  }, [generationState, queryClient]);
-
-  const handleFiles = async (files: FileList | null) => {
-    if (!files?.length) return;
-    setUploadError(null);
-    try {
-      const uploads = await Promise.all(
-        Array.from(files).map((file) => uploadDocument.mutateAsync(file))
-      );
-      setDocuments((current) => [...current, ...uploads]);
-    } catch (error) {
-      setUploadError(
-        error instanceof Error ? error.message : "Upload failed"
-      );
-    } finally {
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-    }
-  };
-
-  const handleSend = async () => {
-    if (!canSend) return;
-    const result = await createGeneration.mutateAsync({
-      input_text: inputText,
-      document_ids: readyDocuments.map((document) => document.id),
-    });
-    setGenerationJobId(result.job_id);
-    setInputText("");
-  };
-
-  const handleAcceptDrafts = async () => {
-    if (draftFilters.length === 0) return;
-    await promoteDraftFilters.mutateAsync(
-      draftFilters.map((filter) => filter.id)
-    );
-  };
-
-  const updateDocument = (nextDocument: UploadedDocument) => {
-    setDocuments((current) =>
-      current.map((document) =>
-        document.id === nextDocument.id ? nextDocument : document
-      )
-    );
-  };
-
   return (
     <div className="flex-1 p-6 space-y-6 max-w-3xl">
       <div className="space-y-2">
@@ -583,61 +1034,21 @@ export default function FiltersPage() {
         </p>
       </div>
 
-      <FieldGroup>
-        <Field>
-          <FieldLabel htmlFor="filter-context">Research context</FieldLabel>
-          <InputGroup>
-            <InputGroupTextarea
-              id="filter-context"
-              value={inputText}
-              maxLength={MAX_INPUT_CHARS}
-              rows={5}
-              placeholder="Add a research direction, question, claim, or context from your current work..."
-              onChange={(event) => setInputText(event.target.value)}
-              disabled={isGenerating}
-            />
-            <InputGroupAddon align="block-end" className="gap-2">
-              <InputGroupButton
-                size="icon-sm"
-                variant="ghost"
-                aria-label="Upload PDF"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploadDocument.isPending}
-              >
-                {uploadDocument.isPending ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Plus className="size-4" />
-                )}
-              </InputGroupButton>
-              <InputGroupText>
-                {inputText.length}/{MAX_INPUT_CHARS}
-              </InputGroupText>
-              {progressText ? (
-                <InputGroupText>{progressText}</InputGroupText>
-              ) : null}
-              <InputGroupButton
-                variant="default"
-                size="sm"
-                className="ml-auto"
-                onClick={handleSend}
-                disabled={!canSend}
-              >
-                {isGenerating || createGeneration.isPending ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Send className="size-4" />
-                )}
-                Send
-              </InputGroupButton>
-            </InputGroupAddon>
-          </InputGroup>
-          <FieldDescription>
-            PDFs must be 1 MB or smaller and 10 pages or fewer. OCR-only work
-            is skipped until it is ready.
-          </FieldDescription>
-        </Field>
-      </FieldGroup>
+      <ResearchContextForm
+        inputText={state.inputText}
+        progressText={progressText}
+        status={{
+          isGenerating,
+          isUploading: uploadDocument.isPending,
+          isCreating: createGeneration.isPending,
+          canSend,
+        }}
+        fileInputRef={fileInputRef}
+        onInputTextChange={(value) =>
+          dispatch({ type: "set-input-text", value })
+        }
+        onSend={handleSend}
+      />
 
       <input
         ref={fileInputRef}
@@ -648,21 +1059,18 @@ export default function FiltersPage() {
         onChange={(event) => handleFiles(event.target.files)}
       />
 
-      {uploadError ? (
-        <p className="text-sm text-destructive">{uploadError}</p>
+      {state.uploadError ? (
+        <p className="text-sm text-destructive">{state.uploadError}</p>
       ) : null}
 
-      {documents.length > 0 ? (
+      {displayDocuments.length > 0 ? (
         <div className="flex flex-col gap-2">
-          {documents.map((document) => (
+          {displayDocuments.map((uploadedDocument) => (
             <DocumentChip
-              key={document.id}
-              document={document}
-              onUpdate={updateDocument}
+              key={uploadedDocument.id}
+              uploadedDocument={uploadedDocument}
               onRemove={(id) =>
-                setDocuments((current) =>
-                  current.filter((document) => document.id !== id)
-                )
+                dispatch({ type: "remove-document", id })
               }
             />
           ))}
@@ -672,9 +1080,7 @@ export default function FiltersPage() {
       {generationJob ? (
         <Card>
           <CardContent className="flex items-center gap-2 pt-6 text-sm text-muted-foreground">
-            {isGenerating ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : null}
+            {isGenerating ? <Loader2 className="size-4 animate-spin" /> : null}
             <span>
               {generationJob.status === "running"
                 ? "Generating draft filters…"
@@ -686,170 +1092,50 @@ export default function FiltersPage() {
         </Card>
       ) : null}
 
-      {(draftFilters.length > 0 || isGenerating) && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold">Draft Filters</h2>
-              <p className="text-sm text-muted-foreground">
-                Drafts are ignored by daily search until accepted.
-              </p>
-            </div>
-            <Button
-              onClick={handleAcceptDrafts}
-              disabled={
-                draftFilters.length === 0 || promoteDraftFilters.isPending
-              }
-            >
-              {promoteDraftFilters.isPending ? (
-                <Loader2 className="mr-2 size-4 animate-spin" />
-              ) : (
-                <Check className="mr-2 size-4" />
-              )}
-              Accept Drafts ({draftFilters.length})
-            </Button>
-          </div>
-
-          {draftFilters.length > 0 ? (
-            <div className="space-y-3">
-              {draftFilters.map((filter) => (
-                <DraftFilterCard key={filter.id} filter={filter} />
-              ))}
-            </div>
-          ) : null}
-        </div>
-      )}
+      <DraftFiltersSection
+        filters={draftFilters}
+        isGenerating={isGenerating}
+        isPromoting={promoteDraftFilters.isPending}
+        onAcceptDrafts={handleAcceptDrafts}
+      />
 
       <ScholarImportSection hasScholarFilters={hasScholarFilters} />
 
-      {feedbackStatus && (feedbackStatus.pending_votes > 0 || feedbackStatus.pending_notes > 0) && (
-        <Card>
-          <CardContent className="pt-4 flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium">Pending Feedback</p>
-              <p className="text-xs text-muted-foreground">
-                {feedbackStatus.pending_votes} vote{feedbackStatus.pending_votes !== 1 ? "s" : ""}
-                {feedbackStatus.pending_notes > 0 && `, ${feedbackStatus.pending_notes} note${feedbackStatus.pending_notes !== 1 ? "s" : ""}`}
-              </p>
-            </div>
-            <Button
-              size="sm"
-              onClick={handleProcessFeedback}
-              disabled={processingFeedback}
-            >
-              {processingFeedback ? (
-                <Loader2 className="mr-1 size-3 animate-spin" />
-              ) : null}
-              Process Feedback
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+      <FeedbackCard
+        status={feedbackStatus}
+        isProcessing={processFeedback.isPending}
+        onProcess={() => processFeedback.mutate()}
+      />
 
-      {proposalFilters.length > 0 && (
-        <div className="space-y-3">
-          <h2 className="text-lg font-semibold">
-            Proposals ({proposalFilters.length})
-          </h2>
-          {proposalFilters.map((f) => (
-            <ProposalCard
-              key={f.id}
-              filter={f}
-              targetFilter={
-                f.target_filter_id
-                  ? allFilters?.find((t) => t.id === f.target_filter_id)
-                  : undefined
-              }
-              onAccept={() => handleAcceptProposal(f.id)}
-              onReject={() => handleRejectProposal(f.id)}
-            />
-          ))}
-        </div>
-      )}
+      <ProposalSection
+        filters={proposalFilters}
+        allFilters={allFilters}
+        onAccept={handleAcceptProposal}
+        onReject={handleRejectProposal}
+      />
 
-      {activeFilters.length > 0 && (
-        <div className="space-y-3">
-          <h2 className="text-lg font-semibold">
-            Active ({activeFilters.length})
-          </h2>
-          {activeFilters.map((f) => (
-            <Card key={f.id}>
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <div className="min-w-0 space-y-1">
-                    <CardTitle className="text-sm">{f.name}</CardTitle>
-                    <p className="text-sm text-muted-foreground">
-                      {f.definition?.description}
-                    </p>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => archiveFilter.mutate(f.id)}
-                  >
-                    <Archive className="mr-1 size-3" />
-                    Archive
-                  </Button>
-                </div>
-              </CardHeader>
-            </Card>
-          ))}
-        </div>
-      )}
+      <ActiveFiltersSection
+        filters={activeFilters}
+        isArchiving={archiveFilter.isPending}
+        onArchive={(filterId) => archiveFilter.mutate(filterId)}
+      />
 
-      {archivedFilters.length > 0 && (
-        <div className="space-y-3">
-          <button
-            type="button"
-            className="flex items-center gap-2 text-lg font-semibold text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={() => setArchivedOpen((open) => !open)}
-            aria-expanded={archivedOpen}
-          >
-            {archivedOpen ? (
-              <ChevronDown className="size-4" />
-            ) : (
-              <ChevronRight className="size-4" />
-            )}
-            Archived ({archivedFilters.length})
-          </button>
-          {archivedOpen &&
-            archivedFilters.map((f) => (
-              <Card key={f.id} className="opacity-60">
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <div className="min-w-0 space-y-1">
-                      <CardTitle className="text-sm">{f.name}</CardTitle>
-                      <p className="text-sm text-muted-foreground">
-                        {f.definition?.description}
-                      </p>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => restoreFilter.mutate(f.id)}
-                    >
-                      <RotateCcw className="mr-1 size-3" />
-                      Restore
-                    </Button>
-                  </div>
-                </CardHeader>
-              </Card>
-            ))}
-        </div>
-      )}
+      <ArchivedFiltersSection
+        filters={archivedFilters}
+        isOpen={state.archivedOpen}
+        isRestoring={restoreFilter.isPending}
+        onToggle={() => dispatch({ type: "toggle-archived" })}
+        onRestore={(filterId) => restoreFilter.mutate(filterId)}
+      />
 
-      {activeFilters.length === 0 &&
-        archivedFilters.length === 0 &&
-        draftFilters.length === 0 &&
-        !isGenerating && (
-          <Card>
-            <CardContent className="pt-6 text-center">
-              <p className="text-muted-foreground">
-                No filters yet. Add research context above to generate filters.
-              </p>
-            </CardContent>
-          </Card>
-        )}
+      <EmptyFiltersState
+        isVisible={
+          activeFilters.length === 0 &&
+          archivedFilters.length === 0 &&
+          draftFilters.length === 0 &&
+          !isGenerating
+        }
+      />
     </div>
   );
 }

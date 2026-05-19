@@ -147,6 +147,7 @@ describe("Daily report page", () => {
     await waitFor(() => {
       expect(screen.getByText(/searching/i)).toBeInTheDocument();
       expect(screen.getByText("40%")).toBeInTheDocument();
+      expect(screen.getByText(/2 \/ 5 evaluations/i)).toBeInTheDocument();
       expect(mockApi.getSearchRunMatches).not.toHaveBeenCalled();
       expect(screen.getByRole("button", { name: /LLM Reasoning/i })).toBeInTheDocument();
     });
@@ -186,6 +187,7 @@ describe("Daily report page", () => {
         paper_source_type: "arxiv",
         paper_source_id: "2401.00001",
         filter_name: "LLM Reasoning",
+        filter_mode: "claim",
       },
     ]);
     renderDaily(<DailyReportView />);
@@ -196,6 +198,7 @@ describe("Daily report page", () => {
         screen.getByRole("link", { name: /open citation 1: 2401.00001/i })
       ).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /LLM Reasoning/i })).toBeInTheDocument();
+      expect(screen.getByText("Claim")).toBeInTheDocument();
     });
 
     expect(

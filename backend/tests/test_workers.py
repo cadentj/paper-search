@@ -1,7 +1,10 @@
 """Worker job tests against temporary SQLite database."""
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
+
+import pytest
 
 from app.models.filter import SQLAFilter
 from app.models.onboarding_extraction import SQLAOnboardingExtraction
@@ -245,6 +248,60 @@ def _fake_summary_llm(*, matched_arxiv_id: str):
     return fake_call_llm
 
 
+class TestDailySearchTimeouts:
+    @pytest.mark.asyncio
+    async def test_pair_timeout_does_not_include_semaphore_wait(self, monkeypatch):
+        from app.jobs import daily_search
+        from app.models.filter import FilterPayload
+        from paper_search_core.schemas.daily_search import PaperPayload
+
+        semaphore = asyncio.Semaphore(1)
+        await semaphore.acquire()
+        calls = {"count": 0}
+
+        async def fake_async_call_llm(**kwargs):
+            calls["count"] += 1
+            return {
+                "content": {"matches": []},
+                "model": "test-model",
+                "response_id": "test-response",
+            }
+
+        monkeypatch.setattr(daily_search, "PAIR_TIMEOUT_SECONDS", 0.01)
+        monkeypatch.setattr(daily_search, "async_call_llm", fake_async_call_llm)
+
+        task = asyncio.create_task(
+            daily_search._evaluate_filter_paper_with_timeout(
+                semaphore=semaphore,
+                filter=FilterPayload(
+                    id="filter-1",
+                    name="Test Filter",
+                    definition={"name": "Test Filter", "mode": "topic"},
+                ),
+                paper=PaperPayload(
+                    id="paper-1",
+                    title="Queued Paper",
+                    source_type="arxiv",
+                    source_id="2605.00001",
+                    item_id="arxiv:2605.00001",
+                    text="Queued paper abstract.",
+                    authors=["Test Author"],
+                ),
+            )
+        )
+
+        await asyncio.sleep(0.03)
+
+        assert not task.done()
+        assert calls["count"] == 0
+
+        semaphore.release()
+        evaluation = await asyncio.wait_for(task, timeout=1)
+
+        assert evaluation.error is None
+        assert calls["count"] == 1
+
+
 class TestRunDailySearch:
     def test_persists_matches_without_inline_summary(self, db_session, patch_worker_database, monkeypatch):
 
@@ -304,6 +361,7 @@ class TestRunDailySearch:
         assert updated_run.match_count == 1
         assert updated_run.candidate_count == len(daily_papers)
         assert job.progress["total"] == len(daily_papers)
+        assert job.progress["current"] == len(daily_papers)
         match_count = (
             db_session.query(SQLAPaperMatch)
             .filter(SQLAPaperMatch.search_run_id == run_id)
@@ -556,6 +614,7 @@ class TestRunDailySearch:
         assert updated_run.status == "running"
         assert updated_run.summary is None
         assert job.progress["total"] == 2
+        assert job.progress["current"] == 2
         assert updated_run.match_count == 1
         match_count = (
             db_session.query(SQLAPaperMatch)
@@ -624,6 +683,7 @@ class TestRunDailySearch:
         assert job is not None
         assert updated_run.status == "failed"
         assert job.progress["total"] == 1
+        assert job.progress["current"] == 1
 
 
 class TestSummarizeDailySearch:

@@ -43,17 +43,24 @@ export function DailyChrome({ children }: { children: React.ReactNode }) {
     >
       <DailyHeader
         selectedDate={effectiveSelectedDate}
-        dateCount={selectedDateCount}
-        dateBreakdown={selectedDateBreakdown}
+        dateStatus={{
+          hasSelectedDate,
+          count: selectedDateCount,
+          breakdown: selectedDateBreakdown,
+        }}
         minDate={DAILY_SEARCH_START}
         maxDate={DAILY_SEARCH_END}
-        hasSelectedDate={hasSelectedDate}
         availableDateSet={DAILY_SEARCH_DATE_SET}
         onDateChange={handleDateChange}
-        showRunSearch={showRunSearch}
-        isRunning={isRunning}
-        isCreating={isCreating}
-        onRunSearch={handleRunSearch}
+        runAction={
+          showRunSearch
+            ? {
+                isRunning,
+                isCreating,
+                onRunSearch: handleRunSearch,
+              }
+            : undefined
+        }
       />
       {children}
     </div>

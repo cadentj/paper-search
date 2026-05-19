@@ -105,10 +105,12 @@ def serialize_daily_search_job(db: Session, job: SQLAJob, run: SQLASearchRun) ->
     match_count = (
         db.query(SQLAPaperMatch).filter(SQLAPaperMatch.search_run_id == run.id).count()
     )
+    current = stored.get("current", match_count)
     return with_progress(
         job,
-        current=match_count,
+        current=current,
         total=stored.get("total", max(match_count, 1)),
+        matches=match_count,
     )
 
 

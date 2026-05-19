@@ -12,6 +12,8 @@ import {
   useIdeaMap,
   useGenerateIdeaMap,
   useIdeaMapJob,
+  usePaperNotes,
+  useUpdatePaperNotes,
 } from "@/hooks/use-queries";
 import {
   Loader2,
@@ -24,7 +26,6 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { IdeaMap, IdeaMapClaim, IdeaMapWarrant, Job, Paper } from "@/lib/api";
-import { api } from "@/lib/api";
 import { Textarea } from "@/components/ui/textarea";
 
 const BLOCK_SELECTOR = "[data-paper-block-id]";
@@ -410,31 +411,28 @@ function IdeaMapWarrantButton({
 }
 
 function PaperNotesPanel({ paperId }: { paperId: string }) {
-  const [text, setText] = useState("");
-  const [loaded, setLoaded] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const { data: note, isLoading } = usePaperNotes(paperId);
+  const updateNotes = useUpdatePaperNotes(paperId);
+  const [draft, setDraft] = useState<{
+    paperId: string;
+    text: string;
+  } | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const text = draft?.paperId === paperId ? draft.text : note?.text ?? "";
 
-  useEffect(() => {
-    api.getPaperNotes(paperId).then((note) => {
-      if (note) setText(note.text);
-      setLoaded(true);
-    }).catch(() => setLoaded(true));
-  }, [paperId]);
+  useEffect(
+    () => () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    },
+    []
+  );
 
   const handleChange = (value: string) => {
-    setText(value);
+    setDraft({ paperId, text: value });
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(async () => {
-      setSaving(true);
-      try {
-        await api.updatePaperNotes(paperId, value);
-      } catch {
-        // ignore
-      } finally {
-        setSaving(false);
-      }
+    saveTimeoutRef.current = setTimeout(() => {
+      updateNotes.mutate(value);
     }, 1000);
   };
 
@@ -447,9 +445,11 @@ function PaperNotesPanel({ paperId }: { paperId: string }) {
         {collapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
         <StickyNote className="size-3.5" />
         Notes
-        {saving && <span className="text-xs text-muted-foreground ml-auto">Saving...</span>}
+        {updateNotes.isPending && (
+          <span className="text-xs text-muted-foreground ml-auto">Saving…</span>
+        )}
       </button>
-      {!collapsed && loaded && (
+      {!collapsed && !isLoading && (
         <div className="p-2 space-y-2">
           <Textarea
             value={text}

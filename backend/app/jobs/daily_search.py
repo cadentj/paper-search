@@ -27,7 +27,7 @@ from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 PAIR_TIMEOUT_SECONDS = 30.0
-PAIRING_PHASE_TIMEOUT_SECONDS = 180.0
+PAIRING_PHASE_TIMEOUT_SECONDS = 360.0
 
 
 class PairEvaluation(BaseModel):
@@ -68,7 +68,6 @@ def _extract_result(mode: str, match: dict | None) -> dict | None:
 
 async def _evaluate_filter_paper(
     *,
-    semaphore: asyncio.Semaphore,
     filter: FilterPayload,
     paper: PaperPayload,
 ) -> PairEvaluation:
@@ -81,25 +80,12 @@ async def _evaluate_filter_paper(
         filter_description=definition.get("description", ""),
         papers_text=paper.prompt_text(),
     )
-    async with semaphore:
-        try:
-            llm_result = await async_call_llm(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                response_model=response_model,
-                profile=JUDGE_PROFILE,
-            )
-        except Exception as exc:
-            return PairEvaluation(
-                filter_id=filter.id,
-                filter_name=filter.name,
-                paper_id=paper.id,
-                paper_title=paper.title,
-                source_type=paper.source_type or "arxiv",
-                source_id=paper.source_id or "",
-                item_id=paper.item_id,
-                error=str(exc),
-            )
+    llm_result = await async_call_llm(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        response_model=response_model,
+        profile=JUDGE_PROFILE,
+    )
 
     matches = llm_result["content"].get("matches", [])
     raw_match = next(
@@ -122,28 +108,48 @@ async def _evaluate_filter_paper(
     )
 
 
+def _pair_error_evaluation(
+    *,
+    filter: FilterPayload,
+    paper: PaperPayload,
+    error: str,
+) -> PairEvaluation:
+    return PairEvaluation(
+        filter_id=filter.id,
+        filter_name=filter.name,
+        paper_id=paper.id,
+        paper_title=paper.title,
+        source_type=paper.source_type or "arxiv",
+        source_id=paper.source_id or "",
+        item_id=paper.item_id,
+        error=error,
+    )
+
+
 async def _evaluate_filter_paper_with_timeout(
     *,
     semaphore: asyncio.Semaphore,
     filter: FilterPayload,
     paper: PaperPayload,
 ) -> PairEvaluation:
-    try:
-        return await asyncio.wait_for(
-            _evaluate_filter_paper(semaphore=semaphore, filter=filter, paper=paper),
-            timeout=PAIR_TIMEOUT_SECONDS,
-        )
-    except asyncio.TimeoutError:
-        return PairEvaluation(
-            filter_id=filter.id,
-            filter_name=filter.name,
-            paper_id=paper.id,
-            paper_title=paper.title,
-            source_type=paper.source_type,
-            source_id=paper.source_id,
-            item_id=paper.item_id,
-            error=f"Timed out after {PAIR_TIMEOUT_SECONDS:g}s",
-        )
+    async with semaphore:
+        try:
+            return await asyncio.wait_for(
+                _evaluate_filter_paper(filter=filter, paper=paper),
+                timeout=PAIR_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            return _pair_error_evaluation(
+                filter=filter,
+                paper=paper,
+                error=f"Timed out after {PAIR_TIMEOUT_SECONDS:g}s",
+            )
+        except Exception as exc:
+            return _pair_error_evaluation(
+                filter=filter,
+                paper=paper,
+                error=str(exc),
+            )
 
 
 async def _evaluate_pairs(
@@ -270,6 +276,7 @@ def run_daily_search(search_run_id: str, job_id: str) -> None:
                                 llm_response_id=evaluation.response_id,
                             )
                         )
+                job.progress = {"current": completed_pairs, "total": pair_total}
                 search_runs.commit_progress(db)
                 pair_progress.update(1)
 

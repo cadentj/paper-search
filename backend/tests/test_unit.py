@@ -1,6 +1,7 @@
 """Backend unit tests."""
 
 import pytest
+from bs4 import BeautifulSoup
 
 from app.utils.html_parser import (
     blocks_to_prompt_text,
@@ -44,6 +45,45 @@ class TestHtmlParser:
         assert 'data-paper-block-id="B000"' in html
         assert 'data-paper-block-id="B001"' in html
         assert 'id="title"' in html
+
+    def test_prepares_viewer_html_preserves_arxiv_chrome(self):
+        source = """
+        <html>
+        <head><title>Paper</title></head>
+        <body>
+            <header class="arxiv-html-header">arXiv header</header>
+            <article>
+                <h1 id="title">A Paper Title With Enough Text</h1>
+                <p id="para1">This paragraph has enough text to become addressable.</p>
+            </article>
+            <div id="beta-badge">BETA</div>
+        </body>
+        </html>
+        """
+        html = prepare_arxiv_html_for_viewer(source)
+
+        assert "arxiv-html-header" in html
+        assert 'id="beta-badge"' in html
+
+    def test_prepares_viewer_html_replaces_existing_base(self):
+        source = """
+        <html>
+        <head><base href="https://r2.example/data/2012/2012.14425.html"></head>
+        <body>
+            <base href="https://r2.example/duplicate-base.html">
+            <p id="para1">This paragraph has enough text to become addressable.</p>
+        </body>
+        </html>
+        """
+        html = prepare_arxiv_html_for_viewer(
+            source,
+            "https://arxiv.org/html/2012.14425",
+        )
+        soup = BeautifulSoup(html, "lxml")
+        bases = soup.select("base")
+
+        assert len(bases) == 1
+        assert bases[0]["href"] == "https://arxiv.org/html/2012.14425"
 
 
 class TestCitationValidation:

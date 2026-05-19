@@ -81,6 +81,7 @@ describe("FiltersPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Active Filter")).toBeInTheDocument();
       expect(screen.getByText(/active \(1\)/i)).toBeInTheDocument();
+      expect(screen.getByText("Claim")).toBeInTheDocument();
     });
 
     const archivedToggle = screen.getByRole("button", {
@@ -93,6 +94,7 @@ describe("FiltersPage", () => {
 
     expect(archivedToggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Archived Filter")).toBeInTheDocument();
+    expect(screen.getByText("Topic")).toBeInTheDocument();
   });
 
   it("shows research context input for generating filters", async () => {
