@@ -158,13 +158,12 @@ function IdeaMapPanel({
   const isSkipped = ideaMap?.status === "skipped";
   const claims = ideaMap?.claims ?? EMPTY_IDEA_MAP_CLAIMS;
   const hasClaims = claims.length > 0;
-  const progressStage = job?.progress?.stage;
   const loadingLabel =
-    progressStage === "claims_running" || ideaMap?.status === "claims_running"
+    ideaMap?.status === "claims_running"
       ? "Finding core claims…"
-      : progressStage === "warrants_running" || ideaMap?.status === "warrants_running"
+      : ideaMap?.status === "warrants_running"
         ? "Finding warrants…"
-        : job?.progress?.message || "Generating idea map…";
+        : "Generating idea map…";
 
   return (
     <div className="w-96 border-r flex flex-col">

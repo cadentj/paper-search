@@ -12,7 +12,7 @@ from app.jobs.documents import process_document
 from app.jobs.queue import get_queue
 from app.models.document import Document
 from app.schemas.documents import DocumentResponse, DocumentUploadResponse
-from app.services.jobs import build_progress, create_job, latest_job_for_subject
+from app.services.jobs import create_job, job_progress, latest_job_for_subject
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -77,12 +77,7 @@ async def upload_document(
         subject_type="document",
         subject_id=document.id,
         status="queued",
-        progress=build_progress(
-            stage="queued",
-            current=0,
-            total=2,
-            message="Queued document processing",
-        ),
+        progress=job_progress(total=2),
     )
     db.commit()
     db.refresh(document)
@@ -99,13 +94,6 @@ async def upload_document(
         job_record.status = "failed"
         job_record.error = document.error
         job_record.completed_at = document.updated_at
-        job_record.progress = build_progress(
-            stage="failed",
-            current=0,
-            total=2,
-            message="Could not enqueue document processing. Is Redis running?",
-            log=(job_record.progress or {}).get("log", []),
-        )
         db.commit()
         raise HTTPException(status_code=503, detail=document.error) from exc
 

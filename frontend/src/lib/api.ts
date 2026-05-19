@@ -58,15 +58,8 @@ export interface OnboardingExtraction {
 }
 
 export interface JobProgress {
-  stage?: string;
   current?: number;
   total?: number;
-  message?: string;
-  log?: {
-    at: string;
-    stage: string;
-    message: string;
-  }[];
   [key: string]: unknown;
 }
 
@@ -83,7 +76,6 @@ export interface Job {
   started_at?: string | null;
   completed_at?: string | null;
   created_at: string;
-  updated_at: string;
 }
 
 export interface JobStartResponse {

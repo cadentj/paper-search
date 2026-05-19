@@ -31,7 +31,7 @@ class TestOnboarding:
         job_id = data["job_id"]
         job = client.get(f"/jobs/{job_id}").json()
         ext_id = job["subject_id"]
-        assert job["progress"]["stage"] in ("queued", "running", "completed", "failed")
+        assert job["status"] in ("queued", "running", "completed", "failed")
 
         ext = client.get(f"/onboarding/extractions/{ext_id}").json()
         assert ext["status"] in ("queued", "running", "completed", "failed")
@@ -159,10 +159,7 @@ class TestSearchRuns:
         assert job_resp.status_code == 200
         job = job_resp.json()
         assert job["status"] == "queued"
-        assert job["progress"]["stage"] == "queued"
-        assert job["progress"]["current"] == 0
-        assert job["progress"]["total"] == 1
-        assert "worker" in job["progress"]["message"]
+        assert job["progress"] == {}
 
         resp = client.get("/search-runs/latest")
         assert resp.status_code == 200

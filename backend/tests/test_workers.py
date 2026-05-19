@@ -264,13 +264,16 @@ class TestRunDailySearch:
         job = _daily_job(db_session, run_id)
         assert job is not None
         assert updated_run.status == "completed"
-        assert job.progress["stage"] == "completed"
         assert updated_run.summary is not None
-        assert updated_run.match_count is not None
+        assert updated_run.match_count == 1
         assert updated_run.candidate_count == len(daily_papers)
         assert job.progress["total"] == len(daily_papers)
-        assert job.progress["current"] == job.progress["total"]
-        assert len(job.progress.get("log", [])) >= 3
+        match_count = (
+            db_session.query(PaperMatch)
+            .filter(PaperMatch.search_run_id == run_id)
+            .count()
+        )
+        assert match_count == updated_run.match_count
 
     def test_ignores_archived_filters(self, db_session, db_engine, monkeypatch):
         from sqlalchemy.orm import sessionmaker
@@ -318,7 +321,6 @@ class TestRunDailySearch:
         job = _daily_job(db_session, run_id)
         assert job is not None
         assert updated_run.status == "completed"
-        assert job.progress["stage"] == "completed"
         assert updated_run.match_count == 0
 
     def test_searches_only_fetched_candidate_papers(self, db_session, db_engine, monkeypatch):
@@ -529,11 +531,14 @@ class TestRunDailySearch:
         job = _daily_job(db_session, run_id)
         assert job is not None
         assert updated_run.status == "completed"
-        assert job.progress["current"] == 2
         assert job.progress["total"] == 2
         assert updated_run.match_count == 1
-        log_msgs = [entry.get("message", "") for entry in job.progress.get("log", [])]
-        assert any("2605.00011" in m or "pair" in m.lower() for m in log_msgs)
+        match_count = (
+            db_session.query(PaperMatch)
+            .filter(PaperMatch.search_run_id == run_id)
+            .count()
+        )
+        assert match_count == 1
 
     def test_all_pair_failures_mark_run_failed(self, db_session, db_engine, monkeypatch):
         from sqlalchemy.orm import sessionmaker
@@ -594,6 +599,4 @@ class TestRunDailySearch:
         job = _daily_job(db_session, run_id)
         assert job is not None
         assert updated_run.status == "failed"
-        assert job.progress["stage"] == "failed"
-        assert job.progress["current"] == 1
         assert job.progress["total"] == 1

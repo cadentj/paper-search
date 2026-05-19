@@ -133,11 +133,6 @@ function DocumentChip({
       >
         {documentStatusLabel(displayDocument.status)}
       </Badge>
-      {job?.progress?.message && isRunning ? (
-        <span className="hidden max-w-36 truncate text-xs text-muted-foreground sm:inline">
-          {job.progress.message}
-        </span>
-      ) : null}
       <Button
         variant="ghost"
         size="icon"
@@ -458,7 +453,11 @@ export default function FiltersPage() {
               <Loader2 className="size-4 animate-spin" />
             ) : null}
             <span>
-              {generationJob.progress?.message || generationJob.status}
+              {generationJob.status === "running"
+                ? "Generating draft filters…"
+                : generationJob.status === "queued"
+                  ? "Queued…"
+                  : generationJob.status}
             </span>
           </CardContent>
         </Card>

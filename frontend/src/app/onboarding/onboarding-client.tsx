@@ -121,11 +121,6 @@ function DocumentChip({
       >
         {documentStatusLabel(displayDocument.status)}
       </Badge>
-      {job?.progress?.message && isRunning ? (
-        <span className="hidden max-w-36 truncate text-xs text-muted-foreground sm:inline">
-          {job.progress.message}
-        </span>
-      ) : null}
       <Button
         variant="ghost"
         size="icon"
@@ -418,7 +413,13 @@ export function OnboardingClient() {
           <Card>
             <CardContent className="flex items-center gap-2 pt-6 text-sm text-muted-foreground">
               {isGenerating ? <Loader2 className="size-4 animate-spin" /> : null}
-              <span>{generationJob.progress?.message || generationJob.status}</span>
+              <span>
+                {generationJob.status === "running"
+                  ? "Generating draft filters…"
+                  : generationJob.status === "queued"
+                    ? "Queued…"
+                    : generationJob.status}
+              </span>
             </CardContent>
           </Card>
         ) : null}

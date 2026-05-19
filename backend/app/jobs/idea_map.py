@@ -12,7 +12,7 @@ from app.db.session import SessionLocal
 from app.models.job import Job
 from app.models.paper import Paper
 from app.models.idea_map import IdeaMap
-from app.services.jobs import build_progress, get_or_create_job_for_subject
+from app.services.jobs import get_or_create_job_for_subject, job_progress, set_job_status
 from app.core.config import LLM_MAX_CONCURRENCY
 from app.services.html_parser import (
     MAX_PROMPT_BLOCKS,
@@ -54,36 +54,6 @@ def _resolve_idea_map_job(db, idea_map_id: str, job_id: str | None) -> Job:
     )
 
 
-def _set_job_progress(
-    job: Job,
-    *,
-    stage: str,
-    current: int,
-    total: int,
-    message: str,
-    status: str | None = None,
-    append_log: bool = True,
-    **extra,
-) -> None:
-    now = datetime.now(timezone.utc)
-    if status:
-        job.status = status
-        if status == "running" and not job.started_at:
-            job.started_at = now
-        if status in {"completed", "failed", "skipped"}:
-            job.completed_at = now
-    job.updated_at = now
-    job.progress = build_progress(
-        stage=stage,
-        current=current,
-        total=total,
-        message=message,
-        log=(job.progress or {}).get("log", []),
-        append_log=append_log,
-        **extra,
-    )
-
-
 def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
     """Worker job: generate idea map from arXiv HTML."""
     db = SessionLocal()
@@ -95,14 +65,7 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
         job = _resolve_idea_map_job(db, idea_map_id, job_id)
         idea_map.status = "running"
         idea_map.updated_at = datetime.now(timezone.utc)
-        _set_job_progress(
-            job,
-            status="running",
-            stage="loading_paper",
-            current=0,
-            total=1,
-            message="Loading paper HTML",
-        )
+        set_job_status(job, status="running")
         db.commit()
 
         paper = db.query(Paper).filter(Paper.id == idea_map.paper_id).first()
@@ -110,14 +73,7 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
             idea_map.status = "skipped"
             idea_map.dropped_reason = "Paper not found or not an arXiv paper with source_id"
             idea_map.updated_at = datetime.now(timezone.utc)
-            _set_job_progress(
-                job,
-                status="skipped",
-                stage="skipped",
-                current=1,
-                total=1,
-                message=idea_map.dropped_reason,
-            )
+            set_job_status(job, status="skipped")
             db.commit()
             return
 
@@ -129,14 +85,7 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
             idea_map.status = "skipped"
             idea_map.dropped_reason = f"HTML not found for {paper.source_id}"
             idea_map.updated_at = datetime.now(timezone.utc)
-            _set_job_progress(
-                job,
-                status="skipped",
-                stage="skipped",
-                current=1,
-                total=1,
-                message=idea_map.dropped_reason,
-            )
+            set_job_status(job, status="skipped")
             db.commit()
             return
 
@@ -145,14 +94,7 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
             idea_map.status = "skipped"
             idea_map.dropped_reason = "HTML could not be parsed into addressable blocks"
             idea_map.updated_at = datetime.now(timezone.utc)
-            _set_job_progress(
-                job,
-                status="skipped",
-                stage="skipped",
-                current=1,
-                total=1,
-                message=idea_map.dropped_reason,
-            )
+            set_job_status(job, status="skipped")
             db.commit()
             return
 
@@ -165,14 +107,6 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
         idea_map.status = "claims_running"
         _set_claims(idea_map, [])
         idea_map.updated_at = datetime.now(timezone.utc)
-        _set_job_progress(
-            job,
-            status="running",
-            stage="claims_running",
-            current=0,
-            total=1,
-            message="Generating core claims",
-        )
         db.commit()
 
         with tqdm(
@@ -220,31 +154,13 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
             idea_map.llm_model = llm_model
             idea_map.llm_response_id = ",".join(response_ids)
             idea_map.updated_at = datetime.now(timezone.utc)
-            _set_job_progress(
-                job,
-                status="completed",
-                stage="completed",
-                current=1,
-                total=1,
-                message="Completed idea map with 0 claims",
-                claims=0,
-                warrants=0,
-            )
+            set_job_status(job, status="completed")
             db.commit()
             return
 
         idea_map.status = "warrants_running"
         idea_map.updated_at = datetime.now(timezone.utc)
-        _set_job_progress(
-            job,
-            status="running",
-            stage="warrants_running",
-            current=0,
-            total=len(claims),
-            message=f"Generating warrants for {len(claims)} claims",
-            claims=len(claims),
-            warrants=_count_warrants(idea_map.claims),
-        )
+        job.progress = job_progress(total=len(claims))
         db.commit()
 
         warrant_queue: Queue[tuple[str, list[dict]]] = Queue()
@@ -363,19 +279,6 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
                             claim.get("id", ""),
                         )
                     warrants_progress.update(1)
-                    _set_job_progress(
-                        job,
-                        status="running",
-                        stage="warrants_running",
-                        current=warrants_progress.n,
-                        total=len(claims),
-                        message=f"Generated warrants for {warrants_progress.n}/{len(claims)} claims",
-                        append_log=False,
-                        claims=len(claims),
-                        valid_warrants=valid_warrant_count,
-                        rejected_warrants=rejected_warrant_count,
-                        failures=warrant_failures,
-                    )
                     db.commit()
                     _set_warrant_progress(
                         warrants_progress,
@@ -434,18 +337,7 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
         idea_map.llm_response_id = ",".join(response_ids)
         idea_map.status = "completed"
         idea_map.updated_at = datetime.now(timezone.utc)
-        _set_job_progress(
-            job,
-            status="completed",
-            stage="completed",
-            current=len(claims),
-            total=len(claims),
-            message=f"Completed idea map with {len(claims)} claims",
-            claims=len(idea_map.claims or []),
-            warrants=_count_warrants(idea_map.claims),
-            rejected_warrants=rejected_warrant_count,
-            failures=warrant_failures,
-        )
+        set_job_status(job, status="completed")
         db.commit()
 
     except Exception as e:
@@ -456,15 +348,7 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
             idea_map.error = str(e)
             idea_map.updated_at = datetime.now(timezone.utc)
             job = _resolve_idea_map_job(db, idea_map_id, job_id)
-            _set_job_progress(
-                job,
-                status="failed",
-                stage="failed",
-                current=(job.progress or {}).get("current", 0),
-                total=(job.progress or {}).get("total", 1),
-                message=f"Idea map generation failed: {e}",
-            )
-            job.error = idea_map.error
+            set_job_status(job, status="failed", error=idea_map.error)
             db.commit()
         raise
     finally:

@@ -10,11 +10,8 @@ from app.schemas.search import PaperMatchResponse, SearchRunResponse
 
 
 class JobProgress(BaseModel):
-    stage: str = "queued"
     current: int = 0
     total: int = 1
-    message: str = "Queued"
-    log: list[dict] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="allow")
 
@@ -32,7 +29,6 @@ class JobResponse(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     created_at: datetime
-    updated_at: datetime
 
     model_config = {"from_attributes": True}
 

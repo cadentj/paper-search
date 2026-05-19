@@ -12,7 +12,7 @@ from app.schemas.papers import PaperResponse, IdeaMapResponse
 from app.schemas.jobs import JobStartResponse
 from app.jobs.queue import get_queue
 from app.jobs.idea_map import generate_idea_map
-from app.services.jobs import build_progress, create_job, latest_job_for_subject
+from app.services.jobs import create_job, latest_job_for_subject
 from app.services.source_providers import provider_for
 
 router = APIRouter(prefix="/papers", tags=["papers"])
@@ -61,12 +61,6 @@ def create_or_get_idea_map(paper_id: str, db: Session = Depends(get_db)):
                     subject_type="idea_map",
                     subject_id=existing.id,
                     status=existing.status,
-                    progress=build_progress(
-                        stage=existing.status,
-                        current=0,
-                        total=1,
-                        message=f"Idea map is {existing.status}",
-                    ),
                 )
                 db.commit()
                 db.refresh(job)
@@ -83,12 +77,6 @@ def create_or_get_idea_map(paper_id: str, db: Session = Depends(get_db)):
             subject_type="idea_map",
             subject_id=existing.id,
             status="queued",
-            progress=build_progress(
-                stage="queued",
-                current=0,
-                total=1,
-                message="Queued, waiting for worker",
-            ),
         )
         db.commit()
         db.refresh(existing)
@@ -110,12 +98,6 @@ def create_or_get_idea_map(paper_id: str, db: Session = Depends(get_db)):
         subject_type="idea_map",
         subject_id=idea_map.id,
         status="queued",
-        progress=build_progress(
-            stage="queued",
-            current=0,
-            total=1,
-            message="Queued, waiting for worker",
-        ),
     )
     db.commit()
     db.refresh(idea_map)
@@ -139,13 +121,6 @@ def _enqueue_idea_map(idea_map: IdeaMap, db: Session, job_record) -> JobStartRes
         job_record.status = "failed"
         job_record.error = idea_map.error
         job_record.completed_at = idea_map.updated_at
-        job_record.progress = build_progress(
-            stage="failed",
-            current=0,
-            total=1,
-            message="Could not enqueue idea map generation. Is Redis running?",
-            log=(job_record.progress or {}).get("log", []),
-        )
         db.commit()
         raise HTTPException(status_code=503, detail=idea_map.error) from exc
 

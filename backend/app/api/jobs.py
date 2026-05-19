@@ -24,10 +24,8 @@ from app.schemas.jobs import (
     OnboardingGenerationJobResponse,
 )
 from app.schemas.search import PaperMatchResponse
-
-
 router = APIRouter(prefix="/jobs", tags=["jobs"])
-DONE_STATUSES = {"completed", "failed"}
+DONE_STATUSES = {"completed", "failed", "skipped"}
 
 
 @router.get("/{job_id}", response_model=JobResponse)
@@ -55,6 +53,68 @@ def _serialize_job(job: Job) -> JobResponse:
     return job.to_pydantic()
 
 
+def _with_progress(job: Job, **fields) -> JobResponse:
+    response = job.to_pydantic()
+    progress = dict(response.progress or {})
+    progress.update(fields)
+    response.progress = progress
+    return response
+
+
+def _serialize_daily_search_job(db: Session, job: Job, run: SearchRun) -> JobResponse:
+    stored = dict((job.progress or {}))
+    match_count = db.query(PaperMatch).filter(PaperMatch.search_run_id == run.id).count()
+    return _with_progress(
+        job,
+        current=match_count,
+        total=stored.get("total", max(match_count, 1)),
+    )
+
+
+def _draft_filters_for_generation(db: Session, job_id: str) -> list[Filter]:
+    return [
+        filt
+        for filt in db.query(Filter)
+        .filter(Filter.status == "draft")
+        .order_by(Filter.created_at.asc(), Filter.id.asc())
+        .all()
+        if (filt.definition or {}).get("onboarding_generation_job_id") == job_id
+    ]
+
+
+def _serialize_onboarding_generation_job(db: Session, job: Job) -> JobResponse:
+    count = len(_draft_filters_for_generation(db, job.id))
+    return _with_progress(job, current=count, total=max(count, 1))
+
+
+def _serialize_onboarding_extraction_job(
+    db: Session,
+    job: Job,
+    extraction: OnboardingExtraction,
+) -> JobResponse:
+    count = len(extraction.proposed_filters or [])
+    return _with_progress(job, current=count, total=max(count, 1))
+
+
+def _serialize_idea_map_job(db: Session, job: Job, idea_map: IdeaMap) -> JobResponse:
+    claims = list(idea_map.claims or [])
+    claim_count = len(claims)
+    stored_total = (job.progress or {}).get("total")
+    if idea_map.status == "warrants_running" and stored_total:
+        return _with_progress(job, current=claim_count, total=int(stored_total))
+    return _with_progress(job, current=claim_count, total=max(claim_count, 1))
+
+
+def _serialize_document_job(job: Job, document: Document) -> JobResponse:
+    if document.status in {"ready", "needs_ocr", "failed"}:
+        current, total = 2, 2
+    elif document.status == "processing":
+        current, total = 1, 2
+    else:
+        current, total = 0, 2
+    return _with_progress(job, current=current, total=total)
+
+
 def _encode_cursor(value: datetime, item_id: str) -> str:
     payload = {"at": value.isoformat(), "id": item_id}
     raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
@@ -75,12 +135,17 @@ def _decode_cursor(cursor: str | None) -> tuple[datetime, str] | None:
         raise HTTPException(status_code=400, detail="Invalid cursor") from exc
 
 
-def _apply_cursor(query, model, column, cursor: str | None):
+def _apply_cursor(items: list, cursor: str | None):
     decoded = _decode_cursor(cursor)
     if not decoded:
-        return query
+        return items
     value, item_id = decoded
-    return query.filter(or_(column > value, and_(column == value, model.id > item_id)))
+    return [
+        item
+        for item in items
+        if item.created_at > value
+        or (item.created_at == value and item.id > item_id)
+    ]
 
 
 def _paper_match_response(db: Session, match: PaperMatch) -> PaperMatchResponse:
@@ -100,19 +165,20 @@ def get_daily_search_job(
     if not run:
         raise HTTPException(status_code=404, detail="Search run not found")
 
-    query = db.query(PaperMatch).filter(PaperMatch.search_run_id == run.id)
-    matches = (
-        _apply_cursor(query, PaperMatch, PaperMatch.created_at, cursor)
+    all_matches = (
+        db.query(PaperMatch)
+        .filter(PaperMatch.search_run_id == run.id)
         .order_by(PaperMatch.created_at.asc(), PaperMatch.id.asc())
         .all()
     )
+    matches = _apply_cursor(all_matches, cursor)
     next_cursor = cursor
     if matches:
         latest = matches[-1]
         next_cursor = _encode_cursor(latest.created_at, latest.id)
 
     return DailySearchJobResponse(
-        job=_serialize_job(job),
+        job=_serialize_daily_search_job(db, job, run),
         subject=run.to_pydantic(job_id=job.id),
         items=[_paper_match_response(db, match) for match in matches],
         next_cursor=next_cursor,
@@ -127,7 +193,7 @@ def get_idea_map_job(job_id: str, db: Session = Depends(get_db)):
     if not idea_map:
         raise HTTPException(status_code=404, detail="Idea map not found")
     return IdeaMapJobResponse(
-        job=_serialize_job(job),
+        job=_serialize_idea_map_job(db, job, idea_map),
         subject=idea_map.to_pydantic(job_id=job.id),
         items=[],
         next_cursor=None,
@@ -145,23 +211,14 @@ def get_onboarding_generation_job(
     db: Session = Depends(get_db),
 ):
     job = _get_job(db, job_id, "onboarding_generation")
-    filter_ids = (job.progress or {}).get("filter_ids") or []
-    query = (
-        db.query(Filter).filter(Filter.id.in_(filter_ids))
-        if filter_ids
-        else db.query(Filter).filter(Filter.id == "__no_filters__")
-    )
-    filters = (
-        _apply_cursor(query, Filter, Filter.created_at, cursor)
-        .order_by(Filter.created_at.asc(), Filter.id.asc())
-        .all()
-    )
+    all_filters = _draft_filters_for_generation(db, job.id)
+    filters = _apply_cursor(all_filters, cursor)
     next_cursor = cursor
     if filters:
         latest = filters[-1]
         next_cursor = _encode_cursor(latest.created_at, latest.id)
     return OnboardingGenerationJobResponse(
-        job=_serialize_job(job),
+        job=_serialize_onboarding_generation_job(db, job),
         subject=_serialize_job(job),
         items=[item.to_pydantic() for item in filters],
         next_cursor=next_cursor,
@@ -181,7 +238,7 @@ def get_onboarding_extraction_job(job_id: str, db: Session = Depends(get_db)):
     if not extraction:
         raise HTTPException(status_code=404, detail="Extraction not found")
     return OnboardingExtractionJobResponse(
-        job=_serialize_job(job),
+        job=_serialize_onboarding_extraction_job(db, job, extraction),
         subject=extraction.to_pydantic(job_id=job.id),
         items=[],
         next_cursor=None,
@@ -199,7 +256,7 @@ def get_document_processing_job(job_id: str, db: Session = Depends(get_db)):
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     return DocumentProcessingJobResponse(
-        job=_serialize_job(job),
+        job=_serialize_document_job(job, document),
         subject=document.to_pydantic(job_id=job.id),
         items=[],
         next_cursor=None,

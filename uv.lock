@@ -634,6 +634,16 @@ wheels = [
 name = "paper-search"
 version = "0.1.0"
 source = { virtual = "." }
+dependencies = [
+    { name = "paper-search-backend" },
+    { name = "paper-search-core" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "paper-search-backend", editable = "backend" },
+    { name = "paper-search-core", editable = "core" },
+]
 
 [[package]]
 name = "paper-search-backend"

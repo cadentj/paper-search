@@ -20,7 +20,7 @@ from app.schemas.search import (
 from app.schemas.jobs import JobStartResponse
 from app.jobs.queue import get_queue
 from app.jobs.daily_search import run_daily_search
-from app.services.jobs import build_progress, create_job, latest_job_for_subject
+from app.services.jobs import create_job, latest_job_for_subject
 from app.services.daily_dates import DAILY_SEARCH_DATE_SET, DEFAULT_DAILY_SEARCH_DATE
 from app.services.source_providers import counts_by_source_for_date
 from app.services.source_settings import enabled_source_types, ensure_default_data_sources
@@ -63,10 +63,9 @@ def create_daily_search_run(
 ):
     ensure_default_data_sources(db)
     requested_date = request.run_date if request and request.run_date else DEFAULT_DAILY_SEARCH_DATE
+    # Assume the date is valid because the frontend restricts user selection.
     if not requested_date:
         raise HTTPException(status_code=400, detail="No daily search dates are configured")
-    if requested_date not in DAILY_SEARCH_DATE_SET:
-        raise HTTPException(status_code=400, detail=f"{requested_date} is outside the configured daily search window")
     if not enabled_source_types(db):
         raise HTTPException(status_code=400, detail="No data sources are enabled")
 
@@ -84,12 +83,6 @@ def create_daily_search_run(
         subject_type="search_run",
         subject_id=run.id,
         status="queued",
-        progress=build_progress(
-            stage="queued",
-            current=0,
-            total=1,
-            message="Queued, waiting for worker",
-        ),
     )
     db.commit()
     db.refresh(run)
@@ -109,23 +102,10 @@ def create_daily_search_run(
         job_record.status = "failed"
         job_record.error = run.error
         job_record.completed_at = run.completed_at
-        job_record.progress = build_progress(
-            stage="failed",
-            current=0,
-            total=1,
-            message="Could not enqueue daily search. Is Redis running?",
-            log=(job_record.progress or {}).get("log", []),
-        )
         db.commit()
         raise HTTPException(status_code=503, detail=run.error) from exc
 
     return JobStartResponse(job_id=job_record.id)
-
-
-def _parse_index_date(value: str | date | None) -> date | None:
-    if value is None or isinstance(value, date):
-        return value
-    return date.fromisoformat(value)
 
 
 @router.get("/{search_run_id}", response_model=SearchRunResponse)

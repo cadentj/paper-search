@@ -2,7 +2,14 @@
 name = "paper-search"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "paper-search-core",
+    "paper-search-backend",
+]
 
 [tool.uv.workspace]
 members = ["core", "backend", "scripts"]
+
+[tool.uv.sources]
+paper-search-core = { workspace = true }
+paper-search-backend = { workspace = true }

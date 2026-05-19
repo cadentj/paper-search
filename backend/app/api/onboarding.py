@@ -21,7 +21,7 @@ from app.schemas.filters import FilterResponse
 from app.schemas.jobs import JobStartResponse
 from app.jobs.queue import get_queue
 from app.jobs.onboarding import extract_onboarding_filters, generate_onboarding_draft_filters
-from app.services.jobs import build_progress, create_job, latest_job_for_subject
+from app.services.jobs import create_job, latest_job_for_subject
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
 logger = logging.getLogger(__name__)
@@ -52,13 +52,6 @@ def create_generation(body: OnboardingGenerationCreate, db: Session = Depends(ge
         kind="onboarding_generation",
         subject_type="onboarding_generation",
         status="queued",
-        progress=build_progress(
-            stage="queued",
-            current=0,
-            total=1,
-            message="Queued onboarding generation",
-            requested_documents=len(body.document_ids),
-        ),
     )
     db.flush()
     job_record.subject_id = job_record.id
@@ -81,14 +74,6 @@ def create_generation(body: OnboardingGenerationCreate, db: Session = Depends(ge
         job_record.status = "failed"
         job_record.error = f"Could not enqueue onboarding generation: {exc}"
         job_record.completed_at = now
-        job_record.updated_at = now
-        job_record.progress = build_progress(
-            stage="failed",
-            current=0,
-            total=1,
-            message="Could not enqueue onboarding generation. Is Redis running?",
-            log=(job_record.progress or {}).get("log", []),
-        )
         db.commit()
         raise HTTPException(status_code=503, detail=job_record.error) from exc
 
@@ -139,12 +124,6 @@ def create_extraction(body: OnboardingExtractionCreate, db: Session = Depends(ge
         subject_type="onboarding_extraction",
         subject_id=extraction.id,
         status="queued",
-        progress=build_progress(
-            stage="queued",
-            current=0,
-            total=1,
-            message="Queued, waiting for worker",
-        ),
     )
     db.commit()
     db.refresh(extraction)
@@ -168,13 +147,6 @@ def create_extraction(body: OnboardingExtractionCreate, db: Session = Depends(ge
         job_record.status = "failed"
         job_record.error = extraction.error
         job_record.completed_at = extraction.updated_at
-        job_record.progress = build_progress(
-            stage="failed",
-            current=0,
-            total=1,
-            message="Could not enqueue onboarding extraction. Is Redis running?",
-            log=(job_record.progress or {}).get("log", []),
-        )
         db.commit()
         raise HTTPException(status_code=503, detail=extraction.error) from exc
 

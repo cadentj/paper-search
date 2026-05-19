@@ -13,40 +13,11 @@ from app.llm.prompts import DOCUMENT_SUMMARY_SYSTEM_PROMPT, DOCUMENT_SUMMARY_USE
 from app.llm.schemas import DocumentSummaryResponse
 from app.models.document import Document
 from app.models.job import Job
-from app.services.jobs import build_progress
+from app.services.jobs import set_job_status
 
 
 def _now():
     return datetime.now(timezone.utc)
-
-
-def _update_job(
-    db,
-    job: Job,
-    *,
-    status: str,
-    stage: str,
-    current: int,
-    total: int,
-    message: str,
-    error: str | None = None,
-) -> None:
-    now = _now()
-    job.status = status
-    job.updated_at = now
-    if status == "running" and job.started_at is None:
-        job.started_at = now
-    if status in {"completed", "failed"}:
-        job.completed_at = now
-    if error is not None:
-        job.error = error
-    job.progress = build_progress(
-        stage=stage,
-        current=current,
-        total=total,
-        message=message,
-        log=(job.progress or {}).get("log", []),
-    )
 
 
 def _extract_text(path: Path) -> str:
@@ -67,15 +38,7 @@ def process_document(document_id: str, job_id: str) -> None:
 
         document.status = "processing"
         document.updated_at = _now()
-        _update_job(
-            db,
-            job,
-            status="running",
-            stage="extracting_text",
-            current=0,
-            total=2,
-            message="Extracting PDF text",
-        )
+        set_job_status(job, status="running")
         db.commit()
 
         pdf_path = Path(document.storage_path)
@@ -93,27 +56,10 @@ def process_document(document_id: str, job_id: str) -> None:
         if len(text) < settings.DOCUMENT_MIN_TEXT_CHARS:
             document.status = "needs_ocr"
             document.error = "No usable embedded PDF text found."
-            _update_job(
-                db,
-                job,
-                status="completed",
-                stage="needs_ocr",
-                current=1,
-                total=1,
-                message="PDF needs OCR before it can be used",
-            )
+            set_job_status(job, status="completed")
             db.commit()
             return
 
-        _update_job(
-            db,
-            job,
-            status="running",
-            stage="summarizing",
-            current=1,
-            total=2,
-            message="Summarizing document",
-        )
         db.commit()
 
         summary_input = text[: settings.DOCUMENT_SUMMARY_MAX_CHARS]
@@ -138,15 +84,7 @@ def process_document(document_id: str, job_id: str) -> None:
         document.status = "ready"
         document.error = None
         document.updated_at = _now()
-        _update_job(
-            db,
-            job,
-            status="completed",
-            stage="completed",
-            current=2,
-            total=2,
-            message="Document ready",
-        )
+        set_job_status(job, status="completed")
         db.commit()
     except Exception as exc:
         db.rollback()
@@ -158,16 +96,7 @@ def process_document(document_id: str, job_id: str) -> None:
             document.error = str(exc)
             document.updated_at = now
         if job:
-            _update_job(
-                db,
-                job,
-                status="failed",
-                stage="failed",
-                current=(job.progress or {}).get("current", 0),
-                total=(job.progress or {}).get("total", 1),
-                message=f"Document processing failed: {exc}",
-                error=str(exc),
-            )
+            set_job_status(job, status="failed", error=str(exc))
         db.commit()
         raise
     finally:

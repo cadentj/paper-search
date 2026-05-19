@@ -9,7 +9,7 @@ from app.models.document import Document
 from app.models.filter import Filter
 from app.models.job import Job
 from app.models.onboarding_extraction import OnboardingExtraction
-from app.services.jobs import build_progress, get_or_create_job_for_subject
+from app.services.jobs import get_or_create_job_for_subject, set_job_status
 from app.llm.client import stream_structured_response
 from app.llm.config import FILTER_GENERATION_PROFILE
 from app.llm.prompts import (
@@ -139,23 +139,10 @@ def generate_onboarding_draft_filters(
         if not job:
             return
 
-        now = datetime.now(timezone.utc)
-        summaries = _document_summaries(db, document_ids)
-        job.status = "running"
-        job.started_at = now
-        job.updated_at = now
-        job.progress = build_progress(
-            stage="generating_filters",
-            current=0,
-            total=1,
-            message="Generating draft filters",
-            log=(job.progress or {}).get("log", []),
-            ready_documents=len(summaries),
-            requested_documents=len(document_ids),
-            filter_ids=[],
-        )
+        set_job_status(job, status="running")
         db.commit()
 
+        summaries = _document_summaries(db, document_ids)
         user_prompt = ONBOARDING_WITH_DOCUMENTS_USER_PROMPT.format(
             input_text=input_text or "(No additional text provided.)",
             document_summaries="\n\n".join(summaries)
@@ -165,10 +152,9 @@ def generate_onboarding_draft_filters(
         text_buffer = ""
         last_count = 0
         created_llm_ids: set[str] = set()
-        created_filter_ids: list[str] = []
 
         def create_new_filters(parsed_filters: list[dict]) -> None:
-            nonlocal last_count, created_filter_ids
+            nonlocal last_count
             new_items = []
             for raw in parsed_filters:
                 llm_id = raw.get("id") or str(uuid.uuid4())
@@ -181,23 +167,9 @@ def generate_onboarding_draft_filters(
                 return
 
             for raw in new_items:
-                filt = _create_draft_filter(db, raw, job_id)
-                db.flush()
-                created_filter_ids.append(filt.id)
-            last_count = len(created_filter_ids)
-            job.progress = build_progress(
-                stage="generating_filters",
-                current=last_count,
-                total=max(last_count, 1),
-                message=f"Generated {last_count} draft filters",
-                log=(job.progress or {}).get("log", []),
-                append_log=False,
-                ready_documents=len(summaries),
-                requested_documents=len(document_ids),
-                filter_ids=created_filter_ids,
-            )
-            job.updated_at = datetime.now(timezone.utc)
+                _create_draft_filter(db, raw, job_id)
             db.commit()
+            last_count = len(parsed_filters)
 
         def handle_delta(delta: str) -> None:
             nonlocal text_buffer
@@ -218,38 +190,13 @@ def generate_onboarding_draft_filters(
         proposed = result["content"].get("proposedFilters", [])
         create_new_filters([_normalize_filter(f) or f for f in proposed])
 
-        final_count = len(created_filter_ids)
-        completed_at = datetime.now(timezone.utc)
-        job.status = "completed"
-        job.completed_at = completed_at
-        job.updated_at = completed_at
-        job.progress = build_progress(
-            stage="completed",
-            current=final_count,
-            total=max(final_count, 1),
-            message=f"Generated {final_count} draft filters",
-            log=(job.progress or {}).get("log", []),
-            ready_documents=len(summaries),
-            requested_documents=len(document_ids),
-            filter_ids=created_filter_ids,
-        )
+        set_job_status(job, status="completed")
         db.commit()
     except Exception as e:
         db.rollback()
         job = db.query(Job).filter(Job.id == job_id).first()
         if job:
-            now = datetime.now(timezone.utc)
-            job.status = "failed"
-            job.error = str(e)
-            job.completed_at = now
-            job.updated_at = now
-            job.progress = build_progress(
-                stage="failed",
-                current=(job.progress or {}).get("current", 0),
-                total=(job.progress or {}).get("total", 1),
-                message=f"Onboarding generation failed: {e}",
-                log=(job.progress or {}).get("log", []),
-            )
+            set_job_status(job, status="failed", error=str(e))
             db.commit()
         raise
     finally:
@@ -270,16 +217,7 @@ def extract_onboarding_filters(extraction_id: str, job_id: str | None = None) ->
         now = datetime.now(timezone.utc)
         extraction.status = "running"
         extraction.updated_at = now
-        job.status = "running"
-        job.started_at = now
-        job.updated_at = now
-        job.progress = build_progress(
-            stage="extracting_filters",
-            current=0,
-            total=1,
-            message="Extracting proposed filters",
-            log=(job.progress or {}).get("log", []),
-        )
+        set_job_status(job, status="running")
         db.commit()
 
         user_prompt = ONBOARDING_USER_PROMPT.format(input_text=extraction.input_text)
@@ -297,16 +235,6 @@ def extract_onboarding_filters(extraction_id: str, job_id: str | None = None) ->
             extraction.proposed_filters = _merge_filters(current, parsed_filters)
             extraction.updated_at = datetime.now(timezone.utc)
             last_count = len(parsed_filters)
-            job.progress = build_progress(
-                stage="extracting_filters",
-                current=last_count,
-                total=max(last_count, 1),
-                message=f"Extracted {last_count} proposed filters",
-                log=(job.progress or {}).get("log", []),
-                append_log=False,
-                filters_found=last_count,
-            )
-            job.updated_at = extraction.updated_at
             db.commit()
 
         result = stream_structured_response(
@@ -333,18 +261,8 @@ def extract_onboarding_filters(extraction_id: str, job_id: str | None = None) ->
         extraction.status = "completed"
         extraction.completed_at = datetime.now(timezone.utc)
         extraction.updated_at = datetime.now(timezone.utc)
-        final_count = len(extraction.proposed_filters or [])
-        job.status = "completed"
         job.completed_at = extraction.completed_at
-        job.updated_at = extraction.updated_at
-        job.progress = build_progress(
-            stage="completed",
-            current=final_count,
-            total=max(final_count, 1),
-            message=f"Completed onboarding extraction with {final_count} filters",
-            log=(job.progress or {}).get("log", []),
-            filters_found=final_count,
-        )
+        set_job_status(job, status="completed")
         db.commit()
 
     except Exception as e:
@@ -358,17 +276,7 @@ def extract_onboarding_filters(extraction_id: str, job_id: str | None = None) ->
             extraction.error = str(e)
             extraction.updated_at = now
             job = _resolve_onboarding_job(db, extraction_id, job_id)
-            job.status = "failed"
-            job.error = extraction.error
-            job.completed_at = now
-            job.updated_at = now
-            job.progress = build_progress(
-                stage="failed",
-                current=(job.progress or {}).get("current", 0),
-                total=(job.progress or {}).get("total", 1),
-                message=f"Onboarding extraction failed: {e}",
-                log=(job.progress or {}).get("log", []),
-            )
+            set_job_status(job, status="failed", error=extraction.error)
             db.commit()
         raise
     finally:

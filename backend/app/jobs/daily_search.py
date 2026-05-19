@@ -13,7 +13,7 @@ from app.models.paper_match import PaperMatch
 from app.models.search_run import SearchRun
 from app.models.search_run_paper import SearchRunPaper
 from app.models.job import Job
-from app.services.jobs import build_progress, get_or_create_job_for_subject
+from app.services.jobs import get_or_create_job_for_subject, job_progress, set_job_status
 from app.services.source_providers import candidates_for_sources
 from app.services.source_settings import enabled_source_types
 from app.llm.client import async_call_llm, call_llm
@@ -68,46 +68,18 @@ def _build_matches_text(matches: list[dict]) -> str:
     return "\n---\n".join(lines)
 
 
-def _append_progress_log(job: Job, stage: str, message: str) -> None:
-    progress = job.progress or {}
-    job.progress = build_progress(
-        stage=progress.get("stage", stage),
-        current=progress.get("current", 0),
-        total=progress.get("total", 1),
-        message=progress.get("message", message),
-        log=progress.get("log", []),
-        append_log=True,
-    )
-
-
-def _set_progress(
+def _set_run_status(
     db,
     run: SearchRun,
     job: Job,
     *,
-    stage: str,
-    current: int,
-    total: int,
-    message: str,
-    status: str | None = None,
+    status: str,
+    error: str | None = None,
 ) -> None:
-    logger.info("daily_search run=%s stage=%s %s", run.id, stage, message)
-    now = datetime.now(timezone.utc)
-    if status:
-        run.status = status
-        job.status = status
-        if status == "running" and not job.started_at:
-            job.started_at = now
-        if status in {"completed", "failed", "skipped"}:
-            job.completed_at = now
-    job.updated_at = now
-    job.progress = build_progress(
-        stage=stage,
-        current=current,
-        total=total,
-        message=message,
-        log=(job.progress or {}).get("log", []),
-    )
+    run.status = status
+    if error is not None:
+        run.error = error
+    set_job_status(job, status=status, error=error)
     db.commit()
 
 
@@ -124,36 +96,10 @@ def _resolve_daily_search_job(db, search_run_id: str, job_id: str | None) -> Job
     )
 
 
-def _set_pair_progress(
-    progress: tqdm,
-    *,
-    completed: int,
-    matched: int,
-    irrelevant: int,
-    failed: int,
-) -> None:
-    progress.set_postfix(
-        done=completed,
-        matched=matched,
-        irrelevant=irrelevant,
-        failed=failed,
-    )
-
-
-def _link_candidate_papers(db, run: SearchRun, job: Job | None = None) -> list[Paper]:
+def _link_candidate_papers(db, run: SearchRun) -> list[Paper]:
     now = datetime.now(timezone.utc)
     active_sources = enabled_source_types(db)
     fetch_result = candidates_for_sources(active_sources, run.run_date)
-    if job:
-        for error in fetch_result.errors:
-            _append_progress_log(job, "fetching_items", error)
-        for stype, count in sorted(fetch_result.skipped_missing_text.items()):
-            if count:
-                _append_progress_log(
-                    job,
-                    "fetching_items",
-                    f"skipped_missing_text[{stype}]={count} (no excerpt in index shard)",
-                )
     if active_sources and fetch_result.errors and not fetch_result.papers:
         raise RuntimeError("; ".join(fetch_result.errors))
 
@@ -345,36 +291,18 @@ def run_daily_search(search_run_id: str, job_id: str | None = None) -> None:
         if not run:
             return
         job = _resolve_daily_search_job(db, search_run_id, job_id)
-        job.started_at = datetime.now(timezone.utc)
-
         run.started_at = datetime.now(timezone.utc)
-        _set_progress(
-            db,
-            run,
-            job,
-            stage="fetching_items",
-            current=0,
-            total=1,
-            message=f"Selecting items for {run.run_date.isoformat()}",
-            status="running",
-        )
+        set_job_status(job, status="running")
+        db.commit()
 
-        papers = _link_candidate_papers(db, run, job)
-        _set_progress(
-            db,
-            run,
-            job,
-            stage="fetching_items",
-            current=1,
-            total=1,
-            message=f"Selected {len(papers)} items",
-            status="running",
-        )
+        papers = _link_candidate_papers(db, run)
 
         active_filters = db.query(Filter).filter(Filter.status == "active").all()
         filter_payloads = [f.to_search_payload() for f in active_filters]
         paper_payloads = [p.to_search_payload() for p in papers]
         pair_total = len(filter_payloads) * len(paper_payloads)
+        job.progress = job_progress(total=pair_total)
+        db.commit()
 
         if not filter_payloads or not paper_payloads:
             run.candidate_count = len(papers)
@@ -385,57 +313,31 @@ def run_daily_search(search_run_id: str, job_id: str | None = None) -> None:
                 else "No items were available for this daily search."
             )
             run.completed_at = datetime.now(timezone.utc)
-            _set_progress(
-                db,
-                run,
-                job,
-                stage="completed",
-                current=max(pair_total, 1),
-                total=max(pair_total, 1),
-                message=run.summary,
-                status="completed",
-            )
+            _set_run_status(db, run, job, status="completed")
             return
 
         all_match_info = []
         completed_pairs = 0
         failed_pairs = 0
-        matched_pairs = 0
-        irrelevant_pairs = 0
         first_pair_error = ""
 
-        _set_progress(
-            db,
-            run,
-            job,
-            stage="matching_filters",
-            current=0,
-            total=pair_total,
-            message=f"Evaluating 0/{pair_total} filter-item pairs",
-            status="running",
-        )
-
         async def handle_pair_result(evaluation: PairEvaluation) -> None:
-            nonlocal completed_pairs, failed_pairs, matched_pairs
-            nonlocal irrelevant_pairs, first_pair_error
+            nonlocal completed_pairs, failed_pairs, first_pair_error
             completed_pairs += 1
 
             if evaluation.error:
                 failed_pairs += 1
                 if not first_pair_error:
                     first_pair_error = evaluation.error
-                message = (
+                tqdm.write(
                     f"Pair {completed_pairs}/{pair_total} failed: "
                     f"{evaluation.filter_name} x {evaluation.item_id}: "
                     f"{evaluation.error}"
                 )
-                _append_progress_log(job, "matching_filters", message)
-                tqdm.write(message)
             else:
                 match_data = evaluation.result or {}
                 result_text = str(match_data.get("result") or "").strip()
                 if result_text:
-                    matched_pairs += 1
                     match = PaperMatch(
                         id=str(uuid.uuid4()),
                         search_run_id=search_run_id,
@@ -455,26 +357,8 @@ def run_daily_search(search_run_id: str, job_id: str | None = None) -> None:
                         "filter_name": evaluation.filter_name,
                         "result": match.result,
                     })
-                else:
-                    irrelevant_pairs += 1
-
-            job.progress = build_progress(
-                stage="matching_filters",
-                current=completed_pairs,
-                total=pair_total,
-                message=f"Evaluated {completed_pairs}/{pair_total} filter-item pairs",
-                log=(job.progress or {}).get("log", []),
-                append_log=False,
-            )
             db.commit()
             pair_progress.update(1)
-            _set_pair_progress(
-                pair_progress,
-                completed=completed_pairs,
-                matched=matched_pairs,
-                irrelevant=irrelevant_pairs,
-                failed=failed_pairs,
-            )
 
         with tqdm(
             total=pair_total,
@@ -483,13 +367,6 @@ def run_daily_search(search_run_id: str, job_id: str | None = None) -> None:
             dynamic_ncols=True,
             disable=None,
         ) as pair_progress:
-            _set_pair_progress(
-                pair_progress,
-                completed=completed_pairs,
-                matched=matched_pairs,
-                irrelevant=irrelevant_pairs,
-                failed=failed_pairs,
-            )
             asyncio.run(
                 _evaluate_pairs(
                     filters=filter_payloads,
@@ -504,16 +381,6 @@ def run_daily_search(search_run_id: str, job_id: str | None = None) -> None:
             )
 
         match_count = len(all_match_info)
-        _set_progress(
-            db,
-            run,
-            job,
-            stage="summarizing",
-            current=pair_total,
-            total=pair_total,
-            message=f"Summarizing {match_count} visible matches",
-            status="running",
-        )
 
         if all_match_info:
             matches_text = _build_matches_text(all_match_info)
@@ -537,16 +404,7 @@ def run_daily_search(search_run_id: str, job_id: str | None = None) -> None:
         run.summary = summary_data.get("summary", "")
         run.summary_citations = summary_data.get("citations", [])
         run.completed_at = datetime.now(timezone.utc)
-        _set_progress(
-            db,
-            run,
-            job,
-            stage="completed",
-            current=pair_total,
-            total=pair_total,
-            message=f"Completed daily search with {match_count} matches",
-            status="completed",
-        )
+        _set_run_status(db, run, job, status="completed")
 
     except Exception as e:
         db.rollback()
@@ -556,18 +414,7 @@ def run_daily_search(search_run_id: str, job_id: str | None = None) -> None:
             run.error = str(e)
             run.completed_at = datetime.now(timezone.utc)
             job = _resolve_daily_search_job(db, search_run_id, job_id)
-            job.status = "failed"
-            job.error = run.error
-            job.completed_at = run.completed_at
-            job.updated_at = run.completed_at
-            job.progress = build_progress(
-                stage="failed",
-                current=(job.progress or {}).get("current", 0),
-                total=(job.progress or {}).get("total", 1),
-                message=f"Daily search failed: {e}",
-                log=(job.progress or {}).get("log", []),
-            )
-            db.commit()
+            _set_run_status(db, run, job, status="failed", error=run.error)
         logger.exception("daily_search run=%s failed", search_run_id)
         raise
     finally:

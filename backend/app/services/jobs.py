@@ -4,38 +4,32 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.models.job import Job
-from app.schemas.jobs import JobProgress
 
 
-def build_progress(
+def job_progress(*, current: int | None = None, total: int | None = None, **extra) -> dict:
+    payload: dict = {}
+    if total is not None:
+        payload["total"] = max(total, 1)
+    if current is not None:
+        payload["current"] = current
+    payload.update(extra)
+    return payload
+
+
+def set_job_status(
+    job: Job,
     *,
-    stage: str,
-    current: int,
-    total: int,
-    message: str,
-    log: list[dict] | None = None,
-    append_log: bool = True,
-    **extra,
-) -> dict:
-    entries = list(log or [])
-    if append_log:
-        entries.append(
-            {
-                "at": datetime.now(timezone.utc).isoformat(),
-                "stage": stage,
-                "message": message,
-            }
-        )
-
-    payload = {
-        "stage": stage,
-        "current": current,
-        "total": max(total, 1),
-        "message": message,
-        "log": entries[-50:],
-        **extra,
-    }
-    return JobProgress.model_validate(payload).model_dump(mode="json")
+    status: str,
+    error: str | None = None,
+) -> None:
+    now = datetime.now(timezone.utc)
+    job.status = status
+    if error is not None:
+        job.error = error
+    if status == "running" and not job.started_at:
+        job.started_at = now
+    if status in {"completed", "failed", "skipped"}:
+        job.completed_at = now
 
 
 def create_job(
@@ -56,14 +50,8 @@ def create_job(
         subject_type=subject_type,
         subject_id=subject_id,
         queue_name=queue_name,
-        progress=progress or build_progress(
-            stage=status,
-            current=0,
-            total=1,
-            message=status.title(),
-        ),
+        progress=progress or {},
         created_at=now,
-        updated_at=now,
     )
     db.add(job)
     return job

@@ -63,7 +63,7 @@ Flat scripts under `scripts/`: `sync.py`, `r2.py` (shared utils), `ingest_arxiv.
 
 ```bash
 cd backend
-uvicorn app.main:app --reload --port 8000
+REDIS_URL=redis://localhost:6379/0 uv run uvicorn app.main:app --reload --port 8000
 ```
 
 The API runs at http://localhost:8000 with hot-reload enabled.

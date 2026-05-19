@@ -13,7 +13,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   useLatestSearchRun,
   useSearchRun,
@@ -66,10 +65,6 @@ import type { Job, PaperMatch, SearchRun } from "@/lib/api";
 type FilterMode = "claim" | "topic";
 type MatchGroup = { name: string; matches: PaperMatch[] };
 
-const PROGRESS_SKELETON_KEYS = [
-  "daily-progress-skeleton-1",
-  "daily-progress-skeleton-2",
-];
 const EMPTY_PAPER_MATCHES: PaperMatch[] = [];
 const SOURCE_LABELS: Record<string, string> = {
   arxiv: "papers",
@@ -163,15 +158,6 @@ function DailyHeader({
     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Daily</h1>
-        {run && (
-          <p className="text-sm text-muted-foreground">
-            {run.status === "completed"
-              ? `${run.match_count || 0} matches from ${run.candidate_count || 0} items`
-              : run.status === "failed"
-                ? "Search failed"
-                : "Search in progress…"}
-          </p>
-        )}
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <DatePicker
@@ -283,33 +269,36 @@ function QuickAddFilter({
 function SearchProgress({
   job,
   progressPercent,
+  matchCount,
   isCreating,
 }: {
   job?: Job | null;
   progressPercent: number;
+  matchCount: number;
   isCreating: boolean;
 }) {
-  const progress = job?.progress;
-  const progressLog = progress?.log ?? [];
-  const stage = progress?.stage || job?.status || "creating";
-  const message = progress?.message || "Creating daily search...";
+  const status = job?.status || (isCreating ? "queued" : "running");
+  const title =
+    status === "queued" || isCreating ? "Daily Search Queued" : "Daily Search Running";
+  const message =
+    matchCount > 0
+      ? `${matchCount} matches found so far`
+      : status === "queued" || isCreating
+        ? "Waiting to start…"
+        : "Searching items…";
 
   return (
     <Card>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between gap-3">
-          <CardTitle className="text-lg">
-            {stage === "queued" || isCreating ? "Daily Search Queued" : "Daily Search Running"}
-          </CardTitle>
-          <Badge variant="secondary">{stage}</Badge>
+          <CardTitle className="text-lg">{title}</CardTitle>
+          <Badge variant="secondary">{status}</Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
         <div>
           <div className="mb-2 flex items-center justify-between gap-3 text-sm">
-            <span className="text-muted-foreground">
-              {message}
-            </span>
+            <span className="text-muted-foreground">{message}</span>
             <span className="font-medium tabular-nums">{progressPercent}%</span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-muted">
@@ -320,27 +309,6 @@ function SearchProgress({
           </div>
         </div>
 
-        {progressLog.length > 0 ? (
-          <div className="rounded-md border bg-muted/30 p-3">
-            <div className="space-y-1.5">
-              {progressLog.slice(-6).map((entry) => (
-                <div
-                  key={`${entry.at}-${entry.stage}-${entry.message}`}
-                  className="flex items-start gap-2 text-xs text-muted-foreground"
-                >
-                  <span className="mt-1 size-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
-                  <span>{entry.message}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {PROGRESS_SKELETON_KEYS.map((key) => (
-              <Skeleton key={key} className="h-4 w-2/3" />
-            ))}
-          </div>
-        )}
       </CardContent>
     </Card>
   );
@@ -609,6 +577,7 @@ export default function DailyPage() {
         <SearchProgress
           job={activeJob}
           progressPercent={progressPercent}
+          matchCount={matches.length}
           isCreating={createSearch.isPending}
         />
       )}

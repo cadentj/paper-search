@@ -152,8 +152,10 @@ def sync_public_indexes(
     progress: tqdm | None = None,
 ) -> dict[str, dict[str, tuple[int, int]]]:
     settings.require_sync_urls()
+    db_path = resolve_sqlite_path(settings.DATABASE_URL)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(
-        settings.DATABASE_URL,
+        f"sqlite:///{db_path}",
         connect_args={"check_same_thread": False},
     )
     Base.metadata.create_all(bind=engine)
