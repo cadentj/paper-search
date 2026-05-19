@@ -23,26 +23,14 @@ from app.llm.prompts import (
 from app.llm.schemas import ClaimFilterSearchResponse, TopicFilterSearchResponse
 from app.models.filter import FilterPayload
 from paper_search_core.schemas.daily_search import PaperPayload
-from pydantic import BaseModel
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 PAIR_TIMEOUT_SECONDS = 30.0
 PAIRING_PHASE_TIMEOUT_SECONDS = 360.0
+PAIR_EVALUATION_FAILED = "evaluation failed"
 
-
-class PairEvaluation(BaseModel):
-    filter_id: str
-    filter_name: str
-    paper_id: str
-    paper_title: str
-    source_type: str
-    source_id: str
-    item_id: str
-    result: dict | None = None
-    model: str | None = None
-    response_id: str | None = None
-    error: str | None = None
+PairOutcome = tuple[dict | None, str | None, str | None, str | None]
 
 
 def _candidate_counts_by_source(papers: list[SQLAPaper]) -> dict[str, int]:
@@ -80,10 +68,9 @@ def _extract_result(mode: str, match: dict | None) -> dict | None:
 
 
 async def _evaluate_filter_paper(
-    *,
     filter: FilterPayload,
     paper: PaperPayload,
-) -> PairEvaluation:
+) -> PairOutcome:
     definition = filter.definition or {}
     mode = definition.get("mode", "topic")
     system_prompt, user_prompt_template, response_model = _prompts_for_mode(mode)
@@ -107,66 +94,25 @@ async def _evaluate_filter_paper(
     )
     result = _extract_result(mode, raw_match)
 
-    return PairEvaluation(
-        filter_id=filter.id,
-        filter_name=filter.name,
-        paper_id=paper.id,
-        paper_title=paper.title,
-        source_type=paper.source_type,
-        source_id=paper.source_id,
-        item_id=paper.item_id,
-        result=result,
-        model=llm_result["model"],
-        response_id=llm_result["response_id"],
-    )
-
-
-def _pair_error_evaluation(
-    *,
-    filter: FilterPayload,
-    paper: PaperPayload,
-    error: str,
-) -> PairEvaluation:
-    return PairEvaluation(
-        filter_id=filter.id,
-        filter_name=filter.name,
-        paper_id=paper.id,
-        paper_title=paper.title,
-        source_type=paper.source_type or "arxiv",
-        source_id=paper.source_id or "",
-        item_id=paper.item_id,
-        error=error,
-    )
+    return result, None, llm_result["model"], llm_result["response_id"]
 
 
 async def _evaluate_filter_paper_with_timeout(
-    *,
     semaphore: asyncio.Semaphore,
     filter: FilterPayload,
     paper: PaperPayload,
-) -> PairEvaluation:
+) -> PairOutcome:
     async with semaphore:
         try:
             return await asyncio.wait_for(
                 _evaluate_filter_paper(filter=filter, paper=paper),
                 timeout=PAIR_TIMEOUT_SECONDS,
             )
-        except asyncio.TimeoutError:
-            return _pair_error_evaluation(
-                filter=filter,
-                paper=paper,
-                error=f"Timed out after {PAIR_TIMEOUT_SECONDS:g}s",
-            )
-        except Exception as exc:
-            return _pair_error_evaluation(
-                filter=filter,
-                paper=paper,
-                error=str(exc),
-            )
+        except (asyncio.TimeoutError, Exception):
+            return None, PAIR_EVALUATION_FAILED, None, None
 
 
 async def _evaluate_pairs(
-    *,
     pairs: list[tuple[FilterPayload, PaperPayload]],
     on_result,
 ) -> None:
@@ -198,7 +144,8 @@ async def _evaluate_pairs(
         if not done:
             break
         for task in done:
-            await on_result(await task)
+            filter, paper = task_pairs[task]
+            await on_result(filter, paper, await task)
 
     if pending:
         for task in pending:
@@ -207,16 +154,9 @@ async def _evaluate_pairs(
         for task in pending:
             filter, paper = task_pairs[task]
             await on_result(
-                PairEvaluation(
-                    filter_id=filter.id,
-                    filter_name=filter.name,
-                    paper_id=paper.id,
-                    paper_title=paper.title,
-                    source_type=paper.source_type,
-                    source_id=paper.source_id,
-                    item_id=paper.item_id,
-                    error=f"Pairing phase timed out after {PAIRING_PHASE_TIMEOUT_SECONDS:g}s",
-                )
+                filter,
+                paper,
+                (None, PAIR_EVALUATION_FAILED, None, None),
             )
 
 
@@ -275,33 +215,34 @@ def run_daily_search(search_run_id: str, job_id: str) -> None:
             failed_pairs = 0
             first_pair_error = ""
 
-            async def handle_pair_result(evaluation: PairEvaluation) -> None:
+            async def handle_pair_result(
+                filter: FilterPayload,
+                paper: PaperPayload,
+                outcome: PairOutcome,
+            ) -> None:
                 nonlocal completed_pairs, failed_pairs, first_pair_error
                 completed_pairs += 1
 
-                if evaluation.error:
+                result, error, llm_model, llm_response_id = outcome
+                if error:
                     failed_pairs += 1
                     if not first_pair_error:
-                        first_pair_error = evaluation.error
+                        first_pair_error = error
                     tqdm.write(
                         f"Pair {completed_pairs}/{pair_total} failed: "
-                        f"{evaluation.filter_name} x {evaluation.item_id}: "
-                        f"{evaluation.error}"
+                        f"{filter.name} x {paper.item_id}"
                     )
-                else:
-                    result = evaluation.result
-                    has_content = result and result.get("reason", "").strip()
-                    if has_content:
-                        db.add(
-                            SQLAPaperMatch(
-                                search_run_id=search_run_id,
-                                filter_id=evaluation.filter_id,
-                                paper_id=evaluation.paper_id,
-                                result=result,
-                                llm_model=evaluation.model,
-                                llm_response_id=evaluation.response_id,
-                            )
+                elif result and result.get("reason", "").strip():
+                    db.add(
+                        SQLAPaperMatch(
+                            search_run_id=search_run_id,
+                            filter_id=filter.id,
+                            paper_id=paper.id,
+                            result=result,
+                            llm_model=llm_model,
+                            llm_response_id=llm_response_id,
                         )
+                    )
                 job.progress = {"current": completed_pairs, "total": pair_total}
                 search_runs.commit_progress(db)
                 pair_progress.update(1)

@@ -137,21 +137,21 @@ def promote_draft_filters(db: Session, filter_ids: list[str]) -> list[SQLAFilter
 
     now = datetime.now(timezone.utc)
     filters = db.query(SQLAFilter).filter(SQLAFilter.id.in_(filter_ids)).all()
-    by_id = {filt.id: filt for filt in filters}
+    by_id = {filter.id: filter for filter in filters}
     ordered = [by_id[fid] for fid in filter_ids if fid in by_id]
     missing = [fid for fid in filter_ids if fid not in by_id]
     if missing:
         raise LookupError(f"Draft filter not found: {missing[0]}")
 
-    for filt in ordered:
-        if filt.status != "draft":
-            raise ValueError(f"Filter is not a draft: {filt.id}")
-        filt.status = "active"
-        filt.updated_at = now
+    for filter in ordered:
+        if filter.status != "draft":
+            raise ValueError(f"Filter is not a draft: {filter.id}")
+        filter.status = "active"
+        filter.updated_at = now
 
     db.flush()
-    for filt in ordered:
-        db.refresh(filt)
+    for filter in ordered:
+        db.refresh(filter)
     return ordered
 
 
@@ -169,7 +169,7 @@ def complete_onboarding(
             "description": definition.get("description", ""),
             "mode": definition.get("mode", "topic"),
         }
-        filt = SQLAFilter(
+        filter = SQLAFilter(
             id=str(uuid.uuid4()),
             name=name,
             definition=definition,
@@ -177,12 +177,12 @@ def complete_onboarding(
             created_at=now,
             updated_at=now,
         )
-        db.add(filt)
-        created_filters.append(filt)
+        db.add(filter)
+        created_filters.append(filter)
 
     db.flush()
-    for filt in created_filters:
-        db.refresh(filt)
+    for filter in created_filters:
+        db.refresh(filter)
     return created_filters
 
 

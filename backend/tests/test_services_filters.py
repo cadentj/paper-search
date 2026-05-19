@@ -11,7 +11,7 @@ def _proposal_filter(
     db_session, *, action: str, target_id: str | None = None
 ) -> SQLAFilter:
     now = datetime.now(timezone.utc)
-    filt = SQLAFilter(
+    filter = SQLAFilter(
         id=str(uuid.uuid4()),
         name="Proposal",
         definition={"name": "Proposal", "description": "", "mode": "topic"},
@@ -21,14 +21,14 @@ def _proposal_filter(
         created_at=now,
         updated_at=now,
     )
-    db_session.add(filt)
+    db_session.add(filter)
     db_session.flush()
-    return filt
+    return filter
 
 
 def test_accept_proposal_create(db_session):
-    filt = _proposal_filter(db_session, action="create")
-    result = filter_service.accept_proposal(db_session, filt.id)
+    filter = _proposal_filter(db_session, action="create")
+    result = filter_service.accept_proposal(db_session, filter.id)
     assert result.status == "active"
     assert result.proposed_action is None
 
@@ -44,20 +44,20 @@ def test_accept_proposal_revise(db_session):
     )
     db_session.add(target)
     db_session.flush()
-    filt = _proposal_filter(db_session, action="revise", target_id=target.id)
-    filt.definition = {"name": "Revised", "description": "new", "mode": "topic"}
-    filt.name = "Revised"
+    filter = _proposal_filter(db_session, action="revise", target_id=target.id)
+    filter.definition = {"name": "Revised", "description": "new", "mode": "topic"}
+    filter.name = "Revised"
     db_session.flush()
 
-    filter_service.accept_proposal(db_session, filt.id)
+    filter_service.accept_proposal(db_session, filter.id)
     db_session.refresh(target)
     assert target.name == "Revised"
-    assert filt.status == "archived"
+    assert filter.status == "archived"
 
 
 def test_accept_proposal_invalid(db_session):
-    filt = _proposal_filter(db_session, action="create")
-    filt.proposed_action = None
+    filter = _proposal_filter(db_session, action="create")
+    filter.proposed_action = None
     db_session.flush()
     with pytest.raises(ValueError):
-        filter_service.accept_proposal(db_session, filt.id)
+        filter_service.accept_proposal(db_session, filter.id)

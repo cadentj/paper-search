@@ -6,6 +6,8 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
+from sqlalchemy.orm import Session
+
 from app.db.session import database
 from app.models.filter import SQLAFilter
 from app.services import filters as filter_service
@@ -21,9 +23,123 @@ from app.llm.prompts import (
     FEEDBACK_REFLECTION_SYSTEM_PROMPT,
     FEEDBACK_REFLECTION_USER_PROMPT,
 )
-from app.llm.schemas import FeedbackReflectionResponse
+from app.llm.schemas import (
+    CreateFeedbackAction,
+    DeleteFeedbackAction,
+    FeedbackReflectionResponse,
+    ReviseFeedbackAction,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _build_reflection_prompt(
+    db: Session,
+    votes: list[SQLAPaperMatchFeedback],
+    notes: list[SQLAPaperNote],
+) -> str:
+    active_filters = filter_service.list_active_filters(db)
+    filter_summaries = []
+    for f in active_filters:
+        d = f.definition or {}
+        filter_summaries.append(
+            f"- [{f.id}] {f.name}: {d.get('description', '')} (mode: {d.get('mode', 'topic')})"
+        )
+
+    vote_descriptions = []
+    for v in votes:
+        paper = db.query(SQLAPaper).filter(SQLAPaper.id == v.paper_id).first()
+        paper_title = paper.title if paper else "Unknown"
+        paper_abstract = paper.abstract if paper else ""
+
+        if v.paper_match_id and v.filter_id:
+            match = (
+                db.query(SQLAPaperMatch)
+                .filter(SQLAPaperMatch.id == v.paper_match_id)
+                .first()
+            )
+            match_filter = (
+                db.query(SQLAFilter).filter(SQLAFilter.id == v.filter_id).first()
+            )
+            filter_name = match_filter.name if match_filter else "Unknown"
+            match_result = ""
+            if match and match.result:
+                match_result = (
+                    match.result
+                    if isinstance(match.result, str)
+                    else json.dumps(match.result)
+                )
+            vote_descriptions.append(
+                f'- {v.value.upper()} on matched paper "{paper_title}" '
+                f"(filter: {filter_name}, result: {match_result})"
+            )
+        else:
+            vote_descriptions.append(
+                f'- UP on unmatched paper "{paper_title}" '
+                f"(abstract: {paper_abstract[:200]}...)"
+            )
+
+    note_descriptions = []
+    for n in notes:
+        paper = db.query(SQLAPaper).filter(SQLAPaper.id == n.paper_id).first()
+        paper_title = paper.title if paper else "Unknown"
+        paper_abstract = paper.abstract if paper else ""
+        note_descriptions.append(
+            f'- Note on "{paper_title}" (abstract: {paper_abstract[:200]}...): {n.text}'
+        )
+
+    return FEEDBACK_REFLECTION_USER_PROMPT.format(
+        existing_filters="\n".join(filter_summaries) if filter_summaries else "(none)",
+        vote_feedback="\n".join(vote_descriptions) if vote_descriptions else "(none)",
+        note_feedback="\n".join(note_descriptions) if note_descriptions else "(none)",
+    )
+
+
+_PENDING_STATUS = {
+    "create": "pending_create",
+    "revise": "pending_revision",
+    "delete": "pending_deletion",
+}
+
+
+def _create_draft_filter(
+    db: Session,
+    action: CreateFeedbackAction | ReviseFeedbackAction | DeleteFeedbackAction,
+    now: datetime,
+) -> None:
+    target_filter_id: str | None = None
+
+    match action:
+        case DeleteFeedbackAction(target_filter_id=target_id):
+            target = db.query(SQLAFilter).filter(SQLAFilter.id == target_id).first()
+            if not target:
+                return
+            name = target.name
+            definition = dict(target.definition or {})
+            target_filter_id = target_id
+        case CreateFeedbackAction(name=name, description=description, mode=mode):
+            definition = {"name": name, "description": description, "mode": mode}
+        case ReviseFeedbackAction(
+            name=name,
+            description=description,
+            mode=mode,
+            target_filter_id=target_id,
+        ):
+            definition = {"name": name, "description": description, "mode": mode}
+            target_filter_id = target_id
+
+    filter = SQLAFilter(
+        id=str(uuid.uuid4()),
+        name=name,
+        definition=definition,
+        status=_PENDING_STATUS[action.action],
+        source="feedback",
+        proposed_action=action.action,
+        target_filter_id=target_filter_id,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(filter)
 
 
 def process_all_feedback(job_id: str) -> None:
@@ -54,70 +170,7 @@ def process_all_feedback(job_id: str) -> None:
                 db.commit()
                 return
 
-            # Build context for the LLM
-            active_filters = filter_service.list_active_filters(db)
-            filter_summaries = []
-            for f in active_filters:
-                d = f.definition or {}
-                filter_summaries.append(
-                    f"- [{f.id}] {f.name}: {d.get('description', '')} (mode: {d.get('mode', 'topic')})"
-                )
-
-            vote_descriptions = []
-            for v in votes:
-                paper = db.query(SQLAPaper).filter(SQLAPaper.id == v.paper_id).first()
-                paper_title = paper.title if paper else "Unknown"
-                paper_abstract = paper.abstract if paper else ""
-
-                if v.paper_match_id and v.filter_id:
-                    match = (
-                        db.query(SQLAPaperMatch)
-                        .filter(SQLAPaperMatch.id == v.paper_match_id)
-                        .first()
-                    )
-                    match_filter = (
-                        db.query(SQLAFilter)
-                        .filter(SQLAFilter.id == v.filter_id)
-                        .first()
-                    )
-                    filter_name = match_filter.name if match_filter else "Unknown"
-                    match_result = ""
-                    if match and match.result:
-                        match_result = (
-                            match.result
-                            if isinstance(match.result, str)
-                            else json.dumps(match.result)
-                        )
-                    vote_descriptions.append(
-                        f'- {v.value.upper()} on matched paper "{paper_title}" '
-                        f"(filter: {filter_name}, result: {match_result})"
-                    )
-                else:
-                    vote_descriptions.append(
-                        f'- UP on unmatched paper "{paper_title}" '
-                        f"(abstract: {paper_abstract[:200]}...)"
-                    )
-
-            note_descriptions = []
-            for n in notes:
-                paper = db.query(SQLAPaper).filter(SQLAPaper.id == n.paper_id).first()
-                paper_title = paper.title if paper else "Unknown"
-                paper_abstract = paper.abstract if paper else ""
-                note_descriptions.append(
-                    f'- Note on "{paper_title}" (abstract: {paper_abstract[:200]}...): {n.text}'
-                )
-
-            user_prompt = FEEDBACK_REFLECTION_USER_PROMPT.format(
-                existing_filters="\n".join(filter_summaries)
-                if filter_summaries
-                else "(none)",
-                vote_feedback="\n".join(vote_descriptions)
-                if vote_descriptions
-                else "(none)",
-                note_feedback="\n".join(note_descriptions)
-                if note_descriptions
-                else "(none)",
-            )
+            user_prompt = _build_reflection_prompt(db, votes, notes)
 
             result = asyncio.run(
                 async_call_llm(
@@ -128,70 +181,11 @@ def process_all_feedback(job_id: str) -> None:
                 )
             )
 
-            actions = result["content"].get("actions", [])
+            reflection = FeedbackReflectionResponse.model_validate(result["content"])
             now = datetime.now(timezone.utc)
 
-            for action in actions:
-                action_type = action.get("action")
-                if action_type == "create":
-                    filt = SQLAFilter(
-                        id=str(uuid.uuid4()),
-                        name=action.get("name", "New Filter"),
-                        definition={
-                            "name": action.get("name", "New Filter"),
-                            "description": action.get("description", ""),
-                            "mode": action.get("mode", "topic"),
-                        },
-                        status="pending_create",
-                        source="feedback",
-                        proposed_action="create",
-                        created_at=now,
-                        updated_at=now,
-                    )
-                    db.add(filt)
-
-                elif action_type == "revise":
-                    target_id = action.get("target_filter_id")
-                    if not target_id:
-                        continue
-                    filt = SQLAFilter(
-                        id=str(uuid.uuid4()),
-                        name=action.get("name", "Revised Filter"),
-                        definition={
-                            "name": action.get("name", "Revised Filter"),
-                            "description": action.get("description", ""),
-                            "mode": action.get("mode", "topic"),
-                        },
-                        status="pending_revision",
-                        source="feedback",
-                        proposed_action="revise",
-                        target_filter_id=target_id,
-                        created_at=now,
-                        updated_at=now,
-                    )
-                    db.add(filt)
-
-                elif action_type == "delete":
-                    target_id = action.get("target_filter_id")
-                    if not target_id:
-                        continue
-                    target = (
-                        db.query(SQLAFilter).filter(SQLAFilter.id == target_id).first()
-                    )
-                    if not target:
-                        continue
-                    filt = SQLAFilter(
-                        id=str(uuid.uuid4()),
-                        name=target.name,
-                        definition=dict(target.definition or {}),
-                        status="pending_deletion",
-                        source="feedback",
-                        proposed_action="delete",
-                        target_filter_id=target_id,
-                        created_at=now,
-                        updated_at=now,
-                    )
-                    db.add(filt)
+            for action in reflection.actions:
+                _create_draft_filter(db, action, now)
 
             # Mark all feedback as processed
             for v in votes:

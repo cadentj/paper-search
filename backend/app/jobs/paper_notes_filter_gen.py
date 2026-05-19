@@ -60,7 +60,7 @@ def generate_filters_from_notes(note_id: str, job_id: str) -> None:
             now = datetime.now(timezone.utc)
 
             for raw in proposed[:5]:
-                filt = SQLAFilter(
+                filter = SQLAFilter(
                     id=str(uuid.uuid4()),
                     name=raw.get("name", "Unnamed Filter"),
                     definition={
@@ -73,7 +73,7 @@ def generate_filters_from_notes(note_id: str, job_id: str) -> None:
                     created_at=now,
                     updated_at=now,
                 )
-                db.add(filt)
+                db.add(filter)
 
             set_job_status(job, status="completed")
             db.commit()

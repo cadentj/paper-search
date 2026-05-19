@@ -92,7 +92,7 @@ def run_scholar_import(import_id: str, job_id: str) -> None:
             now = datetime.now(timezone.utc)
 
             for raw in proposed[:10]:
-                filt = SQLAFilter(
+                filter = SQLAFilter(
                     id=str(uuid.uuid4()),
                     name=raw.get("name", "Unnamed Filter"),
                     definition={
@@ -105,7 +105,7 @@ def run_scholar_import(import_id: str, job_id: str) -> None:
                     created_at=now,
                     updated_at=now,
                 )
-                db.add(filt)
+                db.add(filter)
 
             profile_import.status = "completed"
             set_job_status(job, status="completed")

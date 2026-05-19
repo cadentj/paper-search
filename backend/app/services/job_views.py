@@ -51,8 +51,8 @@ def paper_match_response(db: Session, match: SQLAPaperMatch) -> PaperMatch:
     from paper_search_core.models.paper import SQLAPaper
 
     paper = db.query(SQLAPaper).filter(SQLAPaper.id == match.paper_id).first()
-    filt = db.query(SQLAFilter).filter(SQLAFilter.id == match.filter_id).first()
-    return match.to_pydantic(paper=paper, filt=filt)
+    filter = db.query(SQLAFilter).filter(SQLAFilter.id == match.filter_id).first()
+    return match.to_pydantic(paper=paper, filter=filter)
 
 
 def encode_cursor(value: datetime, item_id: str) -> str:
@@ -89,12 +89,12 @@ def apply_cursor(items: list, cursor: str | None) -> list:
 
 def draft_filters_for_generation(db: Session, job_id: str) -> list[SQLAFilter]:
     return [
-        filt
-        for filt in db.query(SQLAFilter)
+        filter
+        for filter in db.query(SQLAFilter)
         .filter(SQLAFilter.status == "draft")
         .order_by(SQLAFilter.created_at.asc(), SQLAFilter.id.asc())
         .all()
-        if (filt.definition or {}).get("onboarding_generation_job_id") == job_id
+        if (filter.definition or {}).get("onboarding_generation_job_id") == job_id
     ]
 
 

@@ -2,7 +2,14 @@
 
 import pytest
 from bs4 import BeautifulSoup
+from pydantic import ValidationError
 
+from app.llm.schemas import (
+    CreateFeedbackAction,
+    DeleteFeedbackAction,
+    FeedbackReflectionResponse,
+    ReviseFeedbackAction,
+)
 from app.utils.html_parser import (
     blocks_to_prompt_text,
     parse_arxiv_html,
@@ -191,13 +198,13 @@ class TestLLMClient:
 
         from app.llm import client as llm_client
         from app.llm.config import FILTER_GENERATION_PROFILE
-        from app.llm.schemas import FilterSearchResponse
+        from app.llm.schemas import TopicFilterSearchResponse
 
         request = httpx.Request("POST", "https://openrouter.ai/api/v1/responses")
         attempts = {"count": 0}
         parse_calls = []
 
-        parsed = FilterSearchResponse(matches=[])
+        parsed = TopicFilterSearchResponse(matches=[])
         parsed_response = SimpleNamespace(
             id="response-id",
             model="test-model",
@@ -241,13 +248,68 @@ class TestLLMClient:
         result = await llm_client.async_call_llm(
             "system",
             "user",
-            response_model=FilterSearchResponse,
+            response_model=TopicFilterSearchResponse,
             profile=FILTER_GENERATION_PROFILE,
         )
 
         assert attempts["count"] == 2
         assert parse_calls[0]["model"] == "openai/gpt-oss-120b"
         assert parse_calls[0]["extra_body"] == {"provider": {"order": ["cerebras"]}}
-        assert parse_calls[0]["text_format"] is FilterSearchResponse
+        assert parse_calls[0]["text_format"] is TopicFilterSearchResponse
         assert result["content"] == {"matches": []}
         assert result["model"] == "test-model"
+
+
+class TestFeedbackReflectionSchema:
+    def test_parses_create_revise_and_delete_actions(self):
+        reflection = FeedbackReflectionResponse.model_validate(
+            {
+                "actions": [
+                    {
+                        "action": "create",
+                        "name": "New topic",
+                        "description": "Papers on X",
+                        "mode": "topic",
+                    },
+                    {
+                        "action": "revise",
+                        "name": "Updated",
+                        "description": "Broader scope",
+                        "mode": "claim",
+                        "target_filter_id": "filter-1",
+                    },
+                    {
+                        "action": "delete",
+                        "target_filter_id": "filter-2",
+                    },
+                ]
+            }
+        )
+
+        assert isinstance(reflection.actions[0], CreateFeedbackAction)
+        assert isinstance(reflection.actions[1], ReviseFeedbackAction)
+        assert isinstance(reflection.actions[2], DeleteFeedbackAction)
+
+    def test_rejects_create_without_required_fields(self):
+        with pytest.raises(ValidationError):
+            FeedbackReflectionResponse.model_validate(
+                {
+                    "actions": [
+                        {"action": "create", "name": "Incomplete", "mode": "topic"}
+                    ]
+                }
+            )
+
+    def test_rejects_delete_with_filter_definition_fields(self):
+        with pytest.raises(ValidationError):
+            FeedbackReflectionResponse.model_validate(
+                {
+                    "actions": [
+                        {
+                            "action": "delete",
+                            "target_filter_id": "filter-1",
+                            "name": "Should not be here",
+                        }
+                    ]
+                }
+            )

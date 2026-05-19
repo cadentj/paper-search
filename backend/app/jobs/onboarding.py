@@ -99,7 +99,7 @@ def _draft_filter_definition(raw: dict, job_id: str) -> dict:
 def _create_draft_filter(db, raw: dict, job_id: str) -> SQLAFilter:
     now = datetime.now(timezone.utc)
     definition = _draft_filter_definition(raw, job_id)
-    filt = SQLAFilter(
+    filter = SQLAFilter(
         id=str(uuid.uuid4()),
         name=definition["name"],
         definition=definition,
@@ -108,8 +108,8 @@ def _create_draft_filter(db, raw: dict, job_id: str) -> SQLAFilter:
         created_at=now,
         updated_at=now,
     )
-    db.add(filt)
-    return filt
+    db.add(filter)
+    return filter
 
 
 def _document_summaries(db, document_ids: list[str]) -> list[str]:

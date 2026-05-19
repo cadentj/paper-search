@@ -24,15 +24,15 @@ def list_active_filters(db: Session) -> list[SQLAFilter]:
 
 
 def get_filter(db: Session, filter_id: str) -> SQLAFilter:
-    filt = db.query(SQLAFilter).filter(SQLAFilter.id == filter_id).first()
-    if not filt:
+    filter = db.query(SQLAFilter).filter(SQLAFilter.id == filter_id).first()
+    if not filter:
         raise LookupError("Filter not found")
-    return filt
+    return filter
 
 
 def create_filter(db: Session, body: FilterCreate) -> SQLAFilter:
     now = datetime.now(timezone.utc)
-    filt = SQLAFilter(
+    filter = SQLAFilter(
         id=str(uuid.uuid4()),
         name=body.name,
         definition=body.definition.model_dump(),
@@ -40,92 +40,96 @@ def create_filter(db: Session, body: FilterCreate) -> SQLAFilter:
         created_at=now,
         updated_at=now,
     )
-    db.add(filt)
+    db.add(filter)
     db.flush()
-    db.refresh(filt)
-    return filt
+    db.refresh(filter)
+    return filter
 
 
 def update_filter(db: Session, filter_id: str, body: FilterUpdate) -> SQLAFilter:
-    filt = get_filter(db, filter_id)
+    filter = get_filter(db, filter_id)
     if body.name is not None:
-        filt.name = body.name
+        filter.name = body.name
     if body.definition is not None:
-        filt.definition = body.definition.model_dump()
-        filt.name = body.definition.name
-    filt.updated_at = datetime.now(timezone.utc)
+        filter.definition = body.definition.model_dump()
+        filter.name = body.definition.name
+    filter.updated_at = datetime.now(timezone.utc)
     db.flush()
-    db.refresh(filt)
-    return filt
+    db.refresh(filter)
+    return filter
 
 
 def archive_filter(db: Session, filter_id: str) -> SQLAFilter:
-    filt = get_filter(db, filter_id)
+    filter = get_filter(db, filter_id)
     now = datetime.now(timezone.utc)
-    filt.status = "archived"
-    filt.archived_at = now
-    filt.updated_at = now
+    filter.status = "archived"
+    filter.archived_at = now
+    filter.updated_at = now
     db.flush()
-    db.refresh(filt)
-    return filt
+    db.refresh(filter)
+    return filter
 
 
 def restore_filter(db: Session, filter_id: str) -> SQLAFilter:
-    filt = get_filter(db, filter_id)
-    filt.status = "active"
-    filt.archived_at = None
-    filt.updated_at = datetime.now(timezone.utc)
+    filter = get_filter(db, filter_id)
+    filter.status = "active"
+    filter.archived_at = None
+    filter.updated_at = datetime.now(timezone.utc)
     db.flush()
-    db.refresh(filt)
-    return filt
+    db.refresh(filter)
+    return filter
 
 
 def accept_proposal(db: Session, filter_id: str) -> SQLAFilter:
-    filt = get_filter(db, filter_id)
+    filter = get_filter(db, filter_id)
     now = datetime.now(timezone.utc)
 
-    if filt.proposed_action == "create":
-        filt.status = "active"
-        filt.proposed_action = None
-        filt.updated_at = now
-    elif filt.proposed_action == "revise" and filt.target_filter_id:
+    if filter.proposed_action == "create":
+        filter.status = "active"
+        filter.proposed_action = None
+        filter.updated_at = now
+    elif filter.proposed_action == "revise" and filter.target_filter_id:
         target = (
-            db.query(SQLAFilter).filter(SQLAFilter.id == filt.target_filter_id).first()
+            db.query(SQLAFilter)
+            .filter(SQLAFilter.id == filter.target_filter_id)
+            .first()
         )
         if target:
-            target.definition = dict(filt.definition or {})
-            target.name = filt.name
+            target.definition = dict(filter.definition or {})
+            target.name = filter.name
             target.updated_at = now
-        filt.status = "archived"
-        filt.archived_at = now
-        filt.updated_at = now
-    elif filt.proposed_action == "delete" and filt.target_filter_id:
+        filter.status = "archived"
+        filter.archived_at = now
+        filter.updated_at = now
+    elif filter.proposed_action == "delete" and filter.target_filter_id:
         target = (
-            db.query(SQLAFilter).filter(SQLAFilter.id == filt.target_filter_id).first()
+            db.query(SQLAFilter)
+            .filter(SQLAFilter.id == filter.target_filter_id)
+            .first()
         )
         if target:
             target.status = "archived"
             target.archived_at = now
             target.updated_at = now
-        filt.status = "archived"
-        filt.archived_at = now
-        filt.updated_at = now
+        filter.status = "archived"
+        filter.archived_at = now
+        filter.updated_at = now
     else:
         raise ValueError("Not a pending proposal")
 
     db.flush()
-    db.refresh(filt)
-    return filt
+    db.refresh(filter)
+    return filter
 
 
 def reject_proposal(db: Session, filter_id: str) -> SQLAFilter:
-    filt = get_filter(db, filter_id)
-    if not filt.proposed_action:
+    filter = get_filter(db, filter_id)
+    if not filter.proposed_action:
         raise ValueError("Not a pending proposal")
     now = datetime.now(timezone.utc)
-    filt.status = "archived"
-    filt.archived_at = now
-    filt.updated_at = now
+    filter.status = "archived"
+    filter.archived_at = now
+    filter.updated_at = now
     db.flush()
-    db.refresh(filt)
-    return filt
+    db.refresh(filter)
+    return filter

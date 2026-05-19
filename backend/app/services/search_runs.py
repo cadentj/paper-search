@@ -72,8 +72,8 @@ def list_matches_for_run(db: Session, search_run_id: str) -> list[PaperMatch]:
     result = []
     for match in matches:
         paper = db.query(SQLAPaper).filter(SQLAPaper.id == match.paper_id).first()
-        filt = db.query(SQLAFilter).filter(SQLAFilter.id == match.filter_id).first()
-        result.append(match.to_pydantic(paper=paper, filt=filt))
+        filter = db.query(SQLAFilter).filter(SQLAFilter.id == match.filter_id).first()
+        result.append(match.to_pydantic(paper=paper, filter=filter))
     result.sort(key=lambda item: item.created_at, reverse=True)
     return result
 

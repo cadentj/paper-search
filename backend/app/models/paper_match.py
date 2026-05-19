@@ -58,7 +58,7 @@ class SQLAPaperMatch(Base):
         self,
         *,
         paper: SQLAPaper | None = None,
-        filt: SQLAFilter | None = None,
+        filter: SQLAFilter | None = None,
     ) -> PaperMatch:
         return PaperMatch(
             id=self.id,
@@ -75,6 +75,8 @@ class SQLAPaperMatch(Base):
             paper_source_url=paper.source_url if paper else None,
             paper_item_label=paper_item_label(paper) if paper else None,
             paper_search_text=paper.search_text if paper else None,
-            filter_name=filt.name if filt else None,
-            filter_mode=(filt.definition or {}).get("mode", "topic") if filt else None,
+            filter_name=filter.name if filter else None,
+            filter_mode=(filter.definition or {}).get("mode", "topic")
+            if filter
+            else None,
         )

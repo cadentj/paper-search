@@ -94,7 +94,7 @@ def promote_draft_filters(
         filters = onboarding_service.promote_draft_filters(db, body.filter_ids)
     except Exception as exc:
         raise_http_from_service(exc)
-    return [filt.to_pydantic() for filt in filters]
+    return [filter.to_pydantic() for filter in filters]
 
 
 @router.post("/extractions", response_model=JobStart)
@@ -123,7 +123,7 @@ def get_extraction(extraction_id: str, db: Session = Depends(get_db)):
 @router.post("/complete", response_model=list[Filter])
 def complete_onboarding(body: OnboardingCompleteRequest, db: Session = Depends(get_db)):
     filters = onboarding_service.complete_onboarding(db, body)
-    return [filt.to_pydantic() for filt in filters]
+    return [filter.to_pydantic() for filter in filters]
 
 
 @router.post("/scholar/verify", response_model=ScholarVerify)

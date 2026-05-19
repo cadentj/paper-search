@@ -33,9 +33,9 @@ def test_session_commits_on_success(isolated_database):
         )
 
     with isolated_database.session() as db:
-        filt = db.query(SQLAFilter).filter(SQLAFilter.id == filt_id).first()
-        assert filt is not None
-        assert filt.name == "Committed SQLAFilter"
+        filter = db.query(SQLAFilter).filter(SQLAFilter.id == filt_id).first()
+        assert filter is not None
+        assert filter.name == "Committed SQLAFilter"
 
 
 def test_session_rolls_back_on_exception(isolated_database):

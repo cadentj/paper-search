@@ -18,7 +18,6 @@ from app.llm.config import (
 )
 from app.llm.schemas import (
     ClaimFilterSearchResponse,
-    FilterSearchResponse,
     OnboardingFiltersResponse,
     SearchSummaryResponse,
     TopicFilterSearchResponse,
@@ -308,9 +307,10 @@ class TestDailySearchTimeouts:
         assert calls["count"] == 0
 
         semaphore.release()
-        evaluation = await asyncio.wait_for(task, timeout=1)
+        outcome = await asyncio.wait_for(task, timeout=1)
 
-        assert evaluation.error is None
+        _result, error, _model, _response_id = outcome
+        assert error is None
         assert calls["count"] == 1
 
 
@@ -320,7 +320,7 @@ class TestRunDailySearch:
     ):
 
         # Create active filter
-        filt = SQLAFilter(
+        filter = SQLAFilter(
             id=str(uuid.uuid4()),
             name="Test Filter",
             definition={
@@ -332,7 +332,7 @@ class TestRunDailySearch:
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
-        db_session.add(filt)
+        db_session.add(filter)
 
         # Create search run
         run_id = str(uuid.uuid4())
@@ -401,7 +401,7 @@ class TestRunDailySearch:
     ):
 
         # Create archived filter only
-        filt = SQLAFilter(
+        filter = SQLAFilter(
             id=str(uuid.uuid4()),
             name="Archived SQLAFilter",
             definition={
@@ -414,7 +414,7 @@ class TestRunDailySearch:
             updated_at=datetime.now(timezone.utc),
             archived_at=datetime.now(timezone.utc),
         )
-        db_session.add(filt)
+        db_session.add(filter)
 
         run_id = str(uuid.uuid4())
         run = SQLASearchRun(
@@ -459,7 +459,7 @@ class TestRunDailySearch:
         self, db_session, patch_worker_database, monkeypatch
     ):
 
-        filt = SQLAFilter(
+        filter = SQLAFilter(
             id=str(uuid.uuid4()),
             name="Test Filter",
             definition={
@@ -471,7 +471,7 @@ class TestRunDailySearch:
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
-        db_session.add(filt)
+        db_session.add(filter)
 
         run_id = str(uuid.uuid4())
         run = SQLASearchRun(
@@ -535,7 +535,7 @@ class TestRunDailySearch:
         self, db_session, patch_worker_database, monkeypatch
     ):
 
-        filt = SQLAFilter(
+        filter = SQLAFilter(
             id=str(uuid.uuid4()),
             name="Test Filter",
             definition={
@@ -547,7 +547,7 @@ class TestRunDailySearch:
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
-        db_session.add(filt)
+        db_session.add(filter)
 
         run_id = str(uuid.uuid4())
         run = SQLASearchRun(
@@ -583,7 +583,7 @@ class TestRunDailySearch:
         try:
             _run_daily_search(db_session, run_id, job.id)
         except RuntimeError as exc:
-            assert "OPENROUTER_API_KEY" in str(exc)
+            assert "filter-item evaluations failed" in str(exc)
         else:
             raise AssertionError("Expected missing OPENROUTER_API_KEY to fail")
 
@@ -593,14 +593,14 @@ class TestRunDailySearch:
         )
         matches = db_session.query(SQLAPaperMatch).all()
         assert updated_run.status == "failed"
-        assert "OPENROUTER_API_KEY" in updated_run.error
+        assert "evaluation failed" in updated_run.error
         assert matches == []
 
     def test_pair_failures_increment_progress_when_some_pairs_succeed(
         self, db_session, patch_worker_database, monkeypatch
     ):
 
-        filt = SQLAFilter(
+        filter = SQLAFilter(
             id=str(uuid.uuid4()),
             name="Test Filter",
             definition={
@@ -612,7 +612,7 @@ class TestRunDailySearch:
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
-        db_session.add(filt)
+        db_session.add(filter)
 
         run_id = str(uuid.uuid4())
         db_session.add(
@@ -678,7 +678,7 @@ class TestRunDailySearch:
         self, db_session, patch_worker_database, monkeypatch
     ):
 
-        filt = SQLAFilter(
+        filter = SQLAFilter(
             id=str(uuid.uuid4()),
             name="Test Filter",
             definition={
@@ -690,7 +690,7 @@ class TestRunDailySearch:
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
-        db_session.add(filt)
+        db_session.add(filter)
 
         run_id = str(uuid.uuid4())
         db_session.add(
@@ -821,7 +821,7 @@ class TestRunDailySearch:
     def test_no_fts_candidates_completes_with_zero_matches(
         self, db_session, patch_worker_database, monkeypatch
     ):
-        filt = SQLAFilter(
+        filter = SQLAFilter(
             id=str(uuid.uuid4()),
             name="Astrobiology Filter",
             definition={
@@ -832,7 +832,7 @@ class TestRunDailySearch:
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
-        db_session.add(filt)
+        db_session.add(filter)
 
         run_id = str(uuid.uuid4())
         db_session.add(
@@ -888,7 +888,7 @@ class TestSummarizeDailySearch:
     ):
 
         filt_id = str(uuid.uuid4())
-        filt = SQLAFilter(
+        filter = SQLAFilter(
             id=filt_id,
             name="Test Filter",
             definition={
@@ -900,7 +900,7 @@ class TestSummarizeDailySearch:
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
-        db_session.add(filt)
+        db_session.add(filter)
 
         run_id = str(uuid.uuid4())
         run = SQLASearchRun(
