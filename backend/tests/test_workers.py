@@ -14,9 +14,11 @@ from app.llm.config import (
     SUMMARY_PROFILE,
 )
 from app.llm.schemas import (
+    ClaimFilterSearchResponse,
     FilterSearchResponse,
     OnboardingFiltersResponse,
     SearchSummaryResponse,
+    TopicFilterSearchResponse,
 )
 
 
@@ -166,7 +168,7 @@ def _fake_daily_async_llm(*, matched_arxiv_ids: set[str], assert_prompt=None, fa
 
     async def fake_async_call_llm(**kwargs):
         assert kwargs["profile"] == JUDGE_PROFILE
-        assert kwargs["response_model"] is FilterSearchResponse
+        assert kwargs["response_model"] in (ClaimFilterSearchResponse, TopicFilterSearchResponse)
         if assert_prompt:
             assert_prompt(kwargs["user_prompt"])
         arxiv_id = _extract_prompt_arxiv_id(kwargs["user_prompt"])
@@ -174,20 +176,17 @@ def _fake_daily_async_llm(*, matched_arxiv_ids: set[str], assert_prompt=None, fa
         if arxiv_id in fail_arxiv_ids:
             raise RuntimeError(f"transient failure for {arxiv_id}")
         is_match = arxiv_id in matched_arxiv_ids
+        match_data = {
+            "itemId": item_id,
+            "sourceType": "arxiv",
+            "sourceId": arxiv_id,
+        }
+        if is_match:
+            match_data["verdict"] = "positive"
+            match_data["reason"] = "The paper directly addresses the filter."
         return {
             "content": {
-                "matches": [
-                    {
-                        "itemId": item_id,
-                        "sourceType": "arxiv",
-                        "sourceId": arxiv_id,
-                        "result": (
-                            "The paper directly addresses the filter."
-                            if is_match
-                            else ""
-                        ),
-                    }
-                ]
+                "matches": [match_data] if is_match else []
             },
             "model": "test-model",
             "response_id": f"match-response-{arxiv_id}",

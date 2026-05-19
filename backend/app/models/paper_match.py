@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Column, DateTime, ForeignKey, Text
+from sqlalchemy import Column, DateTime, ForeignKey, JSON, Text
 
 from app.models.base import Base
 from app.schemas.search import PaperMatchResponse
@@ -23,7 +23,7 @@ class PaperMatch(Base):
     filter_id = Column(Text, ForeignKey("filters.id"), nullable=False)
     paper_id = Column(Text, ForeignKey("papers.id"), nullable=False)
 
-    result = Column(Text, nullable=False)
+    result = Column(JSON, nullable=False)
 
     llm_model = Column(Text, nullable=True)
     llm_response_id = Column(Text, nullable=True)
@@ -40,7 +40,7 @@ class PaperMatch(Base):
             search_run_id=self.search_run_id,
             filter_id=self.filter_id,
             paper_id=self.paper_id,
-            result=self.result,
+            result=self.result or {},
             llm_model=self.llm_model,
             created_at=self.created_at,
             paper_title=paper.title if paper else None,
@@ -51,4 +51,5 @@ class PaperMatch(Base):
             paper_item_label=paper_item_label(paper) if paper else None,
             paper_search_text=paper.search_text if paper else None,
             filter_name=filt.name if filt else None,
+            filter_mode=(filt.definition or {}).get("mode", "topic") if filt else None,
         )

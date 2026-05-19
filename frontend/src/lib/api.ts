@@ -35,6 +35,10 @@ export interface FilterResponse {
   name: string;
   definition: FilterDefinition;
   status: string;
+  source: string;
+  parent_filter_id?: string | null;
+  proposed_action?: string | null;
+  target_filter_id?: string | null;
   created_at: string;
   updated_at: string;
   archived_at?: string;
@@ -137,12 +141,24 @@ export interface SummaryCitation {
   citedFor: string;
 }
 
+export interface ClaimFilterResult {
+  verdict: "positive" | "negative";
+  reason: string;
+  evidence?: string;
+}
+
+export interface TopicFilterResult {
+  reason: string;
+  evidence?: string;
+}
+
 export interface PaperMatch {
   id: string;
   search_run_id: string;
   filter_id: string;
   paper_id: string;
-  result: string;
+  result: ClaimFilterResult | TopicFilterResult;
+  filter_mode?: string | null;
   llm_model?: string;
   created_at: string;
   paper_title?: string;
@@ -153,6 +169,59 @@ export interface PaperMatch {
   paper_item_label?: string;
   paper_search_text?: string;
   filter_name?: string;
+}
+
+export interface PaperMatchFeedback {
+  id: string;
+  paper_match_id: string;
+  value: "up" | "down";
+  created_at: string;
+}
+
+export interface PaperNote {
+  id: string;
+  paper_id: string;
+  text: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DailySchedule {
+  time: string | null;
+  enabled: boolean;
+}
+
+export interface ScholarVerifyResponse {
+  author_id: string;
+  name: string;
+  affiliations: string[];
+  paper_count: number | null;
+  h_index: number | null;
+}
+
+export interface ScholarImportResponse {
+  id: string;
+  job_id: string;
+}
+
+export interface ScholarImportStatus {
+  id: string;
+  status: string;
+  display_name?: string;
+  error?: string;
+}
+
+export interface FeedbackStatus {
+  pending_votes: number;
+  pending_notes: number;
+  pending_proposals: number;
+}
+
+export interface PaginatedPapers {
+  papers: Paper[];
+  total: number;
+  page: number;
+  per_page: number;
 }
 
 export interface Paper {
@@ -366,6 +435,8 @@ export const api = {
     fetchApi<PaperMatch[]>(`/search-runs/${id}/matches`),
 
   // Papers
+  getDailyPapers: (runDate: string, page: number = 1) =>
+    fetchApi<PaginatedPapers>(`/papers/daily?run_date=${encodeURIComponent(runDate)}&page=${page}&per_page=20`),
   getPaper: (id: string) => fetchApi<Paper>(`/papers/${id}`),
   getPaperHtml: (id: string) =>
     fetchApi<{ html: string | null; source_url: string | null }>(`/papers/${id}/html`),
@@ -374,4 +445,55 @@ export const api = {
   getPaperIdeaMap: (paperId: string) =>
     fetchApi<IdeaMap>(`/papers/${paperId}/idea-map`),
 
+  // Paper notes
+  getPaperNotes: (paperId: string) =>
+    fetchApi<PaperNote | null>(`/papers/${paperId}/notes`),
+  updatePaperNotes: (paperId: string, text: string) =>
+    fetchApi<PaperNote>(`/papers/${paperId}/notes`, {
+      method: "PUT",
+      body: JSON.stringify({ text }),
+    }),
+  // Feedback
+  submitMatchFeedback: (matchId: string, value: "up" | "down") =>
+    fetchApi<{ id: string; paper_id: string; value: string }>(`/paper-matches/${matchId}/feedback`, {
+      method: "POST",
+      body: JSON.stringify({ value }),
+    }),
+  submitPaperFeedback: (paperId: string) =>
+    fetchApi<{ id: string; paper_id: string; value: string }>(`/papers/${paperId}/feedback`, {
+      method: "POST",
+      body: JSON.stringify({ paper_id: paperId, value: "up" }),
+    }),
+  getFeedbackStatus: () =>
+    fetchApi<FeedbackStatus>("/feedback/status"),
+  processFeedback: () =>
+    fetchApi<{ job_id: string }>("/feedback/process", { method: "POST" }),
+
+  // Filter proposals
+  acceptProposal: (filterId: string) =>
+    fetchApi<FilterResponse>(`/filters/${filterId}/accept`, { method: "POST" }),
+  rejectProposal: (filterId: string) =>
+    fetchApi<FilterResponse>(`/filters/${filterId}/reject`, { method: "POST" }),
+
+  // Settings
+  getDailySchedule: () => fetchApi<DailySchedule>("/settings/daily-schedule"),
+  updateDailySchedule: (data: DailySchedule) =>
+    fetchApi<DailySchedule>("/settings/daily-schedule", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  // Scholar
+  verifyScholarProfile: (url: string) =>
+    fetchApi<ScholarVerifyResponse>("/onboarding/scholar/verify", {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
+  startScholarImport: (data: { url: string; author_id: string; display_name: string }) =>
+    fetchApi<ScholarImportResponse>("/onboarding/scholar/imports", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  getScholarImportStatus: (importId: string) =>
+    fetchApi<ScholarImportStatus>(`/onboarding/scholar/imports/${importId}`),
 };

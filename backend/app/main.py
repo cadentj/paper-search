@@ -11,6 +11,9 @@ from app.api.documents import router as documents_router
 from app.api.jobs import router as jobs_router
 from app.api.search import router as search_router
 from app.api.papers import router as papers_router
+from app.api.feedback import router as feedback_router
+from app.api.settings import router as settings_router
+from app.api.scholar import router as scholar_router
 from app.models import Base
 from app.db.session import SessionLocal, engine
 from app.models.paper import Paper
@@ -56,3 +59,6 @@ app.include_router(documents_router)
 app.include_router(jobs_router)
 app.include_router(search_router)
 app.include_router(papers_router)
+app.include_router(feedback_router)
+app.include_router(settings_router)
+app.include_router(scholar_router)

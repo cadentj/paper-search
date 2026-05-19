@@ -163,7 +163,9 @@ export default function SearchPage() {
                             </span>
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            {m.result}
+                            {typeof m.result === "object" && m.result
+                              ? m.result.reason || ("verdict" in m.result ? m.result.verdict : "")
+                              : String(m.result ?? "")}
                           </p>
                         </div>
                       ))}

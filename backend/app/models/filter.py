@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Text, DateTime, JSON
+from sqlalchemy import Column, Text, DateTime, ForeignKey, JSON
 
 from app.models.base import Base
 from app.schemas.daily_search import FilterPayload
@@ -15,6 +15,10 @@ class Filter(Base):
     name = Column(Text, nullable=False)
     definition = Column(JSON, nullable=False)
     status = Column(Text, nullable=False, default="active")
+    source = Column(Text, nullable=False, default="manual")
+    parent_filter_id = Column(Text, ForeignKey("filters.id"), nullable=True)
+    proposed_action = Column(Text, nullable=True)  # "create", "revise", "delete"
+    target_filter_id = Column(Text, ForeignKey("filters.id"), nullable=True)
 
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

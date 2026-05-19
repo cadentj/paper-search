@@ -50,23 +50,42 @@ Extracted text:
 
 Write a concise summary for generating future research search filters."""
 
-FILTER_SEARCH_SYSTEM_PROMPT = """You are a research item evaluator. Given a search filter and research items, evaluate each item.
+CLAIM_FILTER_SEARCH_SYSTEM_PROMPT = """You are a research item evaluator. Given a claim filter and a research item, determine whether the item supports or refutes the claim.
 
 For each item, return:
 - itemId, sourceType, sourceId: exact values from the input
-- result: 1-2 sentences explaining how the item relates to the filter, following the Search Behavior in the user prompt. Include specific evidence from the excerpt when relevant. Return an empty string if the item does not genuinely relate.
+- verdict: "positive" if the item supports, strengthens, or provides evidence for the claim; "negative" if the item refutes, weakens, challenges, or provides evidence against the claim.
+- reason: 1-2 sentences explaining the relationship.
+- evidence: (optional) a brief excerpt or specific finding from the item.
 
-Be selective. Most items should have an empty result."""
+Only include items that genuinely relate to the claim. Ambiguous or mixed items should choose the stronger direction. Omit items that do not relate."""
 
-FILTER_SEARCH_USER_PROMPT = """Filter:
+TOPIC_FILTER_SEARCH_SYSTEM_PROMPT = """You are a research item evaluator. Given a topic filter and a research item, determine whether the item is relevant to the topic.
+
+For each item, return:
+- itemId, sourceType, sourceId: exact values from the input
+- reason: 1-2 sentences explaining how the item relates to the topic.
+- evidence: (optional) a brief excerpt or specific finding from the item.
+
+Only include items that genuinely relate to the topic. Be selective."""
+
+CLAIM_FILTER_SEARCH_USER_PROMPT = """Claim Filter:
 Name: {filter_name}
-Description: {filter_description}
-Search Behavior: {filter_behavior}
+Claim: {filter_description}
 
-Items to evaluate:
+Item to evaluate:
 {papers_text}
 
-Evaluate each item against this filter."""
+Determine whether this item supports or refutes the claim. Return an empty matches array if it does not relate."""
+
+TOPIC_FILTER_SEARCH_USER_PROMPT = """Topic Filter:
+Name: {filter_name}
+Topic: {filter_description}
+
+Item to evaluate:
+{papers_text}
+
+Determine whether this item is relevant to the topic. Return an empty matches array if it does not relate."""
 
 SUMMARY_SYSTEM_PROMPT = """You are a research digest writer. Given a set of item matches from a daily search, write a concise cited summary highlighting the most interesting findings.
 
@@ -135,3 +154,60 @@ Extract supporting warrants for this claim with citations to these block ids."""
 
 IDEA_MAP_SYSTEM_PROMPT = IDEA_MAP_CLAIMS_SYSTEM_PROMPT
 IDEA_MAP_USER_PROMPT = IDEA_MAP_CLAIMS_USER_PROMPT
+
+FEEDBACK_REFLECTION_SYSTEM_PROMPT = """You are a research filter advisor. A researcher has provided feedback on paper matches and left notes on papers. Based on all of their feedback, propose changes to their filter set.
+
+For each proposed change, choose one action:
+- CREATE: propose a new filter for an uncovered research interest
+- REVISE: update an existing filter's description to better match or exclude papers
+- DELETE: remove a filter that is no longer useful
+
+For REVISE and DELETE, you must specify the target_filter_id of the existing filter.
+For CREATE and REVISE, provide a name, description, and mode ("claim" or "topic").
+
+Consider the full picture of feedback before proposing changes. A single vote may not warrant a change, but patterns across multiple votes should inform your decisions."""
+
+FEEDBACK_REFLECTION_USER_PROMPT = """Existing Filters:
+{existing_filters}
+
+Vote Feedback:
+{vote_feedback}
+
+Note Feedback:
+{note_feedback}
+
+Based on all feedback above, propose filter changes."""
+
+PAPER_NOTES_SYSTEM_PROMPT = """You are an expert research assistant. Given a researcher's notes about a specific paper and the paper's metadata, generate targeted search filters that would help them explore the ideas and directions mentioned in their notes.
+
+Each filter should be one of two types:
+- Topic filter (mode: "topic"): Search for papers relevant to a research topic or question from the notes.
+- Claim filter (mode: "claim"): Search for evidence supporting, refuting, or complicating a specific proposition from the notes.
+
+Generate 2-5 filters. Prefer fewer high-quality filters."""
+
+PAPER_NOTES_USER_PROMPT = """Paper: {paper_title}
+Authors: {paper_authors}
+Abstract: {paper_abstract}
+
+Researcher's Notes:
+{notes_text}
+
+Generate proposed search filters based on these notes."""
+
+SCHOLAR_PROFILE_SYSTEM_PROMPT = """You are an expert research assistant. Given a researcher's publication history from Semantic Scholar, generate targeted search filters that would help them keep up with relevant new papers.
+
+Each filter should be one of two types:
+- Topic filter (mode: "topic"): Search for papers relevant to a research topic or question.
+- Claim filter (mode: "claim"): Search for evidence supporting, refuting, or complicating a specific proposition.
+
+Generate 3-5 topic filters and 2-4 claim filters based on the researcher's publications and research interests. Focus on their most active and recent research areas."""
+
+SCHOLAR_PROFILE_USER_PROMPT = """Researcher: {author_name}
+
+Research Interests/Fields: {fields_of_study}
+
+Recent and Notable Publications:
+{publications_text}
+
+Generate proposed search filters based on this researcher's publication history."""

@@ -49,9 +49,10 @@ class PaperMatchResponse(BaseModel):
     search_run_id: str
     filter_id: str
     paper_id: str
-    result: str
+    result: dict
     llm_model: Optional[str] = None
     created_at: datetime
+    filter_mode: Optional[str] = None
 
     # Joined fields
     paper_title: Optional[str] = None

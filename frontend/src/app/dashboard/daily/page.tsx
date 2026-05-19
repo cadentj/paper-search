@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { format, parseISO } from "date-fns";
 import { Button } from "@/components/ui/button";
@@ -62,8 +62,11 @@ import {
   ChevronRight,
   PlusCircle,
   CalendarIcon,
+  ThumbsUp,
+  ThumbsDown,
 } from "lucide-react";
-import type { DailySearchSummary, Job, PaperMatch, SearchRun } from "@/lib/api";
+import type { DailySearchSummary, Job, Paper, PaperMatch, SearchRun, ClaimFilterResult } from "@/lib/api";
+import { api } from "@/lib/api";
 
 type FilterMode = "claim" | "topic";
 type MatchGroup = { name: string; matches: PaperMatch[] };
@@ -408,6 +411,88 @@ function MatchesSection({
   );
 }
 
+function MatchResultDisplay({ match }: { match: PaperMatch }) {
+  const result = match.result;
+  if (!result || typeof result !== "object") return null;
+
+  const isClaim = match.filter_mode === "claim" && "verdict" in result;
+
+  if (isClaim) {
+    const claimResult = result as ClaimFilterResult;
+    return (
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <Badge variant={claimResult.verdict === "positive" ? "default" : "destructive"} className="text-xs">
+            {claimResult.verdict}
+          </Badge>
+        </div>
+        <p className="text-sm text-muted-foreground">{claimResult.reason}</p>
+        {claimResult.evidence && (
+          <p className="text-xs text-muted-foreground italic">{claimResult.evidence}</p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      <p className="text-sm text-muted-foreground">{result.reason}</p>
+      {result.evidence && (
+        <p className="text-xs text-muted-foreground italic">{result.evidence}</p>
+      )}
+    </div>
+  );
+}
+
+function FeedbackButtons({ matchId }: { matchId: string }) {
+  const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
+  const [pending, setPending] = useState<"up" | "down" | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleFeedback = (value: "up" | "down") => {
+    if (submitted) return;
+    setPending(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      setSubmitted(true);
+      try {
+        await api.submitMatchFeedback(matchId, value);
+        setFeedback(value);
+      } catch {
+        setSubmitted(false);
+      }
+      setPending(null);
+    }, 2500);
+  };
+
+  const active = pending ?? feedback;
+
+  return (
+    <div className="flex items-center gap-1">
+      {submitted && !feedback && (
+        <Loader2 className="size-3 animate-spin text-muted-foreground" />
+      )}
+      <button
+        onClick={() => handleFeedback("up")}
+        disabled={submitted}
+        className={`p-1 rounded hover:bg-muted ${active === "up" ? "text-green-600" : "text-muted-foreground"} ${submitted ? "opacity-50 cursor-not-allowed" : ""}`}
+        aria-label="Thumbs up"
+      >
+        <ThumbsUp className="size-3.5" />
+      </button>
+      <button
+        onClick={() => handleFeedback("down")}
+        disabled={submitted}
+        className={`p-1 rounded hover:bg-muted ${active === "down" ? "text-red-600" : "text-muted-foreground"} ${submitted ? "opacity-50 cursor-not-allowed" : ""}`}
+        aria-label="Thumbs down"
+      >
+        <ThumbsDown className="size-3.5" />
+      </button>
+    </div>
+  );
+}
+
 function PaperMatchCard({ match }: { match: PaperMatch }) {
   const externalUrl =
     match.paper_source_url ||
@@ -445,14 +530,150 @@ function PaperMatchCard({ match }: { match: PaperMatch }) {
             )}
           </div>
         </div>
+        <FeedbackButtons matchId={match.id} />
       </div>
-      <p className="text-sm text-muted-foreground">{match.result}</p>
+      <MatchResultDisplay match={match} />
       {match.paper_authors && match.paper_authors.length > 0 && (
         <p className="text-sm text-muted-foreground">
           {match.paper_authors.join(", ")}
         </p>
       )}
     </div>
+  );
+}
+
+function AllPaperCard({ paper }: { paper: Paper }) {
+  const [liked, setLiked] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleLike = async () => {
+    if (liked || submitting) return;
+    setSubmitting(true);
+    try {
+      await api.submitPaperFeedback(paper.id);
+      setLiked(true);
+    } catch {
+      // ignore
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const externalUrl =
+    paper.source_url ||
+    (paper.source_type === "arxiv" && paper.source_id
+      ? `https://arxiv.org/abs/${paper.source_id}`
+      : undefined);
+
+  return (
+    <div className="rounded-lg border p-3 space-y-1">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <Link
+            href={`/dashboard/papers/${paper.id}`}
+            className="text-sm font-medium hover:underline"
+          >
+            {paper.title}
+          </Link>
+          {paper.authors && paper.authors.length > 0 && (
+            <p className="text-xs text-muted-foreground truncate mt-0.5">
+              {paper.authors.join(", ")}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {externalUrl && (
+            <a
+              href={externalUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-1 text-muted-foreground hover:text-foreground"
+            >
+              <ExternalLink className="size-3" />
+            </a>
+          )}
+          <button
+            onClick={handleLike}
+            disabled={liked || submitting}
+            className={`p-1 rounded hover:bg-muted ${liked ? "text-green-600" : "text-muted-foreground"} ${liked ? "opacity-50 cursor-not-allowed" : ""}`}
+            aria-label="Thumbs up"
+          >
+            {submitting ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <ThumbsUp className="size-3.5" />
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AllPapersSection({ selectedDate }: { selectedDate: string }) {
+  const [page, setPage] = useState(1);
+  const [collapsed, setCollapsed] = useState(true);
+
+  const { data, isLoading: loading } = useQuery({
+    queryKey: ["dailyPapers", selectedDate, page],
+    queryFn: () => api.getDailyPapers(selectedDate, page),
+    enabled: !collapsed,
+  });
+
+  const totalPages = data ? Math.ceil(data.total / 20) : 0;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2 cursor-pointer" onClick={() => setCollapsed(!collapsed)}>
+        <CardTitle className="text-base flex items-center gap-2">
+          {collapsed ? <ChevronRight className="size-4" /> : <ChevronDown className="size-4" />}
+          All Papers for {selectedDate}
+          {data && (
+            <span className="text-sm font-normal text-muted-foreground">
+              ({data.total} total)
+            </span>
+          )}
+        </CardTitle>
+      </CardHeader>
+      {!collapsed && (
+        <CardContent className="space-y-3">
+          {loading && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" /> Loading papers...
+            </div>
+          )}
+          {data && !loading && data.papers.length === 0 && (
+            <p className="text-sm text-muted-foreground">No papers found for this date.</p>
+          )}
+          {data && !loading && data.papers.map((paper) => (
+            <AllPaperCard key={paper.id} paper={paper} />
+          ))}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1 || loading}
+                onClick={() => setPage((p) => p - 1)}
+              >
+                Previous
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                Page {page} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages || loading}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
   );
 }
 
@@ -662,6 +883,7 @@ export default function DailyPage() {
         onToggleFilter={toggleFilter}
         onArchiveFilter={(filterId) => archiveFilter.mutate(filterId)}
       />
+      <AllPapersSection key={effectiveSelectedDate} selectedDate={effectiveSelectedDate} />
       {run?.status === "completed" && Object.keys(matchesByFilter).length === 0 && (
         <Card>
           <CardContent className="pt-6 text-center">

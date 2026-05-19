@@ -24,6 +24,10 @@ class FilterResponse(BaseModel):
     name: str
     definition: dict
     status: str
+    source: str = "manual"
+    parent_filter_id: Optional[str] = None
+    proposed_action: Optional[str] = None
+    target_filter_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     archived_at: Optional[datetime] = None

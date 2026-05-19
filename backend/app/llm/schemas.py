@@ -24,15 +24,57 @@ class DocumentSummaryResponse(StrictModel):
     summary: str
 
 
-class FilterSearchMatch(StrictModel):
+class ClaimFilterResult(StrictModel):
+    verdict: Literal["positive", "negative"]
+    reason: str
+    evidence: str | None = None
+
+
+class TopicFilterResult(StrictModel):
+    reason: str
+    evidence: str | None = None
+
+
+class ClaimFilterSearchMatch(StrictModel):
     itemId: str
     sourceType: str
     sourceId: str
-    result: str
+    verdict: Literal["positive", "negative"]
+    reason: str
+    evidence: str | None = None
 
 
-class FilterSearchResponse(StrictModel):
-    matches: list[FilterSearchMatch]
+class TopicFilterSearchMatch(StrictModel):
+    itemId: str
+    sourceType: str
+    sourceId: str
+    reason: str
+    evidence: str | None = None
+
+
+class ClaimFilterSearchResponse(StrictModel):
+    matches: list[ClaimFilterSearchMatch]
+
+
+class TopicFilterSearchResponse(StrictModel):
+    matches: list[TopicFilterSearchMatch]
+
+
+# Backward-compatible alias for tests
+FilterSearchResponse = TopicFilterSearchResponse
+
+
+class FeedbackAction(StrictModel):
+    action: Literal["create", "revise", "delete"]
+    name: str | None = None
+    description: str | None = None
+    mode: Literal["claim", "topic"] | None = None
+    target_filter_id: str | None = None
+    rationale: str = ""
+
+
+class FeedbackReflectionResponse(StrictModel):
+    actions: list[FeedbackAction]
 
 
 class SearchSummaryCitation(StrictModel):

@@ -85,3 +85,62 @@ def restore_filter(filter_id: str, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(filt)
     return filt.to_pydantic()
+
+
+@router.post("/{filter_id}/accept", response_model=FilterResponse)
+def accept_proposal(filter_id: str, db: Session = Depends(get_db)):
+    filt = db.query(Filter).filter(Filter.id == filter_id).first()
+    if not filt:
+        raise HTTPException(status_code=404, detail="Filter not found")
+
+    now = datetime.now(timezone.utc)
+
+    if filt.proposed_action == "create":
+        filt.status = "active"
+        filt.proposed_action = None
+        filt.updated_at = now
+
+    elif filt.proposed_action == "revise" and filt.target_filter_id:
+        target = db.query(Filter).filter(Filter.id == filt.target_filter_id).first()
+        if target:
+            target.definition = dict(filt.definition or {})
+            target.name = filt.name
+            target.updated_at = now
+        filt.status = "archived"
+        filt.archived_at = now
+        filt.updated_at = now
+
+    elif filt.proposed_action == "delete" and filt.target_filter_id:
+        target = db.query(Filter).filter(Filter.id == filt.target_filter_id).first()
+        if target:
+            target.status = "archived"
+            target.archived_at = now
+            target.updated_at = now
+        filt.status = "archived"
+        filt.archived_at = now
+        filt.updated_at = now
+
+    else:
+        raise HTTPException(status_code=400, detail="Not a pending proposal")
+
+    db.commit()
+    db.refresh(filt)
+    return filt.to_pydantic()
+
+
+@router.post("/{filter_id}/reject", response_model=FilterResponse)
+def reject_proposal(filter_id: str, db: Session = Depends(get_db)):
+    filt = db.query(Filter).filter(Filter.id == filter_id).first()
+    if not filt:
+        raise HTTPException(status_code=404, detail="Filter not found")
+
+    if not filt.proposed_action:
+        raise HTTPException(status_code=400, detail="Not a pending proposal")
+
+    now = datetime.now(timezone.utc)
+    filt.status = "archived"
+    filt.archived_at = now
+    filt.updated_at = now
+    db.commit()
+    db.refresh(filt)
+    return filt.to_pydantic()

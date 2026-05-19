@@ -1,6 +1,7 @@
 "use client";
 
-import { Database, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Clock, Database, GraduationCap, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,7 +10,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { useDataSources, useUpdateDataSource } from "@/hooks/use-queries";
+import { api } from "@/lib/api";
 import type { DataSource } from "@/lib/api";
 
 const SOURCE_DESCRIPTIONS: Record<string, string> = {
@@ -100,6 +103,144 @@ export default function SettingsPage() {
           />
         ))}
       </div>
+
+      <DailyScheduleSection />
+      <ScholarReimportSection />
     </div>
+  );
+}
+
+function ScholarReimportSection() {
+  const [url, setUrl] = useState("");
+  const [step, setStep] = useState<"input" | "verifying" | "importing" | "done" | "error">("input");
+  const [error, setError] = useState<string | null>(null);
+
+  const handleImport = async () => {
+    if (!url.trim()) return;
+    setStep("verifying");
+    setError(null);
+    try {
+      const profile = await api.verifyScholarProfile(url);
+      setStep("importing");
+      await api.startScholarImport({
+        url,
+        author_id: profile.author_id,
+        display_name: profile.name,
+      });
+      setStep("done");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed");
+      setStep("error");
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <GraduationCap className="size-4" />
+          Semantic Scholar Re-import
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {step === "done" ? (
+          <p className="text-sm text-muted-foreground">
+            Re-import started. New draft filters will appear on the Filters page.
+          </p>
+        ) : (
+          <>
+            <div className="flex gap-2">
+              <Input
+                placeholder="Paste Semantic Scholar profile URL..."
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                disabled={step === "verifying" || step === "importing"}
+              />
+              <Button
+                size="sm"
+                onClick={handleImport}
+                disabled={!url.trim() || step === "verifying" || step === "importing"}
+              >
+                {(step === "verifying" || step === "importing") && (
+                  <Loader2 className="mr-1 size-3 animate-spin" />
+                )}
+                Re-import
+              </Button>
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            <p className="text-xs text-muted-foreground">
+              Re-import your Semantic Scholar profile to generate new draft filters from your latest publications.
+            </p>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function DailyScheduleSection() {
+  const [time, setTime] = useState("");
+  const [enabled, setEnabled] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    api.getDailySchedule()
+      .then((data) => {
+        setTime(data.time || "");
+        setEnabled(data.enabled);
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const result = await api.updateDailySchedule({ time: time || null, enabled });
+      setTime(result.time || "");
+      setEnabled(result.enabled);
+    } catch {
+      // ignore
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!loaded) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Clock className="size-4" />
+          Daily Search Schedule
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-center gap-3">
+          <Input
+            type="time"
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+            className="w-36"
+          />
+          <Button
+            variant={enabled ? "outline" : "default"}
+            size="sm"
+            onClick={() => setEnabled(!enabled)}
+          >
+            {enabled ? "Enabled" : "Disabled"}
+          </Button>
+          <Button size="sm" onClick={handleSave} disabled={saving}>
+            {saving && <Loader2 className="mr-1 size-3 animate-spin" />}
+            Save
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Set a preferred time for daily searches. Scheduling is not yet automated.
+        </p>
+      </CardContent>
+    </Card>
   );
 }

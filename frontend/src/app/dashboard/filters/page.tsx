@@ -17,6 +17,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   InputGroup,
   InputGroupAddon,
@@ -35,13 +36,14 @@ import {
   useUpdateFilter,
   useUploadDocument,
 } from "@/hooks/use-queries";
-import { DocumentUploadResponse, FilterResponse } from "@/lib/api";
+import { api, DocumentUploadResponse, FilterResponse } from "@/lib/api";
 import {
   Archive,
   Check,
   ChevronDown,
   ChevronRight,
   FileText,
+  GraduationCap,
   Loader2,
   Pencil,
   Plus,
@@ -86,7 +88,6 @@ function DocumentChip({
     isActive ? document.job_id : null
   );
   const latestDocument = documentJob?.subject;
-  const job = documentJob?.job;
   const displayDocument = latestDocument
     ? { ...document, ...latestDocument, job_id: document.job_id }
     : document;
@@ -183,10 +184,11 @@ function DraftFilterCard({ filter }: { filter: FilterResponse }) {
               value={name}
               onChange={(event) => setName(event.target.value)}
             />
-            <Input
+            <Textarea
               aria-label="Filter description"
               value={description}
               onChange={(event) => setDescription(event.target.value)}
+              rows={3}
             />
             <div className="flex gap-2">
               <Button
@@ -245,6 +247,193 @@ function DraftFilterCard({ filter }: { filter: FilterResponse }) {
   );
 }
 
+function ScholarImportSection({ hasScholarFilters }: { hasScholarFilters: boolean }) {
+  const [url, setUrl] = useState("");
+  const [step, setStep] = useState<"input" | "verifying" | "verified" | "importing" | "polling" | "done" | "error">("input");
+  const [profile, setProfile] = useState<{ author_id: string; name: string; affiliations: string[]; paper_count: number | null } | null>(null);
+  const [importId, setImportId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (step !== "polling" || !importId) return;
+    const interval = setInterval(async () => {
+      try {
+        const status = await api.getScholarImportStatus(importId);
+        if (status.status === "completed") {
+          setStep("done");
+          queryClient.invalidateQueries({ queryKey: ["filters"] });
+          clearInterval(interval);
+        } else if (status.status === "failed") {
+          setError(status.error || "Import failed");
+          setStep("error");
+          clearInterval(interval);
+        }
+      } catch {
+        // keep polling
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [step, importId, queryClient]);
+
+  if (hasScholarFilters && step === "input") return null;
+
+  const handleVerify = async () => {
+    if (!url.trim()) return;
+    setStep("verifying");
+    setError(null);
+    try {
+      const result = await api.verifyScholarProfile(url);
+      setProfile(result);
+      setStep("verified");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Verification failed");
+      setStep("error");
+    }
+  };
+
+  const handleImport = async () => {
+    if (!profile) return;
+    setStep("importing");
+    try {
+      const result = await api.startScholarImport({
+        url,
+        author_id: profile.author_id,
+        display_name: profile.name,
+      });
+      setImportId(result.id);
+      setStep("polling");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed");
+      setStep("error");
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <GraduationCap className="size-4" />
+          Semantic Scholar Profile Import
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {step === "done" ? (
+          <p className="text-sm text-muted-foreground">
+            Import complete for {profile?.name}. Draft filters are ready for review above.
+          </p>
+        ) : (
+          <>
+            <div className="flex gap-2">
+              <Input
+                placeholder="Paste Semantic Scholar profile URL..."
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                disabled={step === "verifying" || step === "importing" || step === "polling"}
+              />
+              {step === "input" || step === "error" ? (
+                <Button size="sm" onClick={handleVerify} disabled={!url.trim()}>
+                  Verify
+                </Button>
+              ) : null}
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            {step === "verifying" && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Verifying profile...
+              </div>
+            )}
+            {step === "verified" && profile && (
+              <div className="space-y-2">
+                <div className="text-sm">
+                  <p className="font-medium">{profile.name}</p>
+                  {profile.affiliations.length > 0 && (
+                    <p className="text-muted-foreground">{profile.affiliations.join(", ")}</p>
+                  )}
+                  {profile.paper_count != null && (
+                    <p className="text-muted-foreground">{profile.paper_count} papers</p>
+                  )}
+                </div>
+                <Button size="sm" onClick={handleImport}>
+                  Import & Generate Filters
+                </Button>
+              </div>
+            )}
+            {(step === "importing" || step === "polling") && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                {step === "importing" ? "Starting import..." : "Generating filters from publications..."}
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ProposalCard({
+  filter,
+  targetFilter,
+  onAccept,
+  onReject,
+}: {
+  filter: FilterResponse;
+  targetFilter?: FilterResponse;
+  onAccept: () => void;
+  onReject: () => void;
+}) {
+  const actionLabel =
+    filter.proposed_action === "create"
+      ? "New filter"
+      : filter.proposed_action === "revise"
+        ? "Revise existing filter"
+        : "Delete filter";
+  const badgeVariant =
+    filter.proposed_action === "create"
+      ? "default"
+      : filter.proposed_action === "delete"
+        ? "destructive"
+        : "secondary";
+
+  return (
+    <Card>
+      <CardContent className="pt-4 space-y-2">
+        <div className="flex items-center gap-2">
+          <Badge variant={badgeVariant}>{actionLabel}</Badge>
+        </div>
+        <p className="font-medium">{filter.name}</p>
+        {filter.proposed_action !== "delete" && (
+          <p className="text-sm text-muted-foreground">
+            {filter.definition.description}
+          </p>
+        )}
+        {targetFilter && filter.proposed_action === "revise" && (
+          <div className="rounded border p-2 text-xs text-muted-foreground space-y-1">
+            <p className="font-medium">Current: {targetFilter.name}</p>
+            <p>{targetFilter.definition.description}</p>
+          </div>
+        )}
+        {targetFilter && filter.proposed_action === "delete" && (
+          <p className="text-sm text-muted-foreground">
+            Will archive: {targetFilter.name}
+          </p>
+        )}
+        <div className="flex gap-2">
+          <Button size="sm" onClick={onAccept}>
+            <Check className="mr-1 size-3" />
+            Accept
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onReject}>
+            Dismiss
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function FiltersPage() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -264,9 +453,51 @@ export default function FiltersPage() {
   const { data: draftFilters = [] } = useFilters("draft");
   const { data: allFilters } = useFilters();
 
+  const [processingFeedback, setProcessingFeedback] = useState(false);
+  const [feedbackStatus, setFeedbackStatus] = useState<{ pending_votes: number; pending_notes: number; pending_proposals: number } | null>(null);
+
   const activeFilters = allFilters?.filter((f) => f.status === "active") || [];
   const archivedFilters =
     allFilters?.filter((f) => f.status === "archived") || [];
+  const proposalFilters = allFilters?.filter(
+    (f) => f.proposed_action && ["pending_create", "pending_revision", "pending_deletion"].includes(f.status)
+  ) || [];
+  const hasScholarFilters = allFilters?.some((f) => f.source === "scholar") || false;
+
+  useEffect(() => {
+    api.getFeedbackStatus().then(setFeedbackStatus).catch(() => {});
+  }, []);
+
+  const handleProcessFeedback = async () => {
+    setProcessingFeedback(true);
+    try {
+      await api.processFeedback();
+      queryClient.invalidateQueries({ queryKey: ["filters"] });
+      api.getFeedbackStatus().then(setFeedbackStatus).catch(() => {});
+    } catch {
+      // ignore
+    } finally {
+      setProcessingFeedback(false);
+    }
+  };
+
+  const handleAcceptProposal = async (filterId: string) => {
+    try {
+      await api.acceptProposal(filterId);
+      queryClient.invalidateQueries({ queryKey: ["filters"] });
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleRejectProposal = async (filterId: string) => {
+    try {
+      await api.rejectProposal(filterId);
+      queryClient.invalidateQueries({ queryKey: ["filters"] });
+    } catch {
+      // ignore
+    }
+  };
 
   const readyDocuments = documents.filter(
     (document) => document.status === "ready"
@@ -494,6 +725,53 @@ export default function FiltersPage() {
               ))}
             </div>
           ) : null}
+        </div>
+      )}
+
+      <ScholarImportSection hasScholarFilters={hasScholarFilters} />
+
+      {feedbackStatus && (feedbackStatus.pending_votes > 0 || feedbackStatus.pending_notes > 0) && (
+        <Card>
+          <CardContent className="pt-4 flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Pending Feedback</p>
+              <p className="text-xs text-muted-foreground">
+                {feedbackStatus.pending_votes} vote{feedbackStatus.pending_votes !== 1 ? "s" : ""}
+                {feedbackStatus.pending_notes > 0 && `, ${feedbackStatus.pending_notes} note${feedbackStatus.pending_notes !== 1 ? "s" : ""}`}
+              </p>
+            </div>
+            <Button
+              size="sm"
+              onClick={handleProcessFeedback}
+              disabled={processingFeedback}
+            >
+              {processingFeedback ? (
+                <Loader2 className="mr-1 size-3 animate-spin" />
+              ) : null}
+              Process Feedback
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {proposalFilters.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-lg font-semibold">
+            Proposals ({proposalFilters.length})
+          </h2>
+          {proposalFilters.map((f) => (
+            <ProposalCard
+              key={f.id}
+              filter={f}
+              targetFilter={
+                f.target_filter_id
+                  ? allFilters?.find((t) => t.id === f.target_filter_id)
+                  : undefined
+              }
+              onAccept={() => handleAcceptProposal(f.id)}
+              onReject={() => handleRejectProposal(f.id)}
+            />
+          ))}
         </div>
       )}
 

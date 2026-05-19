@@ -104,6 +104,7 @@ def _create_draft_filter(db, raw: dict, job_id: str) -> Filter:
         name=definition["name"],
         definition=definition,
         status="draft",
+        source="onboarding",
         created_at=now,
         updated_at=now,
     )
