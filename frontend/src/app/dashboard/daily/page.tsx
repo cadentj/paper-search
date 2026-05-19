@@ -446,35 +446,45 @@ function MatchResultDisplay({ match }: { match: PaperMatch }) {
 
 function FeedbackButtons({ matchId }: { matchId: string }) {
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [pending, setPending] = useState<"up" | "down" | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleFeedback = async (value: "up" | "down") => {
-    if (loading) return;
-    setLoading(true);
-    try {
-      await api.submitFeedback(matchId, value);
-      setFeedback(value);
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
+  const handleFeedback = (value: "up" | "down") => {
+    if (submitted) return;
+    setPending(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      setSubmitted(true);
+      try {
+        await api.submitFeedback(matchId, value);
+        setFeedback(value);
+      } catch {
+        setSubmitted(false);
+      }
+      setPending(null);
+    }, 2500);
   };
+
+  const active = pending ?? feedback;
 
   return (
     <div className="flex items-center gap-1">
+      {submitted && !feedback && (
+        <Loader2 className="size-3 animate-spin text-muted-foreground" />
+      )}
       <button
         onClick={() => handleFeedback("up")}
-        disabled={loading}
-        className={`p-1 rounded hover:bg-muted ${feedback === "up" ? "text-green-600" : "text-muted-foreground"}`}
+        disabled={submitted}
+        className={`p-1 rounded hover:bg-muted ${active === "up" ? "text-green-600" : "text-muted-foreground"} ${submitted ? "opacity-50 cursor-not-allowed" : ""}`}
         aria-label="Thumbs up"
       >
         <ThumbsUp className="size-3.5" />
       </button>
       <button
         onClick={() => handleFeedback("down")}
-        disabled={loading}
-        className={`p-1 rounded hover:bg-muted ${feedback === "down" ? "text-red-600" : "text-muted-foreground"}`}
+        disabled={submitted}
+        className={`p-1 rounded hover:bg-muted ${active === "down" ? "text-red-600" : "text-muted-foreground"} ${submitted ? "opacity-50 cursor-not-allowed" : ""}`}
         aria-label="Thumbs down"
       >
         <ThumbsDown className="size-3.5" />

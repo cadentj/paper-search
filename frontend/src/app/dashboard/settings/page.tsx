@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Clock, Database, Loader2 } from "lucide-react";
+import { Clock, Database, GraduationCap, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -105,7 +105,76 @@ export default function SettingsPage() {
       </div>
 
       <DailyScheduleSection />
+      <ScholarReimportSection />
     </div>
+  );
+}
+
+function ScholarReimportSection() {
+  const [url, setUrl] = useState("");
+  const [step, setStep] = useState<"input" | "verifying" | "importing" | "done" | "error">("input");
+  const [error, setError] = useState<string | null>(null);
+
+  const handleImport = async () => {
+    if (!url.trim()) return;
+    setStep("verifying");
+    setError(null);
+    try {
+      const profile = await api.verifyScholarProfile(url);
+      setStep("importing");
+      await api.startScholarImport({
+        url,
+        author_id: profile.author_id,
+        display_name: profile.name,
+      });
+      setStep("done");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed");
+      setStep("error");
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <GraduationCap className="size-4" />
+          Semantic Scholar Re-import
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {step === "done" ? (
+          <p className="text-sm text-muted-foreground">
+            Re-import started. New draft filters will appear on the Filters page.
+          </p>
+        ) : (
+          <>
+            <div className="flex gap-2">
+              <Input
+                placeholder="Paste Semantic Scholar profile URL..."
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                disabled={step === "verifying" || step === "importing"}
+              />
+              <Button
+                size="sm"
+                onClick={handleImport}
+                disabled={!url.trim() || step === "verifying" || step === "importing"}
+              >
+                {(step === "verifying" || step === "importing") && (
+                  <Loader2 className="mr-1 size-3 animate-spin" />
+                )}
+                Re-import
+              </Button>
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            <p className="text-xs text-muted-foreground">
+              Re-import your Semantic Scholar profile to generate new draft filters from your latest publications.
+            </p>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

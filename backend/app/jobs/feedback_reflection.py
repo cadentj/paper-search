@@ -1,8 +1,7 @@
-"""Feedback reflection worker job — generate draft filters from match feedback."""
+"""Feedback reflection worker job — revise a filter based on match feedback."""
 
 import json
 import logging
-import uuid
 from datetime import datetime, timezone
 
 from app.db.session import SessionLocal
@@ -69,27 +68,12 @@ def reflect_on_feedback(feedback_id: str, job_id: str) -> None:
             profile=FILTER_GENERATION_PROFILE,
         )
 
-        proposed = result["content"].get("filters", [])
-        now = datetime.now(timezone.utc)
-
-        for raw in proposed[:3]:
-            filt = Filter(
-                id=str(uuid.uuid4()),
-                name=raw.get("name", "Unnamed Filter"),
-                definition={
-                    "name": raw.get("name", "Unnamed Filter"),
-                    "description": raw.get("description", ""),
-                    "mode": raw.get("mode", "topic"),
-                    "rationale": raw.get("rationale", ""),
-                    "feedback_id": feedback.id,
-                },
-                status="draft",
-                source="feedback",
-                parent_filter_id=parent_filter.id,
-                created_at=now,
-                updated_at=now,
-            )
-            db.add(filt)
+        revised_description = result["content"].get("revised_description", "")
+        if revised_description:
+            new_def = dict(parent_def)
+            new_def["description"] = revised_description
+            parent_filter.definition = new_def
+            parent_filter.updated_at = datetime.now(timezone.utc)
 
         set_job_status(job, status="completed")
         db.commit()

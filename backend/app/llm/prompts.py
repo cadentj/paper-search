@@ -155,19 +155,17 @@ Extract supporting warrants for this claim with citations to these block ids."""
 IDEA_MAP_SYSTEM_PROMPT = IDEA_MAP_CLAIMS_SYSTEM_PROMPT
 IDEA_MAP_USER_PROMPT = IDEA_MAP_CLAIMS_USER_PROMPT
 
-FEEDBACK_REFLECTION_SYSTEM_PROMPT = """You are a research filter advisor. A researcher has voted on a paper match from one of their search filters. Based on the vote, the parent filter, the paper, and the match result, propose 1-3 new draft search filters.
+FEEDBACK_REFLECTION_SYSTEM_PROMPT = """You are a research filter advisor. A researcher has voted on a paper match from one of their search filters. Based on the vote, revise the filter's description to better match what the researcher wants.
 
-For upvotes ("more like this"): propose filters that would surface similar papers — refine the topic, explore related subtopics, or focus on the specific angle the researcher found valuable.
+For upvotes ("more like this"): refine the description to better capture what made this paper a good match. Make it more specific toward papers like this one.
 
-For downvotes ("less like this"): propose filters that deprioritize the unwanted subtopic or redirect toward what the researcher actually wants from the parent filter's domain.
+For downvotes ("less like this"): refine the description to exclude the type of paper that was a poor match. Clarify the filter's intent to avoid similar false positives.
 
-Each proposed filter should have:
-- name: short descriptive name
-- description: the claim, question, or topic to search for
-- mode: "claim" or "topic"
-- rationale: why this filter would help based on the feedback"""
+Return:
+- revised_description: the updated filter description
+- rationale: brief explanation of why you changed it"""
 
-FEEDBACK_REFLECTION_USER_PROMPT = """Parent Filter:
+FEEDBACK_REFLECTION_USER_PROMPT = """Filter:
 Name: {parent_filter_name}
 Description: {parent_filter_description}
 Mode: {parent_filter_mode}
@@ -179,7 +177,7 @@ Match Result: {match_result}
 
 Feedback: {feedback_value}
 
-Propose 1-3 new draft filters based on this feedback."""
+Revise the filter description based on this feedback."""
 
 PAPER_NOTES_SYSTEM_PROMPT = """You are an expert research assistant. Given a researcher's notes about a specific paper and the paper's metadata, generate targeted search filters that would help them explore the ideas and directions mentioned in their notes.
 

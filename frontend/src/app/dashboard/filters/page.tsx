@@ -17,6 +17,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   InputGroup,
   InputGroupAddon,
@@ -184,10 +185,11 @@ function DraftFilterCard({ filter }: { filter: FilterResponse }) {
               value={name}
               onChange={(event) => setName(event.target.value)}
             />
-            <Input
+            <Textarea
               aria-label="Filter description"
               value={description}
               onChange={(event) => setDescription(event.target.value)}
+              rows={3}
             />
             <div className="flex gap-2">
               <Button
@@ -246,12 +248,36 @@ function DraftFilterCard({ filter }: { filter: FilterResponse }) {
   );
 }
 
-function ScholarImportSection() {
+function ScholarImportSection({ hasScholarFilters }: { hasScholarFilters: boolean }) {
   const [url, setUrl] = useState("");
-  const [step, setStep] = useState<"input" | "verifying" | "verified" | "importing" | "done" | "error">("input");
+  const [step, setStep] = useState<"input" | "verifying" | "verified" | "importing" | "polling" | "done" | "error">("input");
   const [profile, setProfile] = useState<{ author_id: string; name: string; affiliations: string[]; paper_count: number | null } | null>(null);
+  const [importId, setImportId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (step !== "polling" || !importId) return;
+    const interval = setInterval(async () => {
+      try {
+        const status = await api.getScholarImportStatus(importId);
+        if (status.status === "completed") {
+          setStep("done");
+          queryClient.invalidateQueries({ queryKey: ["filters"] });
+          clearInterval(interval);
+        } else if (status.status === "failed") {
+          setError(status.error || "Import failed");
+          setStep("error");
+          clearInterval(interval);
+        }
+      } catch {
+        // keep polling
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [step, importId, queryClient]);
+
+  if (hasScholarFilters && step === "input") return null;
 
   const handleVerify = async () => {
     if (!url.trim()) return;
@@ -271,13 +297,13 @@ function ScholarImportSection() {
     if (!profile) return;
     setStep("importing");
     try {
-      await api.startScholarImport({
+      const result = await api.startScholarImport({
         url,
         author_id: profile.author_id,
         display_name: profile.name,
       });
-      setStep("done");
-      queryClient.invalidateQueries({ queryKey: ["filters"] });
+      setImportId(result.id);
+      setStep("polling");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed");
       setStep("error");
@@ -295,7 +321,7 @@ function ScholarImportSection() {
       <CardContent className="space-y-3">
         {step === "done" ? (
           <p className="text-sm text-muted-foreground">
-            Import started for {profile?.name}. Draft filters will appear above shortly.
+            Import complete for {profile?.name}. Draft filters are ready for review above.
           </p>
         ) : (
           <>
@@ -304,7 +330,7 @@ function ScholarImportSection() {
                 placeholder="Paste Semantic Scholar profile URL..."
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                disabled={step === "verifying" || step === "importing"}
+                disabled={step === "verifying" || step === "importing" || step === "polling"}
               />
               {step === "input" || step === "error" ? (
                 <Button size="sm" onClick={handleVerify} disabled={!url.trim()}>
@@ -335,10 +361,10 @@ function ScholarImportSection() {
                 </Button>
               </div>
             )}
-            {step === "importing" && (
+            {(step === "importing" || step === "polling") && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
-                Importing papers and generating filters...
+                {step === "importing" ? "Starting import..." : "Generating filters from publications..."}
               </div>
             )}
           </>
@@ -370,6 +396,7 @@ export default function FiltersPage() {
   const activeFilters = allFilters?.filter((f) => f.status === "active") || [];
   const archivedFilters =
     allFilters?.filter((f) => f.status === "archived") || [];
+  const hasScholarFilters = allFilters?.some((f) => f.source === "scholar") || false;
 
   const readyDocuments = documents.filter(
     (document) => document.status === "ready"
@@ -600,7 +627,7 @@ export default function FiltersPage() {
         </div>
       )}
 
-      <ScholarImportSection />
+      <ScholarImportSection hasScholarFilters={hasScholarFilters} />
 
       {activeFilters.length > 0 && (
         <div className="space-y-3">

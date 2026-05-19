@@ -64,15 +64,9 @@ class TopicFilterSearchResponse(StrictModel):
 FilterSearchResponse = TopicFilterSearchResponse
 
 
-class FeedbackReflectionFilter(StrictModel):
-    name: str
-    description: str
-    mode: Literal["claim", "topic"]
-    rationale: str
-
-
 class FeedbackReflectionResponse(StrictModel):
-    filters: list[FeedbackReflectionFilter]
+    revised_description: str
+    rationale: str
 
 
 class PaperNotesFilterGenFilter(StrictModel):
