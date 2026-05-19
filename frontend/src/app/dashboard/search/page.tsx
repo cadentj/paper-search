@@ -10,7 +10,12 @@ import {
 import { SummaryText } from "@/components/summary-text";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useSearchRuns, useSearchRunMatches, useSearchRun } from "@/hooks/use-queries";
+import {
+  useSearchRuns,
+  useSearchRunMatches,
+  useSearchRun,
+  useSearchRunSummary,
+} from "@/hooks/use-queries";
 import { ChevronDown, ChevronRight, Calendar, FileText } from "lucide-react";
 
 const TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
@@ -35,6 +40,10 @@ export default function SearchPage() {
   const { data: runs, isLoading } = useSearchRuns();
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const { data: selectedRun } = useSearchRun(selectedRunId);
+  const { data: selectedSummary } = useSearchRunSummary(
+    selectedRunId,
+    selectedRun?.status === "completed"
+  );
   const { data: matches } = useSearchRunMatches(
     selectedRun?.status === "completed" ? selectedRunId : null
   );
@@ -124,14 +133,14 @@ export default function SearchPage() {
 
               {selectedRunId === run.id && selectedRun && (
                 <CardContent className="space-y-3">
-                  {selectedRun.summary && (
+                  {selectedSummary && (
                     <div className="rounded-lg bg-muted/50 p-3">
                       <p className="text-xs font-medium text-muted-foreground mb-1">
                         Summary
                       </p>
                       <SummaryText
-                        summary={selectedRun.summary}
-                        citations={selectedRun.summary_citations}
+                        summary={selectedSummary.summary}
+                        citations={selectedSummary.citations}
                         matches={matches || []}
                         className="whitespace-pre-wrap text-sm"
                       />

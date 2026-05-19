@@ -17,13 +17,17 @@ from app.models.paper_match import PaperMatch
 from app.models.search_run import SearchRun
 from app.schemas.jobs import (
     DailySearchJobResponse,
+    DailySearchSummaryJobResponse,
     DocumentProcessingJobResponse,
     IdeaMapJobResponse,
     JobResponse,
     OnboardingExtractionJobResponse,
     OnboardingGenerationJobResponse,
 )
+from app.api.search import _search_run_payload, _summary_payload
 from app.schemas.search import PaperMatchResponse
+from app.services.jobs import latest_job_for_subject
+
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 DONE_STATUSES = {"completed", "failed", "skipped"}
 
@@ -182,6 +186,24 @@ def get_daily_search_job(
         subject=run.to_pydantic(job_id=job.id),
         items=[_paper_match_response(db, match) for match in matches],
         next_cursor=next_cursor,
+        done=_is_done(job),
+    )
+
+
+@router.get(
+    "/daily-search-summary/{job_id}",
+    response_model=DailySearchSummaryJobResponse,
+)
+def get_daily_search_summary_job(job_id: str, db: Session = Depends(get_db)):
+    job = _get_job(db, job_id, "daily_search_summary")
+    run = db.query(SearchRun).filter(SearchRun.id == job.subject_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Search run not found")
+
+    return DailySearchSummaryJobResponse(
+        job=job.to_pydantic(),
+        run=_search_run_payload(run, db),
+        summary=_summary_payload(run),
         done=_is_done(job),
     )
 

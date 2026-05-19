@@ -11,8 +11,11 @@ const mockApi = vi.hoisted(() => ({
   getLatestSearchRun: vi.fn(),
   getSearchRun: vi.fn(),
   getSearchRunMatches: vi.fn(),
+  getSearchRunSummary: vi.fn(),
   getDailySearchJob: vi.fn(),
   createDailySearchRun: vi.fn(),
+  createDailySearchSummary: vi.fn(),
+  getDailySearchSummaryJob: vi.fn(),
   getDailyCandidateCount: vi.fn(),
   getFilters: vi.fn(),
   createFilter: vi.fn(),
@@ -110,17 +113,20 @@ describe("DailyPage", () => {
     mockApi.getSearchRun.mockResolvedValue({
       id: "r1",
       status: "completed",
+      match_count: 1,
+      candidate_count: 5,
+    });
+    mockApi.getSearchRunSummary.mockResolvedValue({
+      search_run_id: "r1",
       summary:
         'Today we found interesting papers on reasoning <cite arxivId="2401.00001"/>.',
-      summary_citations: [
+      citations: [
         {
           arxivId: "2401.00001",
           paperMatchId: "m1",
           citedFor: "reasoning evidence",
         },
       ],
-      match_count: 1,
-      candidate_count: 5,
     });
     mockApi.getSearchRunMatches.mockResolvedValue([
       {

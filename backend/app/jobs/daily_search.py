@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import uuid
 from datetime import datetime, timezone
 
 from app.core.config import LLM_MAX_CONCURRENCY
@@ -11,23 +10,17 @@ from app.models.filter import Filter
 from app.models.paper import Paper
 from app.models.paper_match import PaperMatch
 from app.models.search_run import SearchRun
-from app.models.search_run_paper import SearchRunPaper
 from app.models.job import Job
 from app.services.jobs import get_or_create_job_for_subject, job_progress, set_job_status
-from app.services.source_providers import candidates_for_sources
+from app.services.source_providers import papers_for_sources
 from app.services.source_settings import enabled_source_types
-from app.llm.client import async_call_llm, call_llm
-from app.llm.config import JUDGE_PROFILE, SUMMARY_PROFILE
+from app.llm.client import async_call_llm
+from app.llm.config import JUDGE_PROFILE
 from app.llm.prompts import (
     FILTER_SEARCH_SYSTEM_PROMPT,
     FILTER_SEARCH_USER_PROMPT,
-    SUMMARY_SYSTEM_PROMPT,
-    SUMMARY_USER_PROMPT,
 )
-from app.llm.schemas import (
-    FilterSearchResponse,
-    SearchSummaryResponse,
-)
+from app.llm.schemas import FilterSearchResponse
 from app.schemas.daily_search import FilterPayload, PairEvaluation
 from paper_search_core.schemas.daily_search import PaperPayload
 from tqdm import tqdm
@@ -53,19 +46,6 @@ def _build_papers_text(papers: list[PaperPayload]) -> str:
 
 def _build_paper_text(paper: PaperPayload) -> str:
     return _build_papers_text([paper])
-
-
-def _build_matches_text(matches: list[dict]) -> str:
-    lines = []
-    for m in matches:
-        lines.append(
-            f"Item: {m.get('paper_title', 'Unknown')} ({m.get('item_id', '')})\n"
-            f"Source: {m.get('source_type', '')} {m.get('source_id', '')}\n"
-            f"Filter: {m.get('filter_name', 'Unknown')}\n"
-            f"Result: {m.get('result', '')}\n"
-            f"Match ID: {m.get('match_id', '')}\n"
-        )
-    return "\n---\n".join(lines)
 
 
 def _set_run_status(
@@ -96,50 +76,17 @@ def _resolve_daily_search_job(db, search_run_id: str, job_id: str | None) -> Job
     )
 
 
-def _link_candidate_papers(db, run: SearchRun) -> list[Paper]:
-    now = datetime.now(timezone.utc)
-    active_sources = enabled_source_types(db)
-    fetch_result = candidates_for_sources(active_sources, run.run_date)
-    if active_sources and fetch_result.errors and not fetch_result.papers:
-        raise RuntimeError("; ".join(fetch_result.errors))
-
-    paper_ids = [paper.id for paper in fetch_result.papers]
-    if paper_ids:
-        papers = db.query(Paper).filter(Paper.id.in_(paper_ids)).all()
-        papers_by_id = {paper.id: paper for paper in papers}
-        ordered_papers = [
-            papers_by_id[paper_id]
-            for paper_id in paper_ids
-            if paper_id in papers_by_id
-        ]
-    else:
-        ordered_papers = []
-
-    candidate_paper_ids: set[str] = set()
-    papers: list[Paper] = []
+def _candidate_counts_by_source(papers: list[Paper]) -> dict[str, int]:
     counts: dict[str, int] = {}
-
-    db.query(SearchRunPaper).filter(SearchRunPaper.search_run_id == run.id).delete()
-
-    for paper in ordered_papers:
-        if paper.id in candidate_paper_ids:
-            continue
-        candidate_paper_ids.add(paper.id)
+    for paper in papers:
         source_type = paper.source_type or "arxiv"
         counts[source_type] = counts.get(source_type, 0) + 1
-        papers.append(paper)
-        db.add(
-            SearchRunPaper(
-                search_run_id=run.id,
-                paper_id=paper.id,
-                created_at=now,
-            )
-        )
+    return counts
 
-    run.candidate_count = len(candidate_paper_ids)
-    run.candidate_counts = counts
+
+def _complete_daily_search_stage(db, run: SearchRun, job: Job) -> None:
+    set_job_status(job, status="completed")
     db.commit()
-    return papers
 
 
 def _filter_behavior(mode: str) -> str:
@@ -284,18 +231,19 @@ async def _evaluate_pairs(
 
 
 def run_daily_search(search_run_id: str, job_id: str | None = None) -> None:
-    """Worker job: run daily search across all active filters."""
+    """Worker job: evaluate filters against daily papers and persist matches."""
     db = SessionLocal()
     try:
         run = db.query(SearchRun).filter(SearchRun.id == search_run_id).first()
         if not run:
             return
         job = _resolve_daily_search_job(db, search_run_id, job_id)
+        run.status = "running"
         run.started_at = datetime.now(timezone.utc)
         set_job_status(job, status="running")
         db.commit()
 
-        papers = _link_candidate_papers(db, run)
+        papers = papers_for_sources(enabled_source_types(db), run.run_date)
 
         active_filters = db.query(Filter).filter(Filter.status == "active").all()
         filter_payloads = [f.to_search_payload() for f in active_filters]
@@ -304,19 +252,15 @@ def run_daily_search(search_run_id: str, job_id: str | None = None) -> None:
         job.progress = job_progress(total=pair_total)
         db.commit()
 
+        run.candidate_count = len(papers)
+        run.candidate_counts = _candidate_counts_by_source(papers)
+
         if not filter_payloads or not paper_payloads:
-            run.candidate_count = len(papers)
             run.match_count = 0
-            run.summary = (
-                "No active filters to search."
-                if papers
-                else "No items were available for this daily search."
-            )
-            run.completed_at = datetime.now(timezone.utc)
-            _set_run_status(db, run, job, status="completed")
+            db.commit()
+            _complete_daily_search_stage(db, run, job)
             return
 
-        all_match_info = []
         completed_pairs = 0
         failed_pairs = 0
         first_pair_error = ""
@@ -338,25 +282,16 @@ def run_daily_search(search_run_id: str, job_id: str | None = None) -> None:
                 match_data = evaluation.result or {}
                 result_text = str(match_data.get("result") or "").strip()
                 if result_text:
-                    match = PaperMatch(
-                        id=str(uuid.uuid4()),
-                        search_run_id=search_run_id,
-                        filter_id=evaluation.filter_id,
-                        paper_id=evaluation.paper_id,
-                        result=result_text,
-                        llm_model=evaluation.model,
-                        llm_response_id=evaluation.response_id,
+                    db.add(
+                        PaperMatch(
+                            search_run_id=search_run_id,
+                            filter_id=evaluation.filter_id,
+                            paper_id=evaluation.paper_id,
+                            result=result_text,
+                            llm_model=evaluation.model,
+                            llm_response_id=evaluation.response_id,
+                        )
                     )
-                    db.add(match)
-                    all_match_info.append({
-                        "match_id": match.id,
-                        "paper_title": evaluation.paper_title,
-                        "item_id": evaluation.item_id,
-                        "source_type": evaluation.source_type,
-                        "source_id": evaluation.source_id,
-                        "filter_name": evaluation.filter_name,
-                        "result": match.result,
-                    })
             db.commit()
             pair_progress.update(1)
 
@@ -380,31 +315,13 @@ def run_daily_search(search_run_id: str, job_id: str | None = None) -> None:
                 f"All {pair_total} filter-item evaluations failed. First error: {first_pair_error}"
             )
 
-        match_count = len(all_match_info)
-
-        if all_match_info:
-            matches_text = _build_matches_text(all_match_info)
-            user_prompt = SUMMARY_USER_PROMPT.format(matches_text=matches_text)
-
-            result = call_llm(
-                system_prompt=SUMMARY_SYSTEM_PROMPT,
-                user_prompt=user_prompt,
-                response_model=SearchSummaryResponse,
-                profile=SUMMARY_PROFILE,
-            )
-            summary_data = result["content"]
-        else:
-            summary_data = {
-                "summary": "No relevant items found in today's search.",
-                "citations": [],
-            }
-
-        run.candidate_count = len(papers)
-        run.match_count = match_count
-        run.summary = summary_data.get("summary", "")
-        run.summary_citations = summary_data.get("citations", [])
-        run.completed_at = datetime.now(timezone.utc)
-        _set_run_status(db, run, job, status="completed")
+        run.match_count = (
+            db.query(PaperMatch)
+            .filter(PaperMatch.search_run_id == search_run_id)
+            .count()
+        )
+        db.commit()
+        _complete_daily_search_stage(db, run, job)
 
     except Exception as e:
         db.rollback()

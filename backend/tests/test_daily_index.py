@@ -3,10 +3,10 @@
 from datetime import date, datetime, timezone
 
 from app.models.paper import Paper
-from app.services.daily_index_store import candidates_for_date, count_for_date
+from app.services.daily_index_store import count_for_date, papers_for_date
 
 
-def test_candidates_for_date_reads_db(db_session):
+def test_papers_for_date_reads_db(db_session):
     now = datetime.now(timezone.utc)
     paper = Paper(
         id="paper-1",
@@ -24,10 +24,10 @@ def test_candidates_for_date_reads_db(db_session):
     db_session.add(paper)
     db_session.commit()
 
-    result = candidates_for_date(
+    papers = papers_for_date(
         db_session, source_type="arxiv", run_date=date(2026, 5, 18)
     )
-    assert len(result.papers) == 1
-    assert result.papers[0].title == "Shard"
-    assert result.papers[0].search_text == "Body"
+    assert len(papers) == 1
+    assert papers[0].title == "Shard"
+    assert papers[0].search_text == "Body"
     assert count_for_date(db_session, source_type="arxiv", run_date=date(2026, 5, 18)) == 1

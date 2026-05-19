@@ -6,7 +6,11 @@ from app.schemas.documents import DocumentResponse
 from app.schemas.filters import FilterResponse
 from app.schemas.onboarding import OnboardingExtractionResponse
 from app.schemas.papers import IdeaMapResponse
-from app.schemas.search import PaperMatchResponse, SearchRunResponse
+from app.schemas.search import (
+    DailySearchSummaryResponse,
+    PaperMatchResponse,
+    SearchRunResponse,
+)
 
 
 class JobProgress(BaseModel):
@@ -42,6 +46,13 @@ class DailySearchJobResponse(BaseModel):
     subject: SearchRunResponse
     items: list[PaperMatchResponse] = Field(default_factory=list)
     next_cursor: str | None = None
+    done: bool = False
+
+
+class DailySearchSummaryJobResponse(BaseModel):
+    job: JobResponse
+    run: SearchRunResponse
+    summary: DailySearchSummaryResponse | None = None
     done: bool = False
 
 

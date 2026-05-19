@@ -11,14 +11,27 @@ class SearchRunResponse(BaseModel):
     candidate_count: Optional[int] = None
     candidate_counts: dict | None = None
     match_count: Optional[int] = None
-    summary: Optional[str] = None
-    summary_citations: list
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class SummaryCitationResponse(BaseModel):
+    paperMatchId: Optional[str] = None
+    arxivId: Optional[str] = None
+    itemId: Optional[str] = None
+    sourceType: Optional[str] = None
+    sourceId: Optional[str] = None
+    citedFor: str = ""
+
+
+class DailySearchSummaryResponse(BaseModel):
+    search_run_id: str
+    summary: str
+    citations: list[SummaryCitationResponse] = Field(default_factory=list)
 
 
 class CreateDailySearchRequest(BaseModel):

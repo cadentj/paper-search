@@ -7,9 +7,8 @@ from datetime import date
 
 from app.db.session import SessionLocal
 from app.models.paper import Paper
-from app.services.daily_index_store import candidates_for_date, count_for_date
+from app.services.daily_index_store import count_for_date, papers_for_date
 from app.services.public_r2_index import http_get_text
-from app.services.source_types import SourceFetchResult
 
 logger = logging.getLogger(__name__)
 
@@ -29,19 +28,11 @@ class DbBackedSourceProvider:
         finally:
             db.close()
 
-    def candidates_for_date(self, run_date: date) -> SourceFetchResult:
+    def papers_for_date(self, run_date: date) -> list[Paper]:
         db = SessionLocal()
         try:
-            return candidates_for_date(
+            return papers_for_date(
                 db, source_type=self.source_type, run_date=run_date
-            )
-        except Exception as exc:
-            logger.exception(
-                "failed to read %s candidates for %s", self.source_type, run_date
-            )
-            return SourceFetchResult(
-                papers=[],
-                errors=[f"{self.source_type} fetch failed: {exc}"],
             )
         finally:
             db.close()

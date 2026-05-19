@@ -110,12 +110,16 @@ export interface SearchRun {
   candidate_count?: number;
   candidate_counts?: Record<string, number>;
   match_count?: number;
-  summary?: string;
-  summary_citations: SummaryCitation[];
   started_at?: string;
   completed_at?: string;
   error?: string;
   created_at: string;
+}
+
+export interface DailySearchSummary {
+  search_run_id: string;
+  summary: string;
+  citations: SummaryCitation[];
 }
 
 export interface DailyCandidateCount {
@@ -213,6 +217,13 @@ export interface DailySearchJobResponse {
   done: boolean;
 }
 
+export interface DailySearchSummaryJobResponse {
+  job: Job;
+  run: SearchRun;
+  summary: DailySearchSummary | null;
+  done: boolean;
+}
+
 export interface IdeaMapJobResponse {
   job: Job;
   subject: IdeaMap;
@@ -256,6 +267,8 @@ export const api = {
     fetchApi<DailySearchJobResponse>(
       `/jobs/daily-search/${id}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
     ),
+  getDailySearchSummaryJob: (id: string) =>
+    fetchApi<DailySearchSummaryJobResponse>(`/jobs/daily-search-summary/${id}`),
   getIdeaMapJob: (id: string) =>
     fetchApi<IdeaMapJobResponse>(`/jobs/idea-map/${id}`),
   getOnboardingGenerationJob: (id: string, cursor?: string | null) =>
@@ -348,7 +361,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input ?? {}),
     }),
+  createDailySearchSummary: (searchRunId: string) =>
+    fetchApi<JobStartResponse>(`/search-runs/${searchRunId}/summary`, {
+      method: "POST",
+    }),
   getSearchRun: (id: string) => fetchApi<SearchRun>(`/search-runs/${id}`),
+  getSearchRunSummary: (id: string) =>
+    fetchApi<DailySearchSummary>(`/search-runs/${id}/summary`),
   getSearchRunMatches: (id: string) =>
     fetchApi<PaperMatch[]>(`/search-runs/${id}/matches`),
 

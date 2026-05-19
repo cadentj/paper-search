@@ -19,6 +19,15 @@ export function useJob(id: string | null) {
   });
 }
 
+export function useDailySearchSummaryJob(id: string | null) {
+  return useQuery({
+    queryKey: ["jobs", "daily-search-summary", id],
+    queryFn: () => api.getDailySearchSummaryJob(id!),
+    enabled: !!id,
+    refetchInterval: (query) => (query.state.data?.done ? false : 1000),
+  });
+}
+
 export function useDailySearchJob(id: string | null) {
   const cursorRef = useRef<string | null>(null);
   const jobIdRef = useRef<string | null>(null);
@@ -303,6 +312,14 @@ export function useSearchRun(id: string | null, poll = false) {
   });
 }
 
+export function useSearchRunSummary(id: string | null, enabled = false) {
+  return useQuery({
+    queryKey: ["search-runs", id, "summary"],
+    queryFn: () => api.getSearchRunSummary(id!),
+    enabled: !!id && enabled,
+  });
+}
+
 export function useSearchRunMatches(
   id: string | null,
   status?: string | null
@@ -325,6 +342,19 @@ export function useCreateDailySearch() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       qc.invalidateQueries({ queryKey: ["search-runs"] });
+      qc.invalidateQueries({ queryKey: ["search-runs", "latest"] });
+    },
+  });
+}
+
+export function useCreateDailySearchSummary() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (searchRunId: string) => api.createDailySearchSummary(searchRunId),
+    onSuccess: (_data, searchRunId) => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["search-runs", searchRunId] });
+      qc.invalidateQueries({ queryKey: ["search-runs", searchRunId, "summary"] });
       qc.invalidateQueries({ queryKey: ["search-runs", "latest"] });
     },
   });

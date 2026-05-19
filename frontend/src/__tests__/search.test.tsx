@@ -11,6 +11,7 @@ const mockApi = vi.hoisted(() => ({
   getSearchRuns: vi.fn(),
   getSearchRun: vi.fn(),
   getSearchRunMatches: vi.fn(),
+  getSearchRunSummary: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -40,8 +41,11 @@ describe("SearchPage", () => {
     mockApi.getSearchRun.mockResolvedValue({
       id: "r1",
       status: "completed",
+    });
+    mockApi.getSearchRunSummary.mockResolvedValue({
+      search_run_id: "r1",
       summary: 'Reasoning work stood out <cite arxivId="2401.00001"/>.',
-      summary_citations: [
+      citations: [
         {
           arxivId: "2401.00001",
           paperMatchId: "m1",

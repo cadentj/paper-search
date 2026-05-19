@@ -8,18 +8,14 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.paper import Paper
-from app.services.source_types import SourceFetchResult
 
 
 def count_for_date(db: Session, *, source_type: str, run_date: date) -> int:
     return _papers_for_date(db, source_type=source_type, run_date=run_date).count()
 
 
-def candidates_for_date(
-    db: Session, *, source_type: str, run_date: date
-) -> SourceFetchResult:
-    rows = _papers_for_date(db, source_type=source_type, run_date=run_date).all()
-    return SourceFetchResult(papers=rows)
+def papers_for_date(db: Session, *, source_type: str, run_date: date) -> list[Paper]:
+    return _papers_for_date(db, source_type=source_type, run_date=run_date).all()
 
 
 def _papers_for_date(db: Session, *, source_type: str, run_date: date):

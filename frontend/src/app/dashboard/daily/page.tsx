@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { format, parseISO } from "date-fns";
@@ -21,7 +21,10 @@ import {
   useCreateFilter,
   useArchiveFilter,
   useDailyCandidateCount,
+  useCreateDailySearchSummary,
   useDailySearchJob,
+  useDailySearchSummaryJob,
+  useSearchRunSummary,
 } from "@/hooks/use-queries";
 import {
   DAILY_SEARCH_DATE_SET,
@@ -60,7 +63,7 @@ import {
   PlusCircle,
   CalendarIcon,
 } from "lucide-react";
-import type { Job, PaperMatch, SearchRun } from "@/lib/api";
+import type { DailySearchSummary, Job, PaperMatch, SearchRun } from "@/lib/api";
 
 type FilterMode = "claim" | "topic";
 type MatchGroup = { name: string; matches: PaperMatch[] };
@@ -271,17 +274,23 @@ function SearchProgress({
   progressPercent,
   matchCount,
   isCreating,
+  isSummarizing = false,
 }: {
   job?: Job | null;
   progressPercent: number;
   matchCount: number;
   isCreating: boolean;
+  isSummarizing?: boolean;
 }) {
   const status = job?.status || (isCreating ? "queued" : "running");
-  const title =
-    status === "queued" || isCreating ? "Daily Search Queued" : "Daily Search Running";
-  const message =
-    matchCount > 0
+  const title = isSummarizing
+    ? "Generating Summary"
+    : status === "queued" || isCreating
+      ? "Daily Search Queued"
+      : "Daily Search Running";
+  const message = isSummarizing
+    ? "Writing daily summary…"
+    : matchCount > 0
       ? `${matchCount} matches found so far`
       : status === "queued" || isCreating
         ? "Waiting to start…"
@@ -315,14 +324,12 @@ function SearchProgress({
 }
 
 function DailySummary({
-  run,
+  summary,
   matches,
 }: {
-  run: SearchRun;
+  summary: DailySearchSummary;
   matches: PaperMatch[];
 }) {
-  if (run.status !== "completed" || !run.summary) return null;
-
   return (
     <Card>
       <CardHeader>
@@ -330,8 +337,8 @@ function DailySummary({
       </CardHeader>
       <CardContent>
         <SummaryText
-          summary={run.summary}
-          citations={run.summary_citations}
+          summary={summary.summary}
+          citations={summary.citations}
           matches={matches}
           className="max-w-none whitespace-pre-wrap text-base leading-7 text-foreground"
         />
@@ -453,6 +460,8 @@ export default function DailyPage() {
   const queryClient = useQueryClient();
   const { data: latestRun } = useLatestSearchRun();
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [activeSummaryJobId, setActiveSummaryJobId] = useState<string | null>(null);
+  const summaryStartedForRunRef = useRef<string | null>(null);
   const recoveredJobId =
     latestRun?.status === "queued" || latestRun?.status === "running"
       ? latestRun.job_id || null
@@ -466,12 +475,23 @@ export default function DailyPage() {
     activeJob?.status === "queued" || activeJob?.status === "running";
   const { data: fetchedRun } = useSearchRun(runId, false);
   const run = typedRun || fetchedRun || latestRun || null;
+  const { data: summaryJobData } = useDailySearchSummaryJob(activeSummaryJobId);
+  const { data: runSummary } = useSearchRunSummary(
+    runId,
+    run?.status === "completed"
+  );
+  const summary = summaryJobData?.summary ?? runSummary ?? null;
+  const summaryJob = summaryJobData?.job ?? null;
+  const isSummaryRunning =
+    summaryJob?.status === "queued" || summaryJob?.status === "running";
   const { data: historicalMatches = EMPTY_PAPER_MATCHES } = useSearchRunMatches(
     currentJobId ? null : runId,
     run?.status
   );
   const matches = currentJobId ? dailyJob?.items ?? EMPTY_PAPER_MATCHES : historicalMatches;
   const createSearch = useCreateDailySearch();
+  const { mutate: startSummary, isPending: isStartingSummary } =
+    useCreateDailySearchSummary();
   const archiveFilter = useArchiveFilter();
   const createFilter = useCreateFilter();
 
@@ -489,6 +509,30 @@ export default function DailyPage() {
   const selectedDateBreakdown = candidateCount?.counts_by_source;
 
   useEffect(() => {
+    if (!dailyJob?.done || !runId) return;
+    if (run?.status === "completed" || run?.status === "failed") return;
+    if (activeJob?.status !== "completed") return;
+    if (activeSummaryJobId || isStartingSummary) return;
+    if (summaryStartedForRunRef.current === runId) return;
+
+    summaryStartedForRunRef.current = runId;
+    startSummary(runId, {
+      onSuccess: (data) => setActiveSummaryJobId(data.job_id),
+      onError: () => {
+        summaryStartedForRunRef.current = null;
+      },
+    });
+  }, [
+    dailyJob?.done,
+    runId,
+    run?.status,
+    activeJob?.status,
+    activeSummaryJobId,
+    isStartingSummary,
+    startSummary,
+  ]);
+
+  useEffect(() => {
     if (!dailyJob) return;
     if (dailyJob.done) {
       queryClient.invalidateQueries({ queryKey: ["search-runs", dailyJob.subject.id] });
@@ -497,11 +541,26 @@ export default function DailyPage() {
     }
   }, [dailyJob, queryClient]);
 
+  useEffect(() => {
+    if (!summaryJobData?.done || !runId) return;
+    queryClient.invalidateQueries({ queryKey: ["search-runs", runId] });
+    queryClient.invalidateQueries({ queryKey: ["search-runs", runId, "matches"] });
+    queryClient.invalidateQueries({ queryKey: ["search-runs", runId, "summary"] });
+    queryClient.invalidateQueries({ queryKey: ["search-runs", "latest"] });
+  }, [summaryJobData?.done, runId, queryClient]);
+
   const isRunPending = run?.status === "queued" || run?.status === "running";
-  const isRunning = isJobRunning || isRunPending || createSearch.isPending;
+  const isRunning =
+    isJobRunning ||
+    isSummaryRunning ||
+    isStartingSummary ||
+    isRunPending ||
+    createSearch.isPending;
   const progressTotal = Math.max(activeJob?.progress?.total ?? 1, 1);
   const progressCurrent = Math.min(activeJob?.progress?.current ?? 0, progressTotal);
-  const progressPercent = Math.round((progressCurrent / progressTotal) * 100);
+  const progressPercent = isSummaryRunning
+    ? 100
+    : Math.round((progressCurrent / progressTotal) * 100);
 
   const matchesByFilter = useMemo(
     () =>
@@ -560,7 +619,11 @@ export default function DailyPage() {
           createSearch.mutate(
             { run_date: effectiveSelectedDate },
             {
-              onSuccess: (data) => setActiveJobId(data.job_id),
+              onSuccess: (data) => {
+                setActiveJobId(data.job_id);
+                setActiveSummaryJobId(null);
+                summaryStartedForRunRef.current = null;
+              },
             }
           )
         }
@@ -573,15 +636,16 @@ export default function DailyPage() {
         onFilterTypeChange={setQuickFilterType}
         onAddFilter={handleQuickAddFilter}
       />
-      {(isJobRunning || createSearch.isPending) && (
+      {(isJobRunning || isSummaryRunning || createSearch.isPending) && (
         <SearchProgress
-          job={activeJob}
+          job={isSummaryRunning ? summaryJob : activeJob}
           progressPercent={progressPercent}
           matchCount={matches.length}
           isCreating={createSearch.isPending}
+          isSummarizing={isSummaryRunning}
         />
       )}
-      {run && <DailySummary run={run} matches={matches} />}
+      {summary && <DailySummary summary={summary} matches={matches} />}
       {run?.status === "failed" && (
         <Card className="border-destructive">
           <CardContent className="pt-4">

@@ -183,6 +183,28 @@ class TestSearchRuns:
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
 
+    def test_get_summary_not_found_until_generated(self, client):
+        self._setup_filters(client)
+        create_resp = client.post("/search-runs/daily")
+        assert create_resp.status_code == 200
+        run_id = client.get("/search-runs/latest").json()["id"]
+
+        resp = client.get(f"/search-runs/{run_id}/summary")
+        assert resp.status_code == 404
+
+        run_resp = client.get(f"/search-runs/{run_id}")
+        assert "summary" not in run_resp.json()
+
+    def test_summary_requires_completed_search(self, client):
+        self._setup_filters(client)
+        create_resp = client.post("/search-runs/daily")
+        assert create_resp.status_code == 200
+        run_id = client.get("/search-runs/latest").json()["id"]
+
+        summary_resp = client.post(f"/search-runs/{run_id}/summary")
+        assert summary_resp.status_code == 400
+        assert "complete" in summary_resp.json()["detail"].lower()
+
     def test_create_daily_run_fails_fast_when_queue_unavailable(self, client, monkeypatch):
         self._setup_filters(client)
 
