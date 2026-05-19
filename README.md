@@ -151,7 +151,6 @@ pnpm test
 │   │   ├── schemas/      # Pydantic schemas
 │   │   └── services/     # arXiv fetch, HTML parser
 │   ├── tests/            # Backend tests
-│   ├── alembic/          # Database migrations
 │   ├── pyproject.toml
 │   └── Dockerfile
 ├── frontend/
