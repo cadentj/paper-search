@@ -157,7 +157,6 @@ def apply_relevance_cutoff(candidates: list[FtsCandidate]) -> list[FtsCandidate]
 
 def search_filter_candidates(
     db: Session,
-    *,
     filter: FilterPayload,
     run_date: date,
 ) -> list[FtsCandidate]:
@@ -181,7 +180,6 @@ def search_filter_candidates(
 
 def select_daily_search_pairs(
     db: Session,
-    *,
     filters: list[FilterPayload],
     papers_by_id: dict[str, PaperPayload],
     run_date: date,

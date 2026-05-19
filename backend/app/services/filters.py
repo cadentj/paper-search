@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from app.api.filters import FilterCreate, FilterUpdate
 
 
-def list_filters(db: Session, *, status: str | None = None) -> list[SQLAFilter]:
+def list_filters(db: Session, status: str | None = None) -> list[SQLAFilter]:
     query = db.query(SQLAFilter)
     if status:
         query = query.filter(SQLAFilter.status == status)

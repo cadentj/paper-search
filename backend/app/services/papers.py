@@ -34,7 +34,7 @@ def get_paper(db: Session, paper_id: str) -> SQLAPaper:
 
 
 def list_papers_for_date(
-    db: Session, run_date: date, *, page: int, per_page: int
+    db: Session, run_date: date, page: int, per_page: int
 ) -> tuple[list[SQLAPaper], int]:
     query = db.query(SQLAPaper).filter(func.date(SQLAPaper.published_at) == run_date)
     total = query.count()

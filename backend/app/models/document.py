@@ -50,7 +50,7 @@ class SQLADocument(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    def to_pydantic(self, *, job_id: str | None = None) -> Document:
+    def to_pydantic(self, job_id: str | None = None) -> Document:
         resp = Document.model_validate(self)
         if job_id is not None:
             return resp.model_copy(update={"job_id": job_id})

@@ -8,7 +8,7 @@ from app.services import filters as filter_service
 
 
 def _proposal_filter(
-    db_session, *, action: str, target_id: str | None = None
+    db_session, action: str, target_id: str | None = None
 ) -> SQLAFilter:
     now = datetime.now(timezone.utc)
     filter = SQLAFilter(

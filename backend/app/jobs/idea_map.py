@@ -404,7 +404,6 @@ def _stream_claims(
 
 def _set_warrant_progress(
     progress: tqdm,
-    *,
     valid: int,
     rejected: int,
     failures: int,
@@ -509,7 +508,6 @@ def _normalize_claim(raw: dict) -> dict | None:
 
 def _normalize_warrant(
     raw: dict,
-    *,
     idea_map_id: str | None = None,
     paper_id: str | None = None,
     claim_id: str | None = None,

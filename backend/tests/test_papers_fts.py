@@ -29,7 +29,6 @@ def _published_at(run_date: date) -> datetime:
 
 def _insert_paper(
     db_session,
-    *,
     title: str,
     search_text: str,
     run_date: date | None = None,

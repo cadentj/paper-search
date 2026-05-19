@@ -192,7 +192,6 @@ def load_candidates(
     categories: set[str],
     start_date: date,
     end_date: date,
-    *,
     limit: int | None,
 ) -> list[Candidate]:
     query = (
@@ -306,7 +305,6 @@ def publish_index(settings: Settings) -> None:
 
 
 def build_index(
-    *,
     state_db: Path,
     cache_dir: Path,
     prefix: str,
@@ -366,7 +364,6 @@ def build_index(
 
 def _build_sharded_index(
     daily_papers: dict[str, list[dict[str, Any]]],
-    *,
     html_prefix: str,
     date_index_prefix: str,
     skipped_missing_files: int,
@@ -405,7 +402,7 @@ def _build_sharded_index(
 
 
 def _paper_from_row(
-    row: sqlite3.Row, *, cache_dir: Path, prefix: str
+    row: sqlite3.Row, cache_dir: Path, prefix: str
 ) -> dict[str, Any] | None:
     arxiv_id = str(row["arxiv_id"])
     html_path = _resolve_html_path(row, cache_dir)

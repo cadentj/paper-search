@@ -10,5 +10,5 @@ def public_url_for_base(base_url: str, path_or_key: str) -> str:
     return urljoin(base, quote(path, safe="/:.-_"))
 
 
-def has_searchable_text(item: dict[str, Any], *, text_fields: tuple[str, ...]) -> bool:
+def has_searchable_text(item: dict[str, Any], text_fields: tuple[str, ...]) -> bool:
     return any(str(item.get(field) or "").strip() for field in text_fields)

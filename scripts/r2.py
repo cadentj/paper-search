@@ -114,14 +114,14 @@ def resolve_sqlite_path(database_url: str) -> Path:
     return path
 
 
-def fetch_manifest(*, public_base_url: str, manifest_path: str) -> dict[str, Any]:
+def fetch_manifest(public_base_url: str, manifest_path: str) -> dict[str, Any]:
     url = public_url_for_base(public_base_url, manifest_path)
     response = httpx.get(url, timeout=30.0, follow_redirects=True)
     response.raise_for_status()
     return response.json()
 
 
-def fetch_date_shard(*, public_base_url: str, index_key: str) -> dict[str, Any]:
+def fetch_date_shard(public_base_url: str, index_key: str) -> dict[str, Any]:
     url = public_url_for_base(public_base_url, index_key)
     response = httpx.get(url, timeout=30.0, follow_redirects=True)
     response.raise_for_status()
@@ -129,7 +129,6 @@ def fetch_date_shard(*, public_base_url: str, index_key: str) -> dict[str, Any]:
 
 
 def items_for_date(
-    *,
     public_base_url: str,
     run_date: str,
     date_payload: dict[str, Any],
@@ -145,7 +144,7 @@ def items_for_date(
     return items if isinstance(items, list) else []
 
 
-def r2_client(settings: Settings, *, max_pool_connections: int = 32):
+def r2_client(settings: Settings, max_pool_connections: int = 32):
     missing = [
         name
         for name, value in {
@@ -177,11 +176,11 @@ def normalize_prefix(prefix: str) -> str:
     return f"{stripped}/" if stripped else ""
 
 
-def date_index_key(*, date: str, date_index_prefix: str) -> str:
+def date_index_key(date: str, date_index_prefix: str) -> str:
     return f"{normalize_prefix(date_index_prefix)}{date}.json"
 
 
-def json_body(payload: dict[str, Any], *, pretty: bool = False) -> str:
+def json_body(payload: dict[str, Any], pretty: bool = False) -> str:
     if pretty:
         return json.dumps(payload, indent=2, sort_keys=False) + "\n"
     return json.dumps(payload, separators=(",", ":"), sort_keys=False) + "\n"
@@ -189,7 +188,6 @@ def json_body(payload: dict[str, Any], *, pretty: bool = False) -> str:
 
 def upload_sharded_index(
     client,
-    *,
     bucket: str,
     index_key: str,
     manifest: dict[str, Any],
@@ -232,7 +230,6 @@ class UploadResult:
 
 def upload_html(
     client,
-    *,
     bucket: str,
     cache_dir: Path,
     prefix: str,
@@ -294,7 +291,6 @@ def upload_html(
 
 def _upload_one(
     client,
-    *,
     bucket: str,
     task: UploadTask,
     skip_existing: bool,

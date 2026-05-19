@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -21,7 +20,6 @@ def commit_entities(db: Session, *entities) -> None:
 
 def enqueue_job(
     db: Session,
-    *,
     job: SQLAJob,
     enqueue: Callable[[], object],
     on_failure: Callable[[Session, str], None] | None = None,
@@ -49,7 +47,6 @@ def enqueue_job(
 
 def persist_then_enqueue(
     db: Session,
-    *,
     job: SQLAJob,
     enqueue: Callable[[], object],
     on_failure: Callable[[Session, str], None],

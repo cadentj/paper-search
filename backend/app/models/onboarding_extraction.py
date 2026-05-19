@@ -53,7 +53,7 @@ class SQLAOnboardingExtraction(Base):
     )
     completed_at = Column(DateTime, nullable=True)
 
-    def to_pydantic(self, *, job_id: str | None = None) -> OnboardingExtraction:
+    def to_pydantic(self, job_id: str | None = None) -> OnboardingExtraction:
         resp = OnboardingExtraction.model_validate(self)
         if job_id is not None:
             return resp.model_copy(update={"job_id": job_id})

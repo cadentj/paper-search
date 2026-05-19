@@ -122,7 +122,6 @@ async def _async_call_llm_with_client(
 async def async_call_llm(
     system_prompt: str,
     user_prompt: str,
-    *,
     response_model: type[ResponseModelT],
     profile: str = JUDGE_PROFILE,
 ) -> dict:
@@ -138,7 +137,6 @@ async def async_call_llm(
 
 
 def stream_structured_response(
-    *,
     system_prompt: str,
     user_prompt: str,
     response_model: type[ResponseModelT],

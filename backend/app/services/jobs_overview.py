@@ -40,7 +40,7 @@ def list_active_jobs(db: Session) -> list[SQLAJob]:
     )
 
 
-def list_recent_jobs(db: Session, *, limit: int = RECENT_JOBS_LIMIT) -> list[SQLAJob]:
+def list_recent_jobs(db: Session, limit: int = RECENT_JOBS_LIMIT) -> list[SQLAJob]:
     completed_at = func.coalesce(SQLAJob.completed_at, SQLAJob.created_at)
     return (
         db.query(SQLAJob)
@@ -113,7 +113,6 @@ def serialize_job_for_overview(db: Session, job: SQLAJob) -> Job:
 def _hydrate_entry(
     db: Session,
     job: SQLAJob,
-    *,
     search_runs: dict[str, SQLASearchRun],
     idea_maps: dict[str, SQLAIdeaMap],
     papers: dict[str, SQLAPaper],

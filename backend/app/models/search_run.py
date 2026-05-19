@@ -44,7 +44,7 @@ class SQLASearchRun(Base):
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
-    def to_pydantic(self, *, job_id: str | None = None) -> SearchRun:
+    def to_pydantic(self, job_id: str | None = None) -> SearchRun:
         resp = SearchRun.model_validate(self)
         if job_id is not None:
             return resp.model_copy(update={"job_id": job_id})

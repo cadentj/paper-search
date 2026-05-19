@@ -121,7 +121,6 @@ def get_data_sources(db: Session) -> list[dict[str, Any]]:
 def update_data_source(
     db: Session,
     source_type: str,
-    *,
     enabled: bool | None = None,
     settings: dict | None = None,
 ) -> dict[str, Any]:

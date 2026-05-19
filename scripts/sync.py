@@ -45,7 +45,6 @@ logger = logging.getLogger(__name__)
 
 def load_arxiv_day(
     db: Session,
-    *,
     run_date: date,
     shard_items: list[dict[str, Any]],
     settings: IndexSettings,
@@ -80,7 +79,6 @@ def load_arxiv_day(
 
 def load_lesswrong_day(
     db: Session,
-    *,
     run_date: date,
     shard_items: list[dict[str, Any]],
     settings: IndexSettings,
@@ -101,7 +99,7 @@ def load_lesswrong_day(
     return total, searchable
 
 
-def _ensure_published_on_run_date(record: dict[str, Any], *, run_date: date) -> None:
+def _ensure_published_on_run_date(record: dict[str, Any], run_date: date) -> None:
     published_at = record.get("published_at")
     if published_at is None or published_at.date() != run_date:
         record["published_at"] = datetime.combine(
@@ -118,7 +116,7 @@ def _require_empty_paper_table(db: Session) -> None:
         )
 
 
-def _insert_paper(db: Session, *, record: dict[str, Any], now: datetime) -> SQLAPaper:
+def _insert_paper(db: Session, record: dict[str, Any], now: datetime) -> SQLAPaper:
     source_type = record["source_type"]
     source_id = record["source_id"]
     existing = (
@@ -150,7 +148,6 @@ def _insert_paper(db: Session, *, record: dict[str, Any], now: datetime) -> SQLA
 
 def sync_public_indexes(
     settings: Settings,
-    *,
     progress: tqdm | None = None,
 ) -> dict[str, dict[str, tuple[int, int]]]:
     settings.require_sync_urls()
@@ -206,7 +203,6 @@ def sync_public_indexes(
 
 def _sync_source(
     db: Session,
-    *,
     source_type: str,
     public_base_url: str,
     manifest_path: str,

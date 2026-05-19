@@ -47,7 +47,7 @@ class SQLAIdeaMap(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    def to_pydantic(self, *, job_id: str | None = None) -> IdeaMap:
+    def to_pydantic(self, job_id: str | None = None) -> IdeaMap:
         resp = IdeaMap.model_validate(self)
         if job_id is not None:
             return resp.model_copy(update={"job_id": job_id})

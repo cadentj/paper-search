@@ -70,7 +70,7 @@ def start_generation(db: Session, body: OnboardingGenerationCreate) -> str:
     return job_record.id
 
 
-def start_extraction(db: Session, *, input_text: str) -> str:
+def start_extraction(db: Session, input_text: str) -> str:
     now = datetime.now(timezone.utc)
     extraction = SQLAOnboardingExtraction(
         id=str(uuid.uuid4()),
@@ -188,7 +188,6 @@ def complete_onboarding(
 
 def start_profile_import(
     db: Session,
-    *,
     url: str,
     author_id: str,
     display_name: str,

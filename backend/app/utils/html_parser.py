@@ -38,9 +38,7 @@ ALWAYS_ADDRESSABLE_TAGS = {
 CONTENT_TAGS = ALWAYS_ADDRESSABLE_TAGS | {"li"}
 
 
-def parse_arxiv_html(
-    html: str, *, exclude_back_matter: bool = False
-) -> list[HtmlBlock]:
+def parse_arxiv_html(html: str, exclude_back_matter: bool = False) -> list[HtmlBlock]:
     """Parse arXiv HTML into addressable blocks preserving section titles."""
     return _parse_arxiv_html_document(html, exclude_back_matter=exclude_back_matter)[0]
 
@@ -135,7 +133,6 @@ def blocks_to_prompt_text(
 
 def _parse_arxiv_html_document(
     html: str,
-    *,
     exclude_back_matter: bool,
 ) -> tuple[list[HtmlBlock], BeautifulSoup]:
     soup = BeautifulSoup(html, "lxml")
@@ -190,7 +187,6 @@ def _invalid_range(
     reason: str,
     citation: dict,
     available_block_count: int,
-    *,
     start_block: HtmlBlock | None = None,
     end_block: HtmlBlock | None = None,
     **extra: object,

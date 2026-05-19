@@ -82,9 +82,7 @@ class TestExtractOnboardingFilters:
         assert len(updated.proposed_filters) > 0
 
 
-def _paper_fixture(
-    source_id: str, title: str, *, search_text: str | None = None
-) -> dict:
+def _paper_fixture(source_id: str, title: str, search_text: str | None = None) -> dict:
     return {
         "source_id": source_id,
         "title": title,
@@ -193,7 +191,7 @@ def _extract_prompt_arxiv_id(user_prompt: str) -> str:
 
 
 def _fake_daily_async_llm(
-    *, matched_arxiv_ids: set[str], assert_prompt=None, fail_arxiv_ids=None
+    matched_arxiv_ids: set[str], assert_prompt=None, fail_arxiv_ids=None
 ):
     fail_arxiv_ids = fail_arxiv_ids or set()
 
@@ -227,7 +225,7 @@ def _fake_daily_async_llm(
     return fake_async_call_llm
 
 
-def _fake_summary_llm(*, matched_arxiv_id: str):
+def _fake_summary_llm(matched_arxiv_id: str):
     calls = {"count": 0}
     item_id = f"arxiv:{matched_arxiv_id}"
 

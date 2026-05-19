@@ -28,7 +28,7 @@ from app.services.jobs import set_job_status  # noqa: E402
 ACTIVE_STATUSES = ("queued", "running")
 
 
-def _fail_subject(db, job: SQLAJob, *, message: str, now: datetime) -> None:
+def _fail_subject(db, job: SQLAJob, message: str, now: datetime) -> None:
     if not job.subject_type or not job.subject_id:
         return
 
@@ -81,7 +81,7 @@ def _fail_subject(db, job: SQLAJob, *, message: str, now: datetime) -> None:
             profile_import.error = message
 
 
-def fail_jobs(statuses: tuple[str, ...], *, message: str) -> int:
+def fail_jobs(statuses: tuple[str, ...], message: str) -> int:
     now = datetime.now(timezone.utc)
     with database.session() as db:
         jobs = db.query(SQLAJob).filter(SQLAJob.status.in_(statuses)).all()

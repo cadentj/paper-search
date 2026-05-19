@@ -56,7 +56,6 @@ class SQLAPaperMatch(Base):
 
     def to_pydantic(
         self,
-        *,
         paper: SQLAPaper | None = None,
         filter: SQLAFilter | None = None,
     ) -> PaperMatch:

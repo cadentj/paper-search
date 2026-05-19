@@ -187,7 +187,6 @@ def scrape_windows(
     dates: list[date],
     output_dir: Path,
     cookie: str,
-    *,
     preview_words: int,
 ) -> None:
     windows = date_windows(dates, args.window_days)
@@ -304,7 +303,6 @@ def publish_index(settings: Settings) -> None:
 
 
 def build_index(
-    *,
     state_db: Path,
     cache_dir: Path,
     prefix: str,
@@ -383,7 +381,6 @@ def build_index(
 
 def _post_from_row(
     row: sqlite3.Row,
-    *,
     cache_dir: Path,
     prefix: str,
     preview_words: int,
@@ -527,7 +524,7 @@ def record_window(
 
 
 def record_post(
-    conn: sqlite3.Connection, post: LessWrongPost, *, preview_words: int
+    conn: sqlite3.Connection, post: LessWrongPost, preview_words: int
 ) -> None:
     html_path = f"{post.post_id[:2]}/{SAFE_ID_RE.sub('_', post.post_id)}.html"
     text_preview = _first_words(_extract_plaintext(post.html), preview_words)

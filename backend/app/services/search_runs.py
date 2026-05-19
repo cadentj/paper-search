@@ -80,7 +80,6 @@ def list_matches_for_run(db: Session, search_run_id: str) -> list[PaperMatch]:
 
 def start_daily_search(
     db: Session,
-    *,
     run_date: date | None = None,
 ) -> SQLAJob:
     requested_date = run_date or DEFAULT_DAILY_SEARCH_DATE
@@ -210,9 +209,7 @@ def mark_running(db: Session, run: SQLASearchRun, job: SQLAJob) -> None:
     db.commit()
 
 
-def set_pair_progress(
-    db: Session, job: SQLAJob, *, total: int, current: int = 0
-) -> None:
+def set_pair_progress(db: Session, job: SQLAJob, total: int, current: int = 0) -> None:
     from app.services.jobs import job_progress
 
     job.progress = job_progress(current=current, total=max(total, 1))
@@ -220,7 +217,7 @@ def set_pair_progress(
 
 
 def update_candidate_counts(
-    db: Session, run: SQLASearchRun, *, candidate_count: int, candidate_counts: dict
+    db: Session, run: SQLASearchRun, candidate_count: int, candidate_counts: dict
 ) -> None:
     run.candidate_count = candidate_count
     run.candidate_counts = candidate_counts
@@ -253,7 +250,6 @@ def set_summary_status(
     db: Session,
     run: SQLASearchRun,
     job: SQLAJob,
-    *,
     status: str,
     error: str | None = None,
 ) -> None:
@@ -265,7 +261,7 @@ def set_summary_status(
 
 
 def complete_summary(
-    db: Session, run: SQLASearchRun, job: SQLAJob, *, summary: str, citations: list
+    db: Session, run: SQLASearchRun, job: SQLAJob, summary: str, citations: list
 ) -> None:
     run.summary = summary
     run.summary_citations = citations

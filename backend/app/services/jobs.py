@@ -7,9 +7,7 @@ from app.jobs.queues import queue_for_kind
 from app.models.job import SQLAJob
 
 
-def job_progress(
-    *, current: int | None = None, total: int | None = None, **extra
-) -> dict:
+def job_progress(current: int | None = None, total: int | None = None, **extra) -> dict:
     payload: dict = {}
     if total is not None:
         payload["total"] = max(total, 1)
@@ -21,7 +19,6 @@ def job_progress(
 
 def set_job_status(
     job: SQLAJob,
-    *,
     status: str,
     error: str | None = None,
 ) -> None:
@@ -37,7 +34,6 @@ def set_job_status(
 
 def create_job(
     db: Session,
-    *,
     kind: str,
     subject_type: str | None = None,
     subject_id: str | None = None,
@@ -62,7 +58,6 @@ def create_job(
 
 def latest_job_for_subject(
     db: Session,
-    *,
     subject_type: str,
     subject_id: str,
     kind: str | None = None,
@@ -78,7 +73,6 @@ def latest_job_for_subject(
 
 def get_or_create_job_for_subject(
     db: Session,
-    *,
     kind: str,
     subject_type: str,
     subject_id: str,

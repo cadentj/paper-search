@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from pathlib import Path
 
 from sqlalchemy.orm import Session
 
@@ -17,14 +16,11 @@ from app.services.jobs import (
 )
 
 
-def get_document(db: Session, document_id: str) -> SQLADocument:
-    document = db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
-    if not document:
-        raise LookupError("Document not found")
-    return document
+def get_document(db: Session, document_id: str) -> SQLADocument | None:
+    return db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
 
 
-def document_payload(db: Session, document: SQLADocument):
+def get_document_payload(db: Session, document: SQLADocument):
     job = latest_job_for_subject(
         db,
         subject_type="document",
@@ -36,7 +32,6 @@ def document_payload(db: Session, document: SQLADocument):
 
 def start_document_processing(
     db: Session,
-    *,
     document_id: str,
     original_filename: str,
     content_type: str,
@@ -109,7 +104,7 @@ def commit_document_progress(db: Session) -> None:
 
 
 def complete_document(
-    db: Session, document: SQLADocument, job: SQLAJob, *, summary: str
+    db: Session, document: SQLADocument, job: SQLAJob, summary: str
 ) -> None:
     document.summary = summary
     document.status = "ready"

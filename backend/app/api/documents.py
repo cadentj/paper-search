@@ -80,8 +80,9 @@ async def upload_document(
 
 @router.get("/{document_id}", response_model=Document)
 def get_document(document_id: str, db: Session = Depends(get_db)):
-    try:
-        document = documents_service.get_document(db, document_id)
-    except Exception as exc:
-        raise_http_from_service(exc)
-    return documents_service.document_payload(db, document)
+    document = documents_service.get_document(db, document_id)
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    return documents_service.get_document_payload(db, document)
