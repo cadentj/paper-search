@@ -16,8 +16,6 @@ const mockApi = vi.hoisted(() => ({
   updateFilter: vi.fn(),
   getJob: vi.fn(),
   getJobsOverview: vi.fn(),
-  uploadDocument: vi.fn(),
-  getDocument: vi.fn(),
   createOnboardingGeneration: vi.fn(),
   promoteDraftFilters: vi.fn(),
   getFeedbackStatus: vi.fn(),

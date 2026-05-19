@@ -22,7 +22,6 @@ from app.services.jobs import (
 
 class _GenerationInput(Protocol):
     input_text: str
-    document_ids: Sequence[str]
 
 
 class _CompleteInput(Protocol):
@@ -35,8 +34,8 @@ def start_generation(db: Session, body: _GenerationInput) -> str:
         raise ValueError(
             f"Input text must be {settings.ONBOARDING_INPUT_MAX_CHARS} characters or fewer"
         )
-    if not input_text and not body.document_ids:
-        raise ValueError("Add text or at least one document")
+    if not input_text:
+        raise ValueError("Input text is required")
 
     job_record = create_job(
         db,
@@ -45,7 +44,6 @@ def start_generation(db: Session, body: _GenerationInput) -> str:
         status="queued",
         payload={
             "input_text": input_text,
-            "document_ids": list(body.document_ids),
         },
     )
     db.flush()

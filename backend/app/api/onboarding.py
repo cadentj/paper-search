@@ -32,7 +32,6 @@ class OnboardingCompleteRequest(BaseModel):
 
 class OnboardingGenerationCreate(BaseModel):
     input_text: str
-    document_ids: list[str] = []
 
 
 class DraftFilterPromoteRequest(BaseModel):

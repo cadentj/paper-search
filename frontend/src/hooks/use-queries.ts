@@ -151,15 +151,6 @@ export function useOnboardingExtractionJob(id: string | null) {
   });
 }
 
-export function useDocumentProcessingJob(id: string | null) {
-  return useQuery({
-    queryKey: ["jobs", "document-processing", id],
-    queryFn: () => api.getDocumentProcessingJob(id!),
-    enabled: !!id,
-    refetchInterval: (query) => (query.state.data?.done ? false : 1000),
-  });
-}
-
 // Onboarding
 export function useOnboardingStatus() {
   return useQuery({
@@ -191,7 +182,7 @@ export function useCreateExtraction() {
 export function useCreateOnboardingGeneration() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { input_text: string; document_ids: string[] }) =>
+    mutationFn: (input: { input_text: string }) =>
       api.createOnboardingGeneration(input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
@@ -231,27 +222,6 @@ export function useCompleteOnboarding() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["onboarding", "status"] });
       qc.invalidateQueries({ queryKey: ["filters"] });
-    },
-  });
-}
-
-// Documents
-export function useDocument(id: string | null, poll = false) {
-  return useQuery({
-    queryKey: ["documents", id],
-    queryFn: () => api.getDocument(id!),
-    enabled: !!id,
-    refetchInterval: () => (poll ? 1000 : false),
-  });
-}
-
-export function useUploadDocument() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (file: File) => api.uploadDocument(file),
-    onSuccess: (document) => {
-      qc.setQueryData(["documents", document.id], document);
-      qc.invalidateQueries({ queryKey: ["jobs"] });
     },
   });
 }

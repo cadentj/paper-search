@@ -6,7 +6,6 @@ from sqlalchemy import func
 
 from app.api.onboarding import router as onboarding_router
 from app.api.filters import router as filters_router
-from app.api.documents import router as documents_router
 from app.api.jobs import router as jobs_router
 from app.api.search import router as search_router
 from app.api.papers import router as papers_router
@@ -40,7 +39,6 @@ class JobPollingAccessLogFilter(logging.Filter):
             "/papers/idea-map/jobs/",
             "/onboarding/generations/jobs/",
             "/onboarding/extractions/jobs/",
-            "/documents/jobs/",
         )
         return not any(path.startswith(prefix) for prefix in job_poll_prefixes)
 
@@ -81,7 +79,6 @@ def health_check():
 
 app.include_router(onboarding_router)
 app.include_router(filters_router)
-app.include_router(documents_router)
 app.include_router(jobs_router)
 app.include_router(search_router)
 app.include_router(papers_router)

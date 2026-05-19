@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models.idea_map import SQLAIdeaMap
 from app.models.job import Job, SQLAJob
-from app.services import documents, onboarding, papers, search_runs
+from app.services import onboarding, papers, search_runs
 from app.services.jobs import DONE_STATUSES, with_progress
 
 RECENT_JOBS_LIMIT = 15
@@ -73,10 +73,6 @@ def serialize_job_for_overview(db: Session, job: SQLAJob) -> Job:
         if extraction:
             count = len(extraction.proposed_filters or [])
             return with_progress(job, current=count, total=max(count, 1))
-    elif job.kind == "document_processing":
-        document = documents.get_document_for_job(db, job)
-        if document:
-            return documents.serialize_document_job(job, document)
     return job.to_pydantic()
 
 

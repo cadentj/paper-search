@@ -76,7 +76,6 @@ _WORKER_DATABASE_MODULES = (
     "app.jobs.dispatcher",
     "app.jobs.daily_search",
     "app.jobs.daily_search_summary",
-    "app.jobs.documents",
     "app.jobs.feedback_reflection",
     "app.jobs.idea_map",
     "app.jobs.onboarding",
