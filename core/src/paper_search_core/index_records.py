@@ -62,15 +62,13 @@ def arxiv_record_from_shard(
 ) -> dict[str, Any]:
     arxiv_id = str(paper.get("arxiv_id") or "")
     html_key = str(paper.get("html_key") or arxiv_html_key_for_id(arxiv_id))
-    abstract = arxiv_search_text(paper)
+    search_text = arxiv_search_text(paper)
     return {
         "source_type": "arxiv",
         "source_id": arxiv_id,
         "title": paper.get("title") or arxiv_id,
-        "abstract": abstract,
-        "search_text": abstract,
+        "search_text": search_text,
         "authors": list(paper.get("authors") or []),
-        "categories": list(paper.get("categories") or []),
         "published_at": _parse_datetime(paper.get("latest_version_date")),
         "html_url": public_url_for_base(settings.arxiv_html_public_base_url, html_key),
         "source_url": f"https://arxiv.org/abs/{arxiv_id}",
@@ -87,10 +85,8 @@ def lesswrong_record_from_shard(
         "source_type": "lesswrong",
         "source_id": post_id,
         "title": post.get("title") or "Untitled LessWrong post",
-        "abstract": search_text,
         "search_text": search_text,
         "authors": [author for author in [post.get("author")] if author],
-        "categories": [],
         "published_at": _parse_datetime(post.get("posted_at")),
         "html_url": public_url_for_base(
             settings.lesswrong_html_public_base_url, html_key

@@ -73,7 +73,7 @@ def load_arxiv_day(
 
     searchable = len(records)
     for record in records:
-        _upsert_paper(db, record=record, now=now)
+        _insert_paper(db, record=record, now=now)
 
     return total, searchable, skipped_category
 
@@ -95,7 +95,7 @@ def load_lesswrong_day(
             continue
         record = lesswrong_record_from_shard(post, settings)
         _ensure_published_on_run_date(record, run_date=run_date)
-        _upsert_paper(db, record=record, now=now)
+        _insert_paper(db, record=record, now=now)
         searchable += 1
 
     return total, searchable
@@ -107,7 +107,16 @@ def _ensure_published_on_run_date(record: dict[str, Any], *, run_date: date) -> 
         record["published_at"] = datetime.combine(run_date, time.min, tzinfo=timezone.utc)
 
 
-def _upsert_paper(db: Session, *, record: dict[str, Any], now: datetime) -> Paper:
+def _require_empty_paper_table(db: Session) -> None:
+    count = db.query(Paper).count()
+    if count:
+        raise RuntimeError(
+            f"Refusing to sync: database already has {count} paper(s). "
+            "Use an empty database before running sync."
+        )
+
+
+def _insert_paper(db: Session, *, record: dict[str, Any], now: datetime) -> Paper:
     source_type = record["source_type"]
     source_id = record["source_id"]
     existing = (
@@ -116,15 +125,6 @@ def _upsert_paper(db: Session, *, record: dict[str, Any], now: datetime) -> Pape
         .first()
     )
     if existing:
-        existing.title = record["title"]
-        existing.abstract = record["abstract"]
-        existing.search_text = record.get("search_text") or ""
-        existing.authors = record.get("authors") or []
-        existing.categories = record.get("categories") or []
-        existing.published_at = record.get("published_at")
-        existing.html_url = record.get("html_url")
-        existing.source_url = record.get("source_url")
-        existing.updated_at = now
         return existing
 
     paper = Paper(
@@ -132,15 +132,12 @@ def _upsert_paper(db: Session, *, record: dict[str, Any], now: datetime) -> Pape
         source_type=source_type,
         source_id=source_id,
         title=record["title"],
-        abstract=record["abstract"],
         search_text=record.get("search_text") or "",
         authors=record.get("authors") or [],
-        categories=record.get("categories") or [],
         published_at=record.get("published_at"),
         html_url=record.get("html_url"),
         source_url=record.get("source_url"),
         created_at=now,
-        updated_at=now,
     )
     db.add(paper)
     return paper
@@ -166,6 +163,7 @@ def sync_public_indexes(
     scanned_total = 0
     db = session_factory()
     try:
+        _require_empty_paper_table(db)
         summary["arxiv"], scanned_total = _sync_source(
             db,
             source_type="arxiv",

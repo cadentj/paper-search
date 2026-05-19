@@ -167,7 +167,7 @@ export interface PaperMatch {
   paper_source_id?: string;
   paper_source_url?: string;
   paper_item_label?: string;
-  paper_abstract?: string;
+  paper_search_text?: string;
   filter_name?: string;
 }
 
@@ -229,14 +229,12 @@ export interface Paper {
   source_type: string;
   source_id?: string;
   title: string;
-  abstract: string;
+  search_text: string;
   authors: string[];
-  categories?: string[];
   published_at?: string;
   html_url?: string;
   source_url?: string;
   created_at: string;
-  updated_at: string;
 }
 
 export interface DataSource {

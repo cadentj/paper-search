@@ -13,13 +13,10 @@ def test_papers_for_date_reads_db(db_session):
         source_type="arxiv",
         source_id="2605.01234",
         title="Shard",
-        abstract="Body",
         search_text="Body",
         authors=[],
-        categories=["cs.AI"],
         published_at=datetime(2026, 5, 18, 12, 0, tzinfo=timezone.utc),
         created_at=now,
-        updated_at=now,
     )
     db_session.add(paper)
     db_session.commit()

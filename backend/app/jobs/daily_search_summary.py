@@ -14,63 +14,29 @@ from app.llm.client import call_llm
 from app.llm.config import SUMMARY_PROFILE
 from app.llm.prompts import SUMMARY_SYSTEM_PROMPT, SUMMARY_USER_PROMPT
 from app.llm.schemas import SearchSummaryResponse
-from paper_search_core.schemas.daily_search import paper_item_id
+from paper_search_core.schemas.daily_search import PaperMatchPayload
 
 logger = logging.getLogger(__name__)
 
 
-def _format_result(result) -> str:
-    if isinstance(result, dict):
-        parts = []
-        if result.get("verdict"):
-            parts.append(f"Verdict: {result['verdict']}")
-        if result.get("reason"):
-            parts.append(result["reason"])
-        if result.get("evidence"):
-            parts.append(f"Evidence: {result['evidence']}")
-        return " | ".join(parts) if parts else ""
-    return str(result or "")
-
-
-def _build_matches_text(matches: list[dict]) -> str:
-    lines = []
-    for m in matches:
-        lines.append(
-            f"Item: {m.get('paper_title', 'Unknown')} ({m.get('item_id', '')})\n"
-            f"Source: {m.get('source_type', '')} {m.get('source_id', '')}\n"
-            f"Filter: {m.get('filter_name', 'Unknown')}\n"
-            f"Result: {_format_result(m.get('result', ''))}\n"
-            f"Match ID: {m.get('match_id', '')}\n"
-        )
-    return "\n---\n".join(lines)
-
-
-def _match_rows_for_run(db, search_run_id: str) -> list[dict]:
-    matches = (
-        db.query(PaperMatch)
+def _match_payloads_for_run(db, search_run_id: str) -> list[PaperMatchPayload]:
+    rows = (
+        db.query(PaperMatch, Paper, Filter)
+        .join(Paper, PaperMatch.paper_id == Paper.id)
+        .join(Filter, PaperMatch.filter_id == Filter.id)
         .filter(PaperMatch.search_run_id == search_run_id)
         .order_by(PaperMatch.created_at.asc(), PaperMatch.id.asc())
         .all()
     )
-    rows: list[dict] = []
-    for match in matches:
-        paper = db.query(Paper).filter(Paper.id == match.paper_id).first()
-        filt = db.query(Filter).filter(Filter.id == match.filter_id).first()
-        source_type = paper.source_type if paper else "arxiv"
-        source_id = paper.source_id if paper else ""
-        item_id = paper_item_id(source_type, source_id) if paper and source_id else ""
-        rows.append(
-            {
-                "match_id": match.id,
-                "paper_title": paper.title if paper else "Unknown",
-                "item_id": item_id,
-                "source_type": source_type or "",
-                "source_id": source_id or "",
-                "filter_name": filt.name if filt else "Unknown",
-                "result": match.result,
-            }
+    return [
+        PaperMatchPayload(
+            match_id=match.id,
+            paper=paper.to_search_payload(),
+            filter_name=filter.name,
+            result=match.result or "",
         )
-    return rows
+        for match, paper, filter in rows
+    ]
 
 
 def _fallback_summary(db, run: SearchRun) -> dict:
@@ -127,9 +93,9 @@ def summarize_daily_search(search_run_id: str, job_id: str | None = None) -> Non
         set_job_status(job, status="running")
         db.commit()
 
-        match_rows = _match_rows_for_run(db, search_run_id)
-        if match_rows:
-            matches_text = _build_matches_text(match_rows)
+        match_payloads = _match_payloads_for_run(db, search_run_id)
+        if match_payloads:
+            matches_text = "\n---\n".join(p.model_dump_json() for p in match_payloads)
             user_prompt = SUMMARY_USER_PROMPT.format(matches_text=matches_text)
             result = call_llm(
                 system_prompt=SUMMARY_SYSTEM_PROMPT,

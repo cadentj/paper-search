@@ -61,7 +61,7 @@ class PaperMatchResponse(BaseModel):
     paper_source_id: Optional[str] = None
     paper_source_url: Optional[str] = None
     paper_item_label: Optional[str] = None
-    paper_abstract: Optional[str] = None
+    paper_search_text: Optional[str] = None
     filter_name: Optional[str] = None
 
     model_config = {"from_attributes": True}

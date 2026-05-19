@@ -8,14 +8,12 @@ class PaperResponse(BaseModel):
     source_type: str = "arxiv"
     source_id: Optional[str] = None
     title: str
-    abstract: str
+    search_text: str
     authors: list
-    categories: Optional[list] = None
     published_at: Optional[datetime] = None
     html_url: Optional[str] = None
     source_url: Optional[str] = None
     created_at: datetime
-    updated_at: datetime
 
     model_config = {"from_attributes": True}
 

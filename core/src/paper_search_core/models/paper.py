@@ -18,10 +18,8 @@ class Paper(Base):
     source_id = Column(Text, nullable=True)
 
     title = Column(Text, nullable=False)
-    abstract = Column(Text, nullable=False)
     search_text = Column(Text, nullable=False, default="")
     authors = Column(JSON, nullable=False, default=list)
-    categories = Column(JSON, nullable=True)
     published_at = Column(DateTime, nullable=True)
     html_url = Column(Text, nullable=True)
     source_url = Column(Text, nullable=True)
@@ -30,12 +28,6 @@ class Paper(Base):
         DateTime,
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
-    )
-    updated_at = Column(
-        DateTime,
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     def to_search_payload(self) -> PaperPayload:
@@ -47,6 +39,6 @@ class Paper(Base):
             source_type=source_type,
             source_id=source_id,
             item_id=paper_item_id(source_type, source_id),
-            text=self.search_text or self.abstract,
+            text=self.search_text,
             authors=list(self.authors or []),
         )

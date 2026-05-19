@@ -32,24 +32,6 @@ PAIR_TIMEOUT_SECONDS = 30.0
 PAIRING_PHASE_TIMEOUT_SECONDS = 180.0
 
 
-def _build_papers_text(papers: list[PaperPayload]) -> str:
-    lines = []
-    for p in papers:
-        lines.append(
-            f"Item ID: {p.item_id}\n"
-            f"Source Type: {p.source_type}\n"
-            f"Source ID: {p.source_id}\n"
-            f"Title: {p.title}\n"
-            f"Authors: {', '.join(p.authors) if p.authors else 'Unknown'}\n"
-            f"Excerpt: {p.text}\n"
-        )
-    return "\n---\n".join(lines)
-
-
-def _build_paper_text(paper: PaperPayload) -> str:
-    return _build_papers_text([paper])
-
-
 def _set_run_status(
     db,
     run: SearchRun,
@@ -108,17 +90,17 @@ def _extract_result(mode: str, match: dict | None) -> dict | None:
 async def _evaluate_filter_paper(
     *,
     semaphore: asyncio.Semaphore,
-    filt: FilterPayload,
+    filter: FilterPayload,
     paper: PaperPayload,
 ) -> PairEvaluation:
-    definition = filt.definition or {}
+    definition = filter.definition or {}
     mode = definition.get("mode", "topic")
     system_prompt, user_prompt_template, response_model = _prompts_for_mode(mode)
 
     user_prompt = user_prompt_template.format(
-        filter_name=definition.get("name", filt.name),
+        filter_name=definition.get("name", filter.name),
         filter_description=definition.get("description", ""),
-        papers_text=_build_paper_text(paper),
+        papers_text=paper.prompt_text(),
     )
     async with semaphore:
         try:
@@ -130,8 +112,8 @@ async def _evaluate_filter_paper(
             )
         except Exception as exc:
             return PairEvaluation(
-                filter_id=filt.id,
-                filter_name=filt.name,
+                filter_id=filter.id,
+                filter_name=filter.name,
                 paper_id=paper.id,
                 paper_title=paper.title,
                 source_type=paper.source_type or "arxiv",
@@ -148,8 +130,8 @@ async def _evaluate_filter_paper(
     result = _extract_result(mode, raw_match)
 
     return PairEvaluation(
-        filter_id=filt.id,
-        filter_name=filt.name,
+        filter_id=filter.id,
+        filter_name=filter.name,
         paper_id=paper.id,
         paper_title=paper.title,
         source_type=paper.source_type,
@@ -164,18 +146,18 @@ async def _evaluate_filter_paper(
 async def _evaluate_filter_paper_with_timeout(
     *,
     semaphore: asyncio.Semaphore,
-    filt: FilterPayload,
+    filter: FilterPayload,
     paper: PaperPayload,
 ) -> PairEvaluation:
     try:
         return await asyncio.wait_for(
-            _evaluate_filter_paper(semaphore=semaphore, filt=filt, paper=paper),
+            _evaluate_filter_paper(semaphore=semaphore, filter=filter, paper=paper),
             timeout=PAIR_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:
         return PairEvaluation(
-            filter_id=filt.id,
-            filter_name=filt.name,
+            filter_id=filter.id,
+            filter_name=filter.name,
             paper_id=paper.id,
             paper_title=paper.title,
             source_type=paper.source_type,
@@ -193,16 +175,16 @@ async def _evaluate_pairs(
 ) -> None:
     semaphore = asyncio.Semaphore(max(LLM_MAX_CONCURRENCY, 1))
     task_pairs = {}
-    for filt in filters:
+    for filter in filters:
         for paper in papers:
             task = asyncio.create_task(
                 _evaluate_filter_paper_with_timeout(
                     semaphore=semaphore,
-                    filt=filt,
+                    filter=filter,
                     paper=paper,
                 )
             )
-            task_pairs[task] = (filt, paper)
+            task_pairs[task] = (filter, paper)
 
     pending = set(task_pairs)
     loop = asyncio.get_running_loop()
@@ -227,11 +209,11 @@ async def _evaluate_pairs(
             task.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
         for task in pending:
-            filt, paper = task_pairs[task]
+            filter, paper = task_pairs[task]
             await on_result(
                 PairEvaluation(
-                    filter_id=filt.id,
-                    filter_name=filt.name,
+                    filter_id=filter.id,
+                    filter_name=filter.name,
                     paper_id=paper.id,
                     paper_title=paper.title,
                     source_type=paper.source_type,

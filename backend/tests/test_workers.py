@@ -85,9 +85,8 @@ def _paper_fixture(source_id: str, title: str) -> dict:
     return {
         "source_id": source_id,
         "title": title,
-        "abstract": f"Abstract for {title}.",
+        "search_text": f"Abstract for {title}.",
         "authors": ["Test Author"],
-        "categories": ["cs.AI"],
         "published_at": datetime.now(timezone.utc),
         "html_url": f"https://arxiv.org/html/{source_id}",
         "source_url": f"https://arxiv.org/abs/{source_id}",
@@ -104,15 +103,12 @@ def _papers_from_dicts(db_session, papers: list[dict]) -> list:
             source_type=p.get("source_type", "arxiv"),
             source_id=p["source_id"],
             title=p["title"],
-            abstract=p.get("abstract") or "",
-            search_text=p.get("search_text") or p.get("abstract") or "",
+            search_text=p.get("search_text") or "",
             authors=list(p.get("authors") or []),
-            categories=list(p.get("categories") or []),
             published_at=p.get("published_at"),
             html_url=p.get("html_url"),
             source_url=p.get("source_url"),
             created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
         )
         db_session.add(paper)
         rows.append(paper)
@@ -400,10 +396,9 @@ class TestRunDailySearch:
             source_type="arxiv",
             source_id="2401.00002",
             title="Excluded Paper",
-            abstract="A cached paper from another run.",
+            search_text="A cached paper from another run.",
             authors=["Author"],
             created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
         )
         db_session.add(excluded)
         db_session.commit()
@@ -476,10 +471,9 @@ class TestRunDailySearch:
             source_type="arxiv",
             source_id="2605.00003",
             title="Current Paper",
-            abstract="A current paper that requires LLM matching.",
+            search_text="A current paper that requires LLM matching.",
             authors=["Author"],
             created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
         )
         db_session.add(paper)
         db_session.commit()
@@ -685,11 +679,9 @@ class TestSummarizeDailySearch:
             source_type="arxiv",
             source_id="2605.00001",
             title="Included Scaling Paper",
-            abstract="Abstract",
             search_text="Abstract",
             authors=["Author"],
             created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
         )
         db_session.add(paper)
         db_session.flush()

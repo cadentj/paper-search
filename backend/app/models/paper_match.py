@@ -49,7 +49,7 @@ class PaperMatch(Base):
             paper_source_id=paper.source_id if paper else None,
             paper_source_url=paper.source_url if paper else None,
             paper_item_label=paper_item_label(paper) if paper else None,
-            paper_abstract=paper.abstract if paper else None,
+            paper_search_text=paper.search_text if paper else None,
             filter_name=filt.name if filt else None,
             filter_mode=(filt.definition or {}).get("mode", "topic") if filt else None,
         )

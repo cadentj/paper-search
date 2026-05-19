@@ -514,7 +514,7 @@ function PaperHtmlViewer({
   return (
     <div className="flex-1 flex items-center justify-center">
       <p className="text-sm text-muted-foreground">
-        {paper?.abstract || "Loading paper…"}
+        {paper?.search_text || "Loading paper…"}
       </p>
     </div>
   );

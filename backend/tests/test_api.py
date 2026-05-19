@@ -238,10 +238,9 @@ class TestPapers:
             source_type="arxiv",
             source_id="2605.00001",
             title="Test Paper",
-            abstract="Test abstract.",
+            search_text="Test abstract.",
             authors=["Author"],
             created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
         )
         db_session.add(paper)
         db_session.commit()
