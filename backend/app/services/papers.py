@@ -7,14 +7,18 @@ from datetime import date, datetime, timezone
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.jobs.idea_map import generate_idea_map
-from app.jobs.queues import enqueue_for_job
 from app.models.idea_map import SQLAIdeaMap
 from paper_search_core.models.paper import SQLAPaper
 from app.models.paper_note import SQLAPaperNote
-from app.models.job import SQLAJob
-from app.services.job_enqueue import commit_entities, enqueue_job
-from app.services.jobs import create_job, latest_job_for_subject, set_job_status
+from app.models.job import Job, SQLAJob
+from app.services.jobs import (
+    commit_refresh,
+    create_job,
+    enqueue,
+    latest_job_for_subject,
+    set_job_status,
+    with_progress,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +68,21 @@ def idea_map_payload(db: Session, idea_map: SQLAIdeaMap):
     return idea_map.to_pydantic(job_id=job.id if job else None)
 
 
+def get_idea_map_for_job(db: Session, job: SQLAJob) -> SQLAIdeaMap | None:
+    if not job.subject_id:
+        return None
+    return db.query(SQLAIdeaMap).filter(SQLAIdeaMap.id == job.subject_id).first()
+
+
+def serialize_idea_map_job(db: Session, job: SQLAJob, idea_map: SQLAIdeaMap) -> Job:
+    claims = list(idea_map.claims or [])
+    claim_count = len(claims)
+    stored_total = (job.progress or {}).get("total")
+    if idea_map.status == "warrants_running" and stored_total:
+        return with_progress(job, current=claim_count, total=int(stored_total))
+    return with_progress(job, current=claim_count, total=max(claim_count, 1))
+
+
 def upsert_paper_note(db: Session, paper_id: str, text: str) -> SQLAPaperNote:
     get_paper(db, paper_id)
     now = datetime.now(timezone.utc)
@@ -110,7 +129,7 @@ def start_idea_map(db: Session, paper_id: str) -> str:
                     subject_id=existing.id,
                     status=existing.status,
                 )
-                commit_entities(db, job)
+                commit_refresh(db, job)
             return job.id
 
         existing.status = "queued"
@@ -125,8 +144,8 @@ def start_idea_map(db: Session, paper_id: str) -> str:
             subject_id=existing.id,
             status="queued",
         )
-        commit_entities(db, existing, job_record)
-        _enqueue_idea_map(db, existing, job_record)
+        commit_refresh(db, existing, job_record)
+        enqueue(db, job_record, log_context=f"idea map={existing.id}")
         return job_record.id
 
     now = datetime.now(timezone.utc)
@@ -145,42 +164,9 @@ def start_idea_map(db: Session, paper_id: str) -> str:
         subject_id=idea_map.id,
         status="queued",
     )
-    commit_entities(db, idea_map, job_record)
-    _enqueue_idea_map(db, idea_map, job_record)
+    commit_refresh(db, idea_map, job_record)
+    enqueue(db, job_record, log_context=f"idea map={idea_map.id}")
     return job_record.id
-
-
-def _enqueue_idea_map(db: Session, idea_map: SQLAIdeaMap, job_record: SQLAJob) -> None:
-    def on_failure(sess: Session, error: str) -> None:
-        idea_map.status = "failed"
-        idea_map.error = f"Could not enqueue idea map generation: {error}"
-        idea_map.updated_at = datetime.now(timezone.utc)
-        set_job_status(job_record, status="failed", error=idea_map.error)
-
-    enqueue_job(
-        db,
-        job=job_record,
-        enqueue=lambda: enqueue_for_job(
-            job_record, generate_idea_map, idea_map.id, job_record.id
-        ),
-        on_failure=on_failure,
-        log_context=f"idea map={idea_map.id}",
-    )
-
-
-def resolve_idea_map_job(db: Session, idea_map_id: str, job_id: str | None) -> SQLAJob:
-    if job_id:
-        job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
-        if job:
-            return job
-    from app.services.jobs import get_or_create_job_for_subject
-
-    return get_or_create_job_for_subject(
-        db,
-        kind="idea_map",
-        subject_type="idea_map",
-        subject_id=idea_map_id,
-    )
 
 
 def get_idea_map(db: Session, idea_map_id: str) -> SQLAIdeaMap | None:

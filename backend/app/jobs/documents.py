@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pymupdf
+from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db.session import database
 from app.llm.client import async_call_llm
 from app.llm.config import SUMMARY_PROFILE
 from app.llm.prompts import DOCUMENT_SUMMARY_SYSTEM_PROMPT, DOCUMENT_SUMMARY_USER_PROMPT
@@ -29,68 +29,59 @@ def _extract_text(path: Path) -> str:
     return "\n\n".join(chunk.strip() for chunk in chunks if chunk.strip()).strip()
 
 
-def process_document(document_id: str, job_id: str) -> None:
-    with database.session() as db:
-        try:
-            document = (
-                db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
+def run(db: Session, job: SQLAJob) -> None:
+    document_id = job.subject_id
+    if not document_id:
+        return
+
+    try:
+        document = db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
+        if not document:
+            return
+
+        documents_service.mark_document_processing(db, document, job)
+
+        pdf_path = Path(document.storage_path)
+        text = _extract_text(pdf_path)
+        text_path = pdf_path.with_suffix(".txt")
+        text_path.write_text(text, encoding="utf-8")
+
+        document = db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
+        if not document:
+            return
+        document.extracted_text_path = str(text_path)
+        document.updated_at = _now()
+
+        if len(text) < settings.DOCUMENT_MIN_TEXT_CHARS:
+            documents_service.complete_document_needs_ocr(
+                db, document, job, "No usable embedded PDF text found."
             )
-            job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
-            if not document or not job:
-                return
+            return
 
-            documents_service.mark_document_processing(db, document, job)
+        documents_service.commit_document_progress(db)
 
-            pdf_path = Path(document.storage_path)
-            text = _extract_text(pdf_path)
-            text_path = pdf_path.with_suffix(".txt")
-            text_path.write_text(text, encoding="utf-8")
-
-            document = (
-                db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
+        summary_input = text[: settings.DOCUMENT_SUMMARY_MAX_CHARS]
+        result = asyncio.run(
+            async_call_llm(
+                DOCUMENT_SUMMARY_SYSTEM_PROMPT,
+                DOCUMENT_SUMMARY_USER_PROMPT.format(
+                    filename=document.original_filename,
+                    document_text=summary_input,
+                ),
+                response_model=DocumentSummaryResponse,
+                profile=SUMMARY_PROFILE,
             )
-            job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
-            if not document or not job:
-                return
-            document.extracted_text_path = str(text_path)
-            document.updated_at = _now()
+        )
+        summary = result["content"].get("summary", "").strip()
+        if not summary:
+            raise RuntimeError("Document summary was empty")
 
-            if len(text) < settings.DOCUMENT_MIN_TEXT_CHARS:
-                documents_service.complete_document_needs_ocr(
-                    db, document, job, "No usable embedded PDF text found."
-                )
-                return
-
-            documents_service.commit_document_progress(db)
-
-            summary_input = text[: settings.DOCUMENT_SUMMARY_MAX_CHARS]
-            result = asyncio.run(
-                async_call_llm(
-                    DOCUMENT_SUMMARY_SYSTEM_PROMPT,
-                    DOCUMENT_SUMMARY_USER_PROMPT.format(
-                        filename=document.original_filename,
-                        document_text=summary_input,
-                    ),
-                    response_model=DocumentSummaryResponse,
-                    profile=SUMMARY_PROFILE,
-                )
-            )
-            summary = result["content"].get("summary", "").strip()
-            if not summary:
-                raise RuntimeError("Document summary was empty")
-
-            document = (
-                db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
-            )
-            job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
-            if not document or not job:
-                return
-            documents_service.complete_document(db, document, job, summary=summary)
-        except Exception as exc:
-            db.rollback()
-            document = (
-                db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
-            )
-            job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
-            documents_service.fail_document(db, document, job, str(exc))
-            raise
+        document = db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
+        if not document:
+            return
+        documents_service.complete_document(db, document, job, summary=summary)
+    except Exception as exc:
+        db.rollback()
+        document = db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
+        documents_service.fail_document(db, document, job, str(exc))
+        raise

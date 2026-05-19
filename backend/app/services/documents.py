@@ -4,20 +4,37 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.jobs.queues import enqueue_for_job
 from app.models.document import SQLADocument
-from app.models.job import SQLAJob
-from app.services.job_enqueue import persist_then_enqueue
+from app.models.job import Job, SQLAJob
 from app.services.jobs import (
+    commit_refresh,
     create_job,
+    enqueue,
     job_progress,
     latest_job_for_subject,
     set_job_status,
+    with_progress,
 )
 
 
 def get_document(db: Session, document_id: str) -> SQLADocument | None:
     return db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
+
+
+def get_document_for_job(db: Session, job: SQLAJob) -> SQLADocument | None:
+    if not job.subject_id:
+        return None
+    return db.query(SQLADocument).filter(SQLADocument.id == job.subject_id).first()
+
+
+def serialize_document_job(job: SQLAJob, document: SQLADocument) -> Job:
+    if document.status in {"ready", "needs_ocr", "failed"}:
+        current, total = 2, 2
+    elif document.status == "processing":
+        current, total = 1, 2
+    else:
+        current, total = 0, 2
+    return with_progress(job, current=current, total=total)
 
 
 def get_document_payload(db: Session, document: SQLADocument):
@@ -60,26 +77,8 @@ def start_document_processing(
         status="queued",
         progress=job_progress(total=2),
     )
-
-    def on_failure(sess: Session, error: str) -> None:
-        document.status = "failed"
-        document.error = f"Could not enqueue document processing: {error}"
-        document.updated_at = datetime.now(timezone.utc)
-        set_job_status(job_record, status="failed", error=document.error)
-
-    def _enqueue_document_processing() -> None:
-        from app.jobs.documents import process_document
-
-        enqueue_for_job(job_record, process_document, document.id, job_record.id)
-
-    persist_then_enqueue(
-        db,
-        job=job_record,
-        entities=(document,),
-        enqueue=_enqueue_document_processing,
-        on_failure=on_failure,
-        log_context=f"document={document.id}",
-    )
+    commit_refresh(db, document, job_record)
+    enqueue(db, job_record, log_context=f"document={document.id}")
     return document, job_record.id
 
 

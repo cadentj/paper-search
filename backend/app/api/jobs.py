@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.job import Job
-from app.services import job_views
+from app.services import jobs
 from app.services.jobs_overview import jobs_overview
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -14,8 +14,6 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 class JobOverviewResponse(BaseModel):
     job: Job
-    label: str
-    detail: str | None = None
     href: str | None = None
 
 
@@ -31,8 +29,6 @@ def get_jobs_overview(db: Session = Depends(get_db)):
         active=[
             JobOverviewResponse(
                 job=entry.job,
-                label=entry.label,
-                detail=entry.detail,
                 href=entry.href,
             )
             for entry in overview.active
@@ -40,8 +36,6 @@ def get_jobs_overview(db: Session = Depends(get_db)):
         recent=[
             JobOverviewResponse(
                 job=entry.job,
-                label=entry.label,
-                detail=entry.detail,
                 href=entry.href,
             )
             for entry in overview.recent
@@ -51,7 +45,7 @@ def get_jobs_overview(db: Session = Depends(get_db)):
 
 @router.get("/{job_id}", response_model=Job)
 def get_job(job_id: str, db: Session = Depends(get_db)):
-    job = job_views.get_job(db, job_id)
+    job = jobs.get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job.to_pydantic()

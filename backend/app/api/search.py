@@ -11,10 +11,10 @@ from app.db.session import get_db
 from app.models.job import Job
 from app.models.paper_match import PaperMatch
 from app.models.search_run import SearchRun
-from app.services import job_views
+from app.utils.cursor import apply_cursor, decode_cursor, encode_cursor
 from paper_search_core.daily_dates import DAILY_SEARCH_DATE_SET
 from app.services.sources import counts_by_source_for_date, enabled_source_types
-from app.services import search_runs
+from app.services import jobs, search_runs
 
 router = APIRouter(prefix="/search-runs", tags=["search"])
 logger = logging.getLogger(__name__)
@@ -66,45 +66,45 @@ def get_daily_search_job(
     cursor: str | None = None,
     db: Session = Depends(get_db),
 ):
-    job = job_views.get_job_of_kind(db, job_id, "daily_search")
+    job = jobs.get_job_of_kind(db, job_id, "daily_search")
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    run = job_views.get_search_run_for_job(db, job)
+    run = search_runs.get_search_run_for_job(db, job)
     if not run:
         raise HTTPException(status_code=404, detail="Search run not found")
     if cursor is not None:
         try:
-            job_views.decode_cursor(cursor)
+            decode_cursor(cursor)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="Invalid cursor") from exc
-    all_matches = job_views.list_matches_for_run_ordered(db, run.id)
-    matches = job_views.apply_cursor(all_matches, cursor)
+    all_matches = search_runs.list_matches_for_run_ordered(db, run.id)
+    matches = apply_cursor(all_matches, cursor)
     next_cursor = cursor
     if matches:
         latest = matches[-1]
-        next_cursor = job_views.encode_cursor(latest.created_at, latest.id)
+        next_cursor = encode_cursor(latest.created_at, latest.id)
     return DailySearchJob(
-        job=job_views.serialize_daily_search_job(db, job, run),
+        job=search_runs.serialize_daily_search_job(db, job, run),
         subject=run.to_pydantic(job_id=job.id),
-        items=[job_views.paper_match_response(db, match) for match in matches],
+        items=[search_runs.match_to_pydantic(db, match) for match in matches],
         next_cursor=next_cursor,
-        done=job_views.is_done(job),
+        done=jobs.is_done(job),
     )
 
 
 @router.get("/summary-jobs/{job_id}", response_model=DailySearchSummaryJob)
 def get_daily_search_summary_job(job_id: str, db: Session = Depends(get_db)):
-    job = job_views.get_job_of_kind(db, job_id, "daily_search_summary")
+    job = jobs.get_job_of_kind(db, job_id, "daily_search_summary")
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    run = job_views.get_search_run_for_job(db, job)
+    run = search_runs.get_search_run_for_job(db, job)
     if not run:
         raise HTTPException(status_code=404, detail="Search run not found")
     return DailySearchSummaryJob(
         job=job.to_pydantic(),
         run=search_runs.search_run_payload(db, run),
         summary=search_runs.summary_payload(run),
-        done=job_views.is_done(job),
+        done=jobs.is_done(job),
     )
 
 

@@ -9,7 +9,7 @@ from app.db.session import get_db
 from app.models.idea_map import IdeaMap
 from app.models.job import Job
 from paper_search_core.models.paper import Paper
-from app.services import job_views
+from app.services import jobs
 from app.services.sources import KNOWN_SOURCE_TYPES, paper_html
 from app.services import papers as papers_service
 
@@ -45,18 +45,18 @@ class IdeaMapJob(BaseModel):
 
 @router.get("/idea-map/jobs/{job_id}", response_model=IdeaMapJob)
 def get_idea_map_job(job_id: str, db: Session = Depends(get_db)):
-    job = job_views.get_job_of_kind(db, job_id, "idea_map")
+    job = jobs.get_job_of_kind(db, job_id, "idea_map")
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    idea_map = job_views.get_idea_map_for_job(db, job)
+    idea_map = papers_service.get_idea_map_for_job(db, job)
     if not idea_map:
         raise HTTPException(status_code=404, detail="Idea map not found")
     return IdeaMapJob(
-        job=job_views.serialize_idea_map_job(db, job, idea_map),
+        job=papers_service.serialize_idea_map_job(db, job, idea_map),
         subject=idea_map.to_pydantic(job_id=job.id),
         items=[],
         next_cursor=None,
-        done=job_views.is_done(job),
+        done=jobs.is_done(job),
     )
 
 

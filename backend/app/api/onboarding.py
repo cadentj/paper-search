@@ -10,8 +10,8 @@ from app.db.session import get_db
 from app.models.filter import Filter
 from app.models.job import Job
 from app.models.onboarding_extraction import OnboardingExtraction
-from app.services import job_views
-from app.services import onboarding as onboarding_service
+from app.utils.cursor import apply_cursor, decode_cursor, encode_cursor
+from app.services import jobs, onboarding as onboarding_service
 from app.services.semantic_scholar import extract_author_id, get_author
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
@@ -91,43 +91,43 @@ def get_onboarding_generation_job(
     cursor: str | None = None,
     db: Session = Depends(get_db),
 ):
-    job = job_views.get_job_of_kind(db, job_id, "onboarding_generation")
+    job = jobs.get_job_of_kind(db, job_id, "onboarding_generation")
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     if cursor is not None:
         try:
-            job_views.decode_cursor(cursor)
+            decode_cursor(cursor)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="Invalid cursor") from exc
-    all_filters = job_views.draft_filters_for_generation(db, job.id)
-    filters = job_views.apply_cursor(all_filters, cursor)
+    all_filters = onboarding_service.draft_filters_for_generation(db, job.id)
+    filters = apply_cursor(all_filters, cursor)
     next_cursor = cursor
     if filters:
         latest = filters[-1]
-        next_cursor = job_views.encode_cursor(latest.created_at, latest.id)
+        next_cursor = encode_cursor(latest.created_at, latest.id)
     return OnboardingGenerationJob(
-        job=job_views.serialize_onboarding_generation_job(db, job),
+        job=onboarding_service.serialize_onboarding_generation_job(db, job),
         subject=job.to_pydantic(),
         items=[item.to_pydantic() for item in filters],
         next_cursor=next_cursor,
-        done=job_views.is_done(job),
+        done=jobs.is_done(job),
     )
 
 
 @router.get("/extractions/jobs/{job_id}", response_model=OnboardingExtractionJob)
 def get_onboarding_extraction_job(job_id: str, db: Session = Depends(get_db)):
-    job = job_views.get_job_of_kind(db, job_id, "onboarding_extraction")
+    job = jobs.get_job_of_kind(db, job_id, "onboarding_extraction")
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    extraction = job_views.get_extraction_for_job(db, job)
+    extraction = onboarding_service.get_extraction_for_job(db, job)
     if not extraction:
         raise HTTPException(status_code=404, detail="Extraction not found")
     return OnboardingExtractionJob(
-        job=job_views.serialize_onboarding_extraction_job(db, job, extraction),
+        job=onboarding_service.serialize_onboarding_extraction_job(db, job, extraction),
         subject=extraction.to_pydantic(job_id=job.id),
         items=[],
         next_cursor=None,
-        done=job_views.is_done(job),
+        done=jobs.is_done(job),
     )
 
 

@@ -5,18 +5,20 @@ from datetime import date, datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.jobs.daily_search import run_daily_search
-from app.jobs.daily_search_summary import summarize_daily_search
-from app.jobs.queues import enqueue_for_job
 from app.models.filter import SQLAFilter
-from app.models.job import SQLAJob
+from app.models.job import Job, SQLAJob
 from paper_search_core.models.paper import SQLAPaper
 from app.models.paper_match import PaperMatch, SQLAPaperMatch
 from app.models.search_run import SQLASearchRun, SearchRun
 from paper_search_core.daily_dates import DEFAULT_DAILY_SEARCH_DATE
-from app.services.job_enqueue import commit_entities, enqueue_job, persist_then_enqueue
-from app.services.jobs import get_or_create_job_for_subject
-from app.services.jobs import create_job, latest_job_for_subject, set_job_status
+from app.services.jobs import (
+    commit_refresh,
+    create_job,
+    enqueue,
+    latest_job_for_subject,
+    set_job_status,
+    with_progress,
+)
 from app.services.sources import enabled_source_types
 
 ACTIVE_SUMMARY_JOB_STATUSES = {"queued", "running"}
@@ -62,6 +64,43 @@ def summary_payload(run: SQLASearchRun):
     )
 
 
+def get_search_run_for_job(db: Session, job: SQLAJob) -> SQLASearchRun | None:
+    if not job.subject_id:
+        return None
+    return db.query(SQLASearchRun).filter(SQLASearchRun.id == job.subject_id).first()
+
+
+def match_to_pydantic(db: Session, match: SQLAPaperMatch) -> PaperMatch:
+    paper = db.query(SQLAPaper).filter(SQLAPaper.id == match.paper_id).first()
+    filter = db.query(SQLAFilter).filter(SQLAFilter.id == match.filter_id).first()
+    return match.to_pydantic(paper=paper, filter=filter)
+
+
+def list_matches_for_run_ordered(
+    db: Session, search_run_id: str
+) -> list[SQLAPaperMatch]:
+    return (
+        db.query(SQLAPaperMatch)
+        .filter(SQLAPaperMatch.search_run_id == search_run_id)
+        .order_by(SQLAPaperMatch.created_at.asc(), SQLAPaperMatch.id.asc())
+        .all()
+    )
+
+
+def serialize_daily_search_job(db: Session, job: SQLAJob, run: SQLASearchRun) -> Job:
+    stored = dict(job.progress or {})
+    match_count = (
+        db.query(SQLAPaperMatch).filter(SQLAPaperMatch.search_run_id == run.id).count()
+    )
+    current = stored.get("current", match_count)
+    return with_progress(
+        job,
+        current=current,
+        total=stored.get("total", max(match_count, 1)),
+        matches=match_count,
+    )
+
+
 def list_matches_for_run(db: Session, search_run_id: str) -> list[PaperMatch]:
     get_search_run(db, search_run_id)
     matches = (
@@ -69,11 +108,7 @@ def list_matches_for_run(db: Session, search_run_id: str) -> list[PaperMatch]:
         .filter(SQLAPaperMatch.search_run_id == search_run_id)
         .all()
     )
-    result = []
-    for match in matches:
-        paper = db.query(SQLAPaper).filter(SQLAPaper.id == match.paper_id).first()
-        filter = db.query(SQLAFilter).filter(SQLAFilter.id == match.filter_id).first()
-        result.append(match.to_pydantic(paper=paper, filter=filter))
+    result = [match_to_pydantic(db, match) for match in matches]
     result.sort(key=lambda item: item.created_at, reverse=True)
     return result
 
@@ -104,22 +139,8 @@ def start_daily_search(
         status="queued",
     )
 
-    def on_failure(sess: Session, error: str) -> None:
-        run.status = "failed"
-        run.error = f"Could not enqueue daily search: {error}"
-        run.completed_at = datetime.now(timezone.utc)
-        set_job_status(job_record, status="failed", error=run.error)
-
-    persist_then_enqueue(
-        db,
-        job=job_record,
-        entities=(run,),
-        enqueue=lambda: enqueue_for_job(
-            job_record, run_daily_search, run.id, job_record.id
-        ),
-        on_failure=on_failure,
-        log_context=f"daily search run={run.id}",
-    )
+    commit_refresh(db, run, job_record)
+    enqueue(db, job_record, log_context=f"daily search run={run.id}")
     return job_record
 
 
@@ -154,52 +175,9 @@ def start_daily_summary(db: Session, search_run_id: str) -> SQLAJob:
         status="queued",
     )
 
-    def on_failure(sess: Session, error: str) -> None:
-        set_job_status(
-            summary_job,
-            status="failed",
-            error=f"Could not enqueue summary: {error}",
-        )
-
-    commit_entities(db, summary_job)
-    enqueue_job(
-        db,
-        job=summary_job,
-        enqueue=lambda: enqueue_for_job(
-            summary_job, summarize_daily_search, run.id, summary_job.id
-        ),
-        on_failure=on_failure,
-        log_context=f"daily search summary run={run.id}",
-    )
+    commit_refresh(db, summary_job)
+    enqueue(db, summary_job, log_context=f"daily search summary run={run.id}")
     return summary_job
-
-
-def resolve_daily_search_job(
-    db: Session, search_run_id: str, job_id: str | None
-) -> SQLAJob:
-    if job_id:
-        job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
-        if job:
-            return job
-    return get_or_create_job_for_subject(
-        db,
-        kind="daily_search",
-        subject_type="search_run",
-        subject_id=search_run_id,
-    )
-
-
-def resolve_summary_job(db: Session, search_run_id: str, job_id: str | None) -> SQLAJob:
-    if job_id:
-        job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
-        if job:
-            return job
-    return get_or_create_job_for_subject(
-        db,
-        kind="daily_search_summary",
-        subject_type="search_run",
-        subject_id=search_run_id,
-    )
 
 
 def mark_running(db: Session, run: SQLASearchRun, job: SQLAJob) -> None:

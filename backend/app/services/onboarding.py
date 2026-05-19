@@ -7,17 +7,17 @@ from typing import TYPE_CHECKING
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.jobs.onboarding import (
-    extract_onboarding_filters,
-    generate_onboarding_draft_filters,
-)
-from app.jobs.queues import enqueue_for_job
-from app.jobs.scholar_import import run_scholar_import
 from app.models.filter import SQLAFilter
+from app.models.job import Job, SQLAJob
 from app.models.onboarding_extraction import SQLAOnboardingExtraction
 from app.models.research_profile_import import SQLAResearchProfileImport
-from app.services.job_enqueue import commit_entities, enqueue_job, persist_then_enqueue
-from app.services.jobs import create_job, latest_job_for_subject, set_job_status
+from app.services.jobs import (
+    commit_refresh,
+    create_job,
+    enqueue,
+    latest_job_for_subject,
+    with_progress,
+)
 
 if TYPE_CHECKING:
     from app.api.onboarding import OnboardingCompleteRequest, OnboardingGenerationCreate
@@ -42,31 +42,15 @@ def start_generation(db: Session, body: OnboardingGenerationCreate) -> str:
         kind="onboarding_generation",
         subject_type="onboarding_generation",
         status="queued",
+        payload={
+            "input_text": input_text,
+            "document_ids": list(body.document_ids),
+        },
     )
     db.flush()
     job_record.subject_id = job_record.id
-    commit_entities(db, job_record)
-
-    def on_failure(sess: Session, error: str) -> None:
-        set_job_status(
-            job_record,
-            status="failed",
-            error=f"Could not enqueue onboarding generation: {error}",
-        )
-
-    enqueue_job(
-        db,
-        job=job_record,
-        enqueue=lambda: enqueue_for_job(
-            job_record,
-            generate_onboarding_draft_filters,
-            input_text,
-            body.document_ids,
-            job_record.id,
-        ),
-        on_failure=on_failure,
-        log_context=f"onboarding generation={job_record.id}",
-    )
+    commit_refresh(db, job_record)
+    enqueue(db, job_record, log_context=f"onboarding generation={job_record.id}")
     return job_record.id
 
 
@@ -87,27 +71,47 @@ def start_extraction(db: Session, input_text: str) -> str:
         subject_id=extraction.id,
         status="queued",
     )
-
-    def on_failure(sess: Session, error: str) -> None:
-        extraction.status = "failed"
-        extraction.error = f"Could not enqueue onboarding extraction: {error}"
-        extraction.updated_at = datetime.now(timezone.utc)
-        set_job_status(job_record, status="failed", error=extraction.error)
-
+    commit_refresh(db, extraction, job_record)
     try:
-        persist_then_enqueue(
-            db,
-            job=job_record,
-            entities=(extraction,),
-            enqueue=lambda: enqueue_for_job(
-                job_record, extract_onboarding_filters, extraction.id, job_record.id
-            ),
-            on_failure=on_failure,
-            log_context=f"onboarding extraction={extraction.id}",
-        )
+        enqueue(db, job_record, log_context=f"onboarding extraction={extraction.id}")
     except ConnectionError as exc:
         raise ConnectionError(extraction.error or str(exc)) from exc
     return job_record.id
+
+
+def draft_filters_for_generation(db: Session, job_id: str) -> list[SQLAFilter]:
+    return [
+        filter
+        for filter in db.query(SQLAFilter)
+        .filter(SQLAFilter.status == "draft")
+        .order_by(SQLAFilter.created_at.asc(), SQLAFilter.id.asc())
+        .all()
+        if (filter.definition or {}).get("onboarding_generation_job_id") == job_id
+    ]
+
+
+def serialize_onboarding_generation_job(db: Session, job: SQLAJob) -> Job:
+    count = len(draft_filters_for_generation(db, job.id))
+    return with_progress(job, current=count, total=max(count, 1))
+
+
+def get_extraction_for_job(
+    db: Session, job: SQLAJob
+) -> SQLAOnboardingExtraction | None:
+    if not job.subject_id:
+        return None
+    return (
+        db.query(SQLAOnboardingExtraction)
+        .filter(SQLAOnboardingExtraction.id == job.subject_id)
+        .first()
+    )
+
+
+def serialize_onboarding_extraction_job(
+    db: Session, job: SQLAJob, extraction: SQLAOnboardingExtraction
+) -> Job:
+    count = len(extraction.proposed_filters or [])
+    return with_progress(job, current=count, total=max(count, 1))
 
 
 def get_extraction(db: Session, extraction_id: str) -> SQLAOnboardingExtraction:
@@ -210,21 +214,8 @@ def start_profile_import(
         subject_type="research_profile_import",
         subject_id=profile_import.id,
     )
-
-    def on_failure(sess: Session, error: str) -> None:
-        profile_import.status = "failed"
-        profile_import.error = error
-        set_job_status(job_record, status="failed", error=error)
-
-    persist_then_enqueue(
-        db,
-        job=job_record,
-        entities=(profile_import,),
-        enqueue=lambda: enqueue_for_job(
-            job_record, run_scholar_import, profile_import.id, job_record.id
-        ),
-        on_failure=on_failure,
-    )
+    commit_refresh(db, profile_import, job_record)
+    enqueue(db, job_record)
     return profile_import.id, job_record.id
 
 

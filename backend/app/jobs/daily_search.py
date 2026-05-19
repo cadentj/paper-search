@@ -3,8 +3,9 @@
 import asyncio
 import logging
 
+from sqlalchemy.orm import Session
+
 from app.config import LLM_MAX_CONCURRENCY
-from app.db.session import database
 from paper_search_core.models.paper import SQLAPaper
 from app.models.paper_match import SQLAPaperMatch
 from app.models.search_run import SQLASearchRun
@@ -160,129 +161,123 @@ async def _evaluate_pairs(
             )
 
 
-def run_daily_search(search_run_id: str, job_id: str) -> None:
-    """Worker job: evaluate filters against daily papers and persist matches."""
+def run(db: Session, job: SQLAJob) -> None:
+    """Evaluate filters against daily papers and persist matches."""
     from app.services import search_runs
 
-    with database.session() as db:
-        run = db.query(SQLASearchRun).filter(SQLASearchRun.id == search_run_id).first()
-        if not run:
-            return
+    search_run_id = job.subject_id
+    if not search_run_id:
+        return
 
-        job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
-        if not job:
-            return
+    run = db.query(SQLASearchRun).filter(SQLASearchRun.id == search_run_id).first()
+    if not run:
+        return
 
-        try:
-            search_runs.mark_running(db, run, job)
+    try:
+        search_runs.mark_running(db, run, job)
 
-            papers = papers_for_sources(db, enabled_source_types(db), run.run_date)
+        papers = papers_for_sources(db, enabled_source_types(db), run.run_date)
 
-            active_filters = filter_service.list_active_filters(db)
-            filter_payloads = [f.to_search_payload() for f in active_filters]
-            papers_by_id = {p.id: p.to_search_payload() for p in papers}
+        active_filters = filter_service.list_active_filters(db)
+        filter_payloads = [f.to_search_payload() for f in active_filters]
+        papers_by_id = {p.id: p.to_search_payload() for p in papers}
 
-            search_runs.update_candidate_counts(
-                db,
-                run,
-                candidate_count=len(papers),
-                candidate_counts=_candidate_counts_by_source(papers),
-            )
+        search_runs.update_candidate_counts(
+            db,
+            run,
+            candidate_count=len(papers),
+            candidate_counts=_candidate_counts_by_source(papers),
+        )
 
-            if not filter_payloads or not papers:
-                search_runs.set_match_count(db, run, 0)
-                search_runs.complete_daily_search_job(db, job)
-                return
-
-            candidate_pairs = select_daily_search_pairs(
-                db,
-                filters=filter_payloads,
-                papers_by_id=papers_by_id,
-                run_date=run.run_date,
-            )
-            pair_total = len(candidate_pairs)
-
-            if pair_total == 0:
-                job.progress = {"current": 0, "total": 0}
-                search_runs.commit_progress(db)
-                search_runs.set_match_count(db, run, 0)
-                search_runs.complete_daily_search_job(db, job)
-                return
-
-            search_runs.set_pair_progress(db, job, total=pair_total)
-
-            completed_pairs = 0
-            failed_pairs = 0
-            first_pair_error = ""
-
-            async def handle_pair_result(
-                filter: FilterPayload,
-                paper: PaperPayload,
-                outcome: PairOutcome,
-            ) -> None:
-                nonlocal completed_pairs, failed_pairs, first_pair_error
-                completed_pairs += 1
-
-                result, error, llm_model, llm_response_id = outcome
-                if error:
-                    failed_pairs += 1
-                    if not first_pair_error:
-                        first_pair_error = error
-                    tqdm.write(
-                        f"Pair {completed_pairs}/{pair_total} failed: "
-                        f"{filter.name} x {paper.item_id}"
-                    )
-                elif result and result.get("reason", "").strip():
-                    db.add(
-                        SQLAPaperMatch(
-                            search_run_id=search_run_id,
-                            filter_id=filter.id,
-                            paper_id=paper.id,
-                            result=result,
-                            llm_model=llm_model,
-                            llm_response_id=llm_response_id,
-                        )
-                    )
-                job.progress = {"current": completed_pairs, "total": pair_total}
-                search_runs.commit_progress(db)
-                pair_progress.update(1)
-
-            with tqdm(
-                total=pair_total,
-                desc="filter-item pairs",
-                unit="pair",
-                dynamic_ncols=True,
-                disable=None,
-            ) as pair_progress:
-                asyncio.run(
-                    _evaluate_pairs(
-                        pairs=candidate_pairs,
-                        on_result=handle_pair_result,
-                    )
-                )
-
-            if failed_pairs == pair_total:
-                raise RuntimeError(
-                    f"All {pair_total} filter-item evaluations failed. First error: {first_pair_error}"
-                )
-
-            match_count = (
-                db.query(SQLAPaperMatch)
-                .filter(SQLAPaperMatch.search_run_id == search_run_id)
-                .count()
-            )
-            search_runs.set_match_count(db, run, match_count)
+        if not filter_payloads or not papers:
+            search_runs.set_match_count(db, run, 0)
             search_runs.complete_daily_search_job(db, job)
+            return
 
-        except Exception as e:
-            db.rollback()
-            run = (
-                db.query(SQLASearchRun)
-                .filter(SQLASearchRun.id == search_run_id)
-                .first()
+        candidate_pairs = select_daily_search_pairs(
+            db,
+            filters=filter_payloads,
+            papers_by_id=papers_by_id,
+            run_date=run.run_date,
+        )
+        pair_total = len(candidate_pairs)
+
+        if pair_total == 0:
+            job.progress = {"current": 0, "total": 0}
+            search_runs.commit_progress(db)
+            search_runs.set_match_count(db, run, 0)
+            search_runs.complete_daily_search_job(db, job)
+            return
+
+        search_runs.set_pair_progress(db, job, total=pair_total)
+
+        completed_pairs = 0
+        failed_pairs = 0
+        first_pair_error = ""
+
+        async def handle_pair_result(
+            filter: FilterPayload,
+            paper: PaperPayload,
+            outcome: PairOutcome,
+        ) -> None:
+            nonlocal completed_pairs, failed_pairs, first_pair_error
+            completed_pairs += 1
+
+            result, error, llm_model, llm_response_id = outcome
+            if error:
+                failed_pairs += 1
+                if not first_pair_error:
+                    first_pair_error = error
+                tqdm.write(
+                    f"Pair {completed_pairs}/{pair_total} failed: "
+                    f"{filter.name} x {paper.item_id}"
+                )
+            elif result and result.get("reason", "").strip():
+                db.add(
+                    SQLAPaperMatch(
+                        search_run_id=search_run_id,
+                        filter_id=filter.id,
+                        paper_id=paper.id,
+                        result=result,
+                        llm_model=llm_model,
+                        llm_response_id=llm_response_id,
+                    )
+                )
+            job.progress = {"current": completed_pairs, "total": pair_total}
+            search_runs.commit_progress(db)
+            pair_progress.update(1)
+
+        with tqdm(
+            total=pair_total,
+            desc="filter-item pairs",
+            unit="pair",
+            dynamic_ncols=True,
+            disable=None,
+        ) as pair_progress:
+            asyncio.run(
+                _evaluate_pairs(
+                    pairs=candidate_pairs,
+                    on_result=handle_pair_result,
+                )
             )
-            if run:
-                job = search_runs.resolve_daily_search_job(db, search_run_id, job_id)
-                search_runs.fail_run(db, run, job, str(e))
-            logger.exception("daily_search run=%s failed", search_run_id)
-            raise
+
+        if failed_pairs == pair_total:
+            raise RuntimeError(
+                f"All {pair_total} filter-item evaluations failed. First error: {first_pair_error}"
+            )
+
+        match_count = (
+            db.query(SQLAPaperMatch)
+            .filter(SQLAPaperMatch.search_run_id == search_run_id)
+            .count()
+        )
+        search_runs.set_match_count(db, run, match_count)
+        search_runs.complete_daily_search_job(db, job)
+
+    except Exception as e:
+        db.rollback()
+        run = db.query(SQLASearchRun).filter(SQLASearchRun.id == search_run_id).first()
+        if run:
+            search_runs.fail_run(db, run, job, str(e))
+        logger.exception("daily_search run=%s failed", search_run_id)
+        raise

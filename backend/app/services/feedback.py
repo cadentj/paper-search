@@ -5,15 +5,12 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.jobs.feedback_reflection import process_all_feedback
-from app.jobs.queues import enqueue_for_job
 from app.models.filter import SQLAFilter
 from paper_search_core.models.paper import SQLAPaper
 from app.models.paper_match import SQLAPaperMatch
 from app.models.paper_match_feedback import SQLAPaperMatchFeedback
 from app.models.paper_note import SQLAPaperNote
-from app.services.job_enqueue import commit_entities, enqueue_job, mark_job_failed
-from app.services.jobs import create_job
+from app.services.jobs import commit_refresh, create_job, enqueue
 
 
 def upsert_match_feedback(
@@ -127,14 +124,6 @@ def start_feedback_processing(db: Session) -> str:
         subject_type="feedback_batch",
         subject_id="batch",
     )
-    commit_entities(db, job_record)
-
-    enqueue_job(
-        db,
-        job=job_record,
-        enqueue=lambda: enqueue_for_job(
-            job_record, process_all_feedback, job_record.id
-        ),
-        on_failure=lambda sess, error: mark_job_failed(sess, job_record, error),
-    )
+    commit_refresh(db, job_record)
+    enqueue(db, job_record)
     return job_record.id

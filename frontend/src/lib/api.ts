@@ -87,8 +87,6 @@ export interface JobStartResponse {
 
 export interface JobOverviewEntry {
   job: Job;
-  label: string;
-  detail?: string | null;
   href?: string | null;
 }
 

@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.db.session import database
 from app.models.filter import SQLAFilter
 from app.services import filters as filter_service
 from app.models.job import SQLAJob
@@ -142,64 +141,55 @@ def _create_draft_filter(
     db.add(filter)
 
 
-def process_all_feedback(job_id: str) -> None:
-    with database.session() as db:
-        try:
-            job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
-            if not job:
-                return
-            set_job_status(job, status="running")
-            db.commit()
+def run(db: Session, job: SQLAJob) -> None:
+    try:
+        set_job_status(job, status="running")
+        db.commit()
 
-            # Gather pending votes
-            votes = (
-                db.query(SQLAPaperMatchFeedback)
-                .filter(SQLAPaperMatchFeedback.processed == False)
-                .all()
-            )
+        votes = (
+            db.query(SQLAPaperMatchFeedback)
+            .filter(SQLAPaperMatchFeedback.processed == False)
+            .all()
+        )
 
-            # Gather pending notes
-            notes = (
-                db.query(SQLAPaperNote)
-                .filter(SQLAPaperNote.processed == False, SQLAPaperNote.text != "")
-                .all()
-            )
+        notes = (
+            db.query(SQLAPaperNote)
+            .filter(SQLAPaperNote.processed == False, SQLAPaperNote.text != "")
+            .all()
+        )
 
-            if not votes and not notes:
-                set_job_status(job, status="completed")
-                db.commit()
-                return
-
-            user_prompt = _build_reflection_prompt(db, votes, notes)
-
-            result = asyncio.run(
-                async_call_llm(
-                    system_prompt=FEEDBACK_REFLECTION_SYSTEM_PROMPT,
-                    user_prompt=user_prompt,
-                    response_model=FeedbackReflectionResponse,
-                    profile=FILTER_GENERATION_PROFILE,
-                )
-            )
-
-            reflection = FeedbackReflectionResponse.model_validate(result["content"])
-            now = datetime.now(timezone.utc)
-
-            for action in reflection.actions:
-                _create_draft_filter(db, action, now)
-
-            # Mark all feedback as processed
-            for v in votes:
-                v.processed = True
-            for n in notes:
-                n.processed = True
-
+        if not votes and not notes:
             set_job_status(job, status="completed")
             db.commit()
+            return
 
-        except Exception as e:
-            db.rollback()
-            job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
-            if job:
-                set_job_status(job, status="failed", error=str(e))
-                db.commit()
-            logger.exception("feedback processing failed job=%s", job_id)
+        user_prompt = _build_reflection_prompt(db, votes, notes)
+
+        result = asyncio.run(
+            async_call_llm(
+                system_prompt=FEEDBACK_REFLECTION_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                response_model=FeedbackReflectionResponse,
+                profile=FILTER_GENERATION_PROFILE,
+            )
+        )
+
+        reflection = FeedbackReflectionResponse.model_validate(result["content"])
+        now = datetime.now(timezone.utc)
+
+        for action in reflection.actions:
+            _create_draft_filter(db, action, now)
+
+        for v in votes:
+            v.processed = True
+        for n in notes:
+            n.processed = True
+
+        set_job_status(job, status="completed")
+        db.commit()
+
+    except Exception as e:
+        db.rollback()
+        set_job_status(job, status="failed", error=str(e))
+        db.commit()
+        logger.exception("feedback processing failed job=%s", job.id)

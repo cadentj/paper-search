@@ -26,7 +26,7 @@ function statusVariant(status: string): "default" | "secondary" | "destructive" 
 }
 
 function JobRow({ entry }: { entry: JobOverviewEntry }) {
-  const { job, label, detail, href } = entry;
+  const { job, href } = entry;
   const percent = jobProgressPercent(job);
   const total = Math.max(job.progress?.total ?? 1, 1);
   const current = Math.min(job.progress?.current ?? 0, total);
@@ -34,10 +34,10 @@ function JobRow({ entry }: { entry: JobOverviewEntry }) {
 
   const title = href ? (
     <Link href={href} className="font-medium hover:underline">
-      {label}
+      {job.kind}
     </Link>
   ) : (
-    <span className="font-medium">{label}</span>
+    <span className="font-medium">{job.kind}</span>
   );
 
   return (
@@ -45,9 +45,6 @@ function JobRow({ entry }: { entry: JobOverviewEntry }) {
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 space-y-1">
           {title}
-          {detail ? (
-            <p className="text-sm text-muted-foreground">{detail}</p>
-          ) : null}
           <p className="text-xs text-muted-foreground">
             Queue: {job.queue_name ?? "unknown"}
           </p>

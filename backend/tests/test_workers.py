@@ -67,9 +67,18 @@ class TestExtractOnboardingFilters:
             fake_stream_structured_response,
         )
 
-        from app.jobs.onboarding import extract_onboarding_filters
+        from app.services.jobs import create_job
+        from app.jobs.dispatcher import run_job
 
-        extract_onboarding_filters(ext_id)
+        job = create_job(
+            db_session,
+            kind="onboarding_extraction",
+            subject_type="onboarding_extraction",
+            subject_id=ext_id,
+            status="queued",
+        )
+        db_session.commit()
+        run_job(job.id)
 
         db_session.expire_all()
         updated = (
@@ -150,7 +159,7 @@ def _daily_summary_job(db_session, run_id: str):
 
 def _run_summary_for_run(db_session, run_id: str) -> None:
     from app.services.jobs import create_job
-    from app.jobs.daily_search_summary import summarize_daily_search
+    from app.jobs.daily_search_summary import run as run_summary
 
     summary_job = create_job(
         db_session,
@@ -160,7 +169,7 @@ def _run_summary_for_run(db_session, run_id: str) -> None:
         status="queued",
     )
     db_session.commit()
-    summarize_daily_search(run_id, summary_job.id)
+    run_summary(db_session, summary_job)
 
 
 def _create_daily_search_job(db_session, run_id: str):
@@ -178,9 +187,11 @@ def _create_daily_search_job(db_session, run_id: str):
 
 
 def _run_daily_search(db_session, run_id: str, job_id: str) -> None:
-    from app.jobs.daily_search import run_daily_search
+    from app.models.job import SQLAJob
+    from app.jobs.daily_search import run as run_daily_search_job
 
-    run_daily_search(run_id, job_id)
+    job = db_session.get(SQLAJob, job_id)
+    run_daily_search_job(db_session, job)
 
 
 def _extract_prompt_arxiv_id(user_prompt: str) -> str:
@@ -940,9 +951,18 @@ class TestSummarizeDailySearch:
             _fake_summary_llm(matched_arxiv_id="2605.00001"),
         )
 
-        from app.jobs.daily_search_summary import summarize_daily_search
+        from app.services.jobs import create_job
+        from app.jobs.daily_search_summary import run as run_summary
 
-        summarize_daily_search(run_id)
+        summary_job = create_job(
+            db_session,
+            kind="daily_search_summary",
+            subject_type="search_run",
+            subject_id=run_id,
+            status="queued",
+        )
+        db_session.commit()
+        run_summary(db_session, summary_job)
 
         db_session.expire_all()
         updated_run = (

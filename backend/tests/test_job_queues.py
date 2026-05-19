@@ -5,12 +5,12 @@ from datetime import date, datetime, timezone
 
 import pytest
 
+from app.jobs.dispatcher import run_job
 from app.jobs.queues import (
     IDEA_MAPS,
     INTERACTIVE,
     KIND_TO_QUEUE,
     REPORTS,
-    enqueue_for_job,
     queue_for_kind,
 )
 from app.models.idea_map import SQLAIdeaMap
@@ -50,21 +50,27 @@ def test_create_job_explicit_queue_name(db_session):
     assert job.queue_name == "custom"
 
 
-def test_enqueue_for_job_uses_matching_queue(db_session, monkeypatch):
-    captured: list[str] = []
+def test_enqueue_uses_run_job_and_matching_queue(db_session, monkeypatch):
+    captured: dict = {}
 
     class FakeQueue:
-        def enqueue(self, *args, **kwargs):
+        def enqueue(self, func, job_id):
+            captured["func"] = func
+            captured["job_id"] = job_id
+
             class FakeRqJob:
                 id = "rq-test"
 
             return FakeRqJob()
 
-    def fake_get_queue(name: str):
-        captured.append(name)
+    def fake_queue(name: str, connection=None):
+        captured["queue_name"] = name
         return FakeQueue()
 
-    monkeypatch.setattr("app.jobs.queues.get_queue", fake_get_queue)
+    monkeypatch.setattr("app.services.jobs.Queue", fake_queue)
+    monkeypatch.setattr("app.services.jobs.Redis.from_url", lambda url: object())
+
+    from app.services.jobs import enqueue
 
     job = create_job(
         db_session,
@@ -72,12 +78,13 @@ def test_enqueue_for_job_uses_matching_queue(db_session, monkeypatch):
         subject_type="feedback_batch",
         subject_id="batch",
     )
+    db_session.add(job)
+    db_session.commit()
 
-    def worker():
-        pass
-
-    enqueue_for_job(job, worker)
-    assert captured == [INTERACTIVE]
+    enqueue(db_session, job)
+    assert captured["queue_name"] == INTERACTIVE
+    assert captured["func"] is run_job
+    assert captured["job_id"] == job.id
 
 
 def test_jobs_overview_active_and_recent(client, db_session):
@@ -139,16 +146,13 @@ def test_jobs_overview_active_and_recent(client, db_session):
 
     assert len(payload["active"]) == 2
     active_by_kind = {entry["job"]["kind"]: entry for entry in payload["active"]}
-    assert active_by_kind["daily_search"]["label"] == "Daily search"
-    assert active_by_kind["daily_search"]["href"] == "/dashboard/daily/report"
-    assert active_by_kind["daily_search"]["detail"] == "2026-05-19"
-    assert active_by_kind["feedback_reflection"]["label"] == "Processing feedback"
-    assert active_by_kind["feedback_reflection"]["href"] == "/dashboard/filters"
+    assert active_by_kind["daily_search"]["job"]["kind"] == "daily_search"
+    assert active_by_kind["daily_search"]["href"] is None
+    assert active_by_kind["feedback_reflection"]["job"]["kind"] == "feedback_reflection"
+    assert active_by_kind["feedback_reflection"]["href"] is None
 
     assert len(payload["recent"]) >= 1
     recent_idea = next(
         entry for entry in payload["recent"] if entry["job"]["kind"] == "idea_map"
     )
-    assert recent_idea["label"] == "Idea map"
     assert recent_idea["href"] == f"/dashboard/papers/{paper.id}"
-    assert recent_idea["detail"] == "Attention Is All You Need"

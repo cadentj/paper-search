@@ -34,7 +34,8 @@ def test_start_idea_map_creates_new(db_session, monkeypatch):
 
             return FakeJob()
 
-    monkeypatch.setattr("app.jobs.queues.get_queue", lambda _name: FakeQueue())
+    monkeypatch.setattr("app.services.jobs.Queue", lambda *args, **kwargs: FakeQueue())
+    monkeypatch.setattr("app.services.jobs.Redis.from_url", lambda url: object())
 
     job_id = papers_service.start_idea_map(db_session, paper.id)
     assert job_id

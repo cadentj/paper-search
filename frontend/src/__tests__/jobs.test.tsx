@@ -28,9 +28,6 @@ describe("Jobs page", () => {
             progress: { current: 3, total: 10 },
             created_at: "2026-05-19T12:00:00Z",
           },
-          label: "Daily search",
-          detail: "2026-05-19",
-          href: "/dashboard/daily/report",
         },
       ],
       recent: [
@@ -44,8 +41,6 @@ describe("Jobs page", () => {
             created_at: "2026-05-19T11:00:00Z",
             completed_at: "2026-05-19T11:05:00Z",
           },
-          label: "Idea map",
-          detail: "Test paper",
           href: "/dashboard/papers/paper-1",
         },
       ],
@@ -61,12 +56,12 @@ describe("Jobs page", () => {
       </QueryClientProvider>
     );
 
-    expect(await screen.findByText("Daily search")).toBeInTheDocument();
+    expect(await screen.findByText("daily_search")).toBeInTheDocument();
     expect(screen.getByText("Active")).toBeInTheDocument();
     expect(screen.getByText("Recent")).toBeInTheDocument();
     expect(screen.getByText("running")).toBeInTheDocument();
     expect(screen.getByText("30%")).toBeInTheDocument();
-    expect(screen.getByText("Idea map")).toBeInTheDocument();
+    expect(screen.getByText("idea_map")).toBeInTheDocument();
     expect(screen.getByText("completed")).toBeInTheDocument();
     expect(screen.getByText("Queue: reports")).toBeInTheDocument();
   });

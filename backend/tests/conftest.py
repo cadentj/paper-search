@@ -81,6 +81,7 @@ def db_session(db_engine):
 
 
 _WORKER_DATABASE_MODULES = (
+    "app.jobs.dispatcher",
     "app.jobs.daily_search",
     "app.jobs.daily_search_summary",
     "app.jobs.documents",

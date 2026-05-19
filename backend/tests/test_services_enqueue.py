@@ -1,43 +1,65 @@
 import pytest
 
 from app.models.job import SQLAJob
-from app.services.job_enqueue import enqueue_job, persist_then_enqueue
-from app.services.jobs import create_job
+from app.services.jobs import commit_refresh, create_job, enqueue
 from app.services import search_runs
 
 
-def test_enqueue_job_success(db_session, monkeypatch):
+def test_enqueue_success(db_session, monkeypatch):
     job = create_job(
         db_session,
         kind="feedback_reflection",
         subject_type="feedback_batch",
         subject_id="1",
     )
-    db_session.commit()
+    db_session.add(job)
 
-    enqueue_job(
-        db_session,
-        job=job,
-        enqueue=lambda: None,
+    enqueued: list[str] = []
+
+    class FakeQueue:
+        def enqueue(self, func, job_id):
+            enqueued.append(job_id)
+
+    monkeypatch.setattr(
+        "app.services.jobs.Queue",
+        lambda *args, **kwargs: FakeQueue(),
     )
+    monkeypatch.setattr(
+        "app.services.jobs.Redis.from_url",
+        lambda url: object(),
+    )
+
+    commit_refresh(db_session, job)
+    enqueue(db_session, job)
+    assert enqueued == [job.id]
     assert job.status == "queued"
 
 
-def test_enqueue_job_failure_marks_failed(db_session):
+def test_enqueue_failure_marks_failed(db_session, monkeypatch):
     job = create_job(
         db_session,
         kind="feedback_reflection",
         subject_type="feedback_batch",
         subject_id="1",
     )
-    db_session.commit()
+    db_session.add(job)
+    commit_refresh(db_session, job)
+
+    class FakeQueue:
+        def enqueue(self, *args, **kwargs):
+            raise RuntimeError("queue down")
+
+    monkeypatch.setattr(
+        "app.services.jobs.Queue",
+        lambda *args, **kwargs: FakeQueue(),
+    )
+    monkeypatch.setattr(
+        "app.services.jobs.Redis.from_url",
+        lambda url: object(),
+    )
 
     with pytest.raises(ConnectionError):
-        enqueue_job(
-            db_session,
-            job=job,
-            enqueue=lambda: (_ for _ in ()).throw(RuntimeError("queue down")),
-        )
+        enqueue(db_session, job)
     assert job.status == "failed"
     assert "queue down" in (job.error or "")
 
@@ -48,24 +70,3 @@ def test_start_daily_search_validation(db_session, monkeypatch):
     )
     with pytest.raises(ValueError, match="No data sources are enabled"):
         search_runs.start_daily_search(db_session)
-
-
-def test_persist_then_enqueue_commits_entities(db_session, monkeypatch):
-    job = create_job(
-        db_session,
-        kind="feedback_reflection",
-        subject_type="feedback_batch",
-        subject_id="x",
-    )
-    db_session.add(job)
-
-    persist_then_enqueue(
-        db_session,
-        job=job,
-        entities=(),
-        enqueue=lambda: None,
-        on_failure=lambda sess, err: None,
-    )
-    refreshed = db_session.query(SQLAJob).filter(SQLAJob.id == job.id).first()
-    assert refreshed is not None
-    assert refreshed.status == "queued"
