@@ -7,7 +7,7 @@ echo "Starting Redis..."
 docker compose up -d redis
 
 echo "Stopping app services that may hold SQLite locks..."
-docker compose stop backend worker >/dev/null || true
+docker compose stop backend worker-interactive worker-reports worker-idea-maps >/dev/null || true
 
 echo "Deleting SQLite database from the Docker volume..."
 docker compose run --rm --no-deps backend sh -lc \
@@ -20,6 +20,6 @@ echo "Syncing public indexes into a fresh SQLite database..."
 docker compose run --rm --no-deps backend python /workspace/scripts/sync.py
 
 echo "Starting backend services..."
-docker compose up -d backend worker
+docker compose up -d backend worker-interactive worker-reports worker-idea-maps
 
 echo "Done. Frontend: http://localhost:3000  API: http://localhost:8000"

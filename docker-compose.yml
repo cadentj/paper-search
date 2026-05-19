@@ -35,7 +35,7 @@ services:
       - .:/workspace
       - backend_data:/workspace/backend/data
 
-  worker:
+  worker-interactive:
     build:
       context: .
       dockerfile: backend/Dockerfile.dev
@@ -44,7 +44,57 @@ services:
       - watchfiles
       - --filter
       - python
-      - python -m app.worker
+      - python -m app.worker --queue interactive --num-workers ${INTERACTIVE_WORKERS:-1}
+      - app
+      - /workspace/core/src
+    depends_on:
+      - redis
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: sqlite:////workspace/backend/data/paper_search.db
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: ${APP_ENV:-development}
+      WATCHFILES_FORCE_POLLING: "true"
+    volumes:
+      - .:/workspace
+      - backend_data:/workspace/backend/data
+
+  worker-reports:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.dev
+    working_dir: /workspace/backend
+    command:
+      - watchfiles
+      - --filter
+      - python
+      - python -m app.worker --queue reports --num-workers ${REPORT_WORKERS:-1}
+      - app
+      - /workspace/core/src
+    depends_on:
+      - redis
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: sqlite:////workspace/backend/data/paper_search.db
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: ${APP_ENV:-development}
+      WATCHFILES_FORCE_POLLING: "true"
+    volumes:
+      - .:/workspace
+      - backend_data:/workspace/backend/data
+
+  worker-idea-maps:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.dev
+    working_dir: /workspace/backend
+    command:
+      - watchfiles
+      - --filter
+      - python
+      - python -m app.worker --queue idea_maps --num-workers ${IDEA_MAP_WORKERS:-1}
       - app
       - /workspace/core/src
     depends_on:

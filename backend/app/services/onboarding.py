@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.jobs.onboarding import extract_onboarding_filters, generate_onboarding_draft_filters
-from app.jobs.queue import get_queue
+from app.jobs.queues import enqueue_for_job
 from app.jobs.scholar_import import run_scholar_import
 from app.models.filter import SQLAFilter
 from app.models.onboarding_extraction import SQLAOnboardingExtraction
@@ -57,7 +57,8 @@ def start_generation(db: Session, body: OnboardingGenerationCreate) -> str:
     enqueue_job(
         db,
         job=job_record,
-        enqueue=lambda: get_queue().enqueue(
+        enqueue=lambda: enqueue_for_job(
+            job_record,
             generate_onboarding_draft_filters,
             input_text,
             body.document_ids,
@@ -98,8 +99,8 @@ def start_extraction(db: Session, *, input_text: str) -> str:
             db,
             job=job_record,
             entities=(extraction,),
-            enqueue=lambda: get_queue().enqueue(
-                extract_onboarding_filters, extraction.id, job_record.id
+            enqueue=lambda: enqueue_for_job(
+                job_record, extract_onboarding_filters, extraction.id, job_record.id
             ),
             on_failure=on_failure,
             log_context=f"onboarding extraction={extraction.id}",
@@ -218,8 +219,8 @@ def start_profile_import(
         db,
         job=job_record,
         entities=(profile_import,),
-        enqueue=lambda: get_queue().enqueue(
-            run_scholar_import, profile_import.id, job_record.id
+        enqueue=lambda: enqueue_for_job(
+            job_record, run_scholar_import, profile_import.id, job_record.id
         ),
         on_failure=on_failure,
         store_queue_job_id=False,

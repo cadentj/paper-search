@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.jobs.feedback_reflection import process_all_feedback
-from app.jobs.queue import get_queue
+from app.jobs.queues import enqueue_for_job
 from app.models.filter import SQLAFilter
 from paper_search_core.models.paper import SQLAPaper
 from app.models.paper_match import SQLAPaperMatch
@@ -125,7 +125,7 @@ def start_feedback_processing(db: Session) -> str:
     enqueue_job(
         db,
         job=job_record,
-        enqueue=lambda: get_queue().enqueue(process_all_feedback, job_record.id),
+        enqueue=lambda: enqueue_for_job(job_record, process_all_feedback, job_record.id),
         on_failure=lambda sess, error: mark_job_failed(sess, job_record, error),
         store_queue_job_id=False,
     )

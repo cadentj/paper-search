@@ -6,8 +6,10 @@ import {
   Newspaper,
   Filter,
   Settings,
+  ListTodo,
+  Loader2,
 } from "lucide-react";
-import { useFeedbackStatus } from "@/hooks/use-queries";
+import { useFeedbackStatus, useJobsOverview } from "@/hooks/use-queries";
 import {
   Sidebar,
   SidebarContent,
@@ -26,11 +28,14 @@ import {
 import { type ReactNode } from "react";
 
 const SETTINGS_HREF = "/dashboard/settings";
+const JOBS_HREF = "/dashboard/jobs";
 
 const DAILY_SUB_ITEMS = [
   { label: "Report", href: "/dashboard/daily/report" },
   { label: "All Papers", href: "/dashboard/daily/all-papers" },
 ] as const;
+
+const REPORT_JOB_KINDS = new Set(["daily_search", "daily_search_summary"]);
 
 function isDailyPath(pathname: string) {
   return pathname === "/dashboard/daily" || pathname.startsWith("/dashboard/daily/");
@@ -43,6 +48,12 @@ function isDailyReportPath(pathname: string) {
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { data: feedbackStatus } = useFeedbackStatus();
+  const { data: jobsOverview } = useJobsOverview();
+
+  const activeJobs = jobsOverview?.active ?? [];
+  const hasActiveJobs = activeJobs.length > 0;
+  const hasReportJob = activeJobs.some((entry) => REPORT_JOB_KINDS.has(entry.job.kind));
+  const ideaMapCount = activeJobs.filter((entry) => entry.job.kind === "idea_map").length;
 
   const hasPendingFeedback = feedbackStatus
     ? feedbackStatus.pending_votes > 0 || feedbackStatus.pending_notes > 0
@@ -81,6 +92,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                   >
                     <Newspaper className="size-4" />
                     <span>Daily</span>
+                    {ideaMapCount > 0 && (
+                      <span className="ml-auto rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums">
+                        {ideaMapCount}
+                      </span>
+                    )}
                   </SidebarMenuButton>
                   <SidebarMenuSub>
                     {DAILY_SUB_ITEMS.map((item) => (
@@ -94,10 +110,25 @@ export function AppShell({ children }: { children: ReactNode }) {
                           render={<Link href={item.href} />}
                         >
                           {item.label}
+                          {item.href === "/dashboard/daily/report" && hasReportJob && (
+                            <Loader2 className="ml-auto size-3.5 animate-spin text-muted-foreground" />
+                          )}
                         </SidebarMenuSubButton>
                       </SidebarMenuSubItem>
                     ))}
                   </SidebarMenuSub>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={pathname === JOBS_HREF}
+                    render={<Link href={JOBS_HREF} />}
+                  >
+                    <ListTodo className="size-4" />
+                    <span>Jobs</span>
+                    {hasActiveJobs && (
+                      <Loader2 className="ml-auto size-3.5 animate-spin text-muted-foreground" />
+                    )}
+                  </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
                   <SidebarMenuButton

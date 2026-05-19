@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.jobs.daily_search import run_daily_search
 from app.jobs.daily_search_summary import summarize_daily_search
-from app.jobs.queue import get_queue
+from app.jobs.queues import enqueue_for_job
 from app.models.filter import SQLAFilter
 from app.models.job import SQLAJob
 from paper_search_core.models.paper import SQLAPaper
@@ -116,7 +116,7 @@ def start_daily_search(
         db,
         job=job_record,
         entities=(run,),
-        enqueue=lambda: get_queue().enqueue(run_daily_search, run.id, job_record.id),
+        enqueue=lambda: enqueue_for_job(job_record, run_daily_search, run.id, job_record.id),
         on_failure=on_failure,
         log_context=f"daily search run={run.id}",
     )
@@ -163,7 +163,9 @@ def start_daily_summary(db: Session, search_run_id: str) -> SQLAJob:
     enqueue_job(
         db,
         job=summary_job,
-        enqueue=lambda: get_queue().enqueue(summarize_daily_search, run.id, summary_job.id),
+        enqueue=lambda: enqueue_for_job(
+            summary_job, summarize_daily_search, run.id, summary_job.id
+        ),
         on_failure=on_failure,
         log_context=f"daily search summary run={run.id}",
     )

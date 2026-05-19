@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AppShell } from "@/components/app-shell";
 
@@ -11,6 +11,7 @@ vi.mock("next/navigation", () => ({
 
 const mockApi = vi.hoisted(() => ({
   getFeedbackStatus: vi.fn(),
+  getJobsOverview: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -26,6 +27,7 @@ describe("AppShell navigation", () => {
       pending_notes: 0,
       pending_proposals: 0,
     });
+    mockApi.getJobsOverview.mockResolvedValue({ active: [], recent: [] });
   });
 
   it("shows Filters, Daily with nested Report and All Papers, and Settings", () => {
@@ -49,13 +51,54 @@ describe("AppShell navigation", () => {
     expect(navHrefs).toContain("/dashboard/daily/report");
     expect(navHrefs).toContain("/dashboard/daily/all-papers");
     expect(navHrefs).toContain("/dashboard/settings");
+    expect(navHrefs).toContain("/dashboard/jobs");
     expect(navHrefs).not.toContain("/dashboard/search");
 
     expect(screen.getByText("Filters")).toBeInTheDocument();
     expect(screen.getByText("Daily")).toBeInTheDocument();
     expect(screen.getByText("Report")).toBeInTheDocument();
     expect(screen.getByText("All Papers")).toBeInTheDocument();
+    expect(screen.getByText("Jobs")).toBeInTheDocument();
     expect(screen.getByText("Settings")).toBeInTheDocument();
     expect(screen.queryByText("Search")).not.toBeInTheDocument();
+  });
+
+  it("shows report activity indicator when a report job is active", async () => {
+    mockPathname.current = "/dashboard/daily/report";
+    mockApi.getJobsOverview.mockResolvedValue({
+      active: [
+        {
+          job: {
+            id: "job-1",
+            kind: "daily_search",
+            status: "running",
+            queue_name: "reports",
+            progress: { current: 1, total: 10 },
+            created_at: new Date().toISOString(),
+          },
+          label: "Daily search",
+          detail: "2026-05-19",
+          href: "/dashboard/daily/report",
+        },
+      ],
+      recent: [],
+    });
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AppShell>
+          <div>Content</div>
+        </AppShell>
+      </QueryClientProvider>
+    );
+
+    await screen.findByText("Report");
+    await waitFor(() => {
+      expect(document.querySelector(".animate-spin")).not.toBeNull();
+    });
   });
 });

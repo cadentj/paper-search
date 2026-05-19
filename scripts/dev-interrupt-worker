@@ -3,7 +3,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-docker compose stop worker >/dev/null || true
+WORKERS=(worker-interactive worker-reports worker-idea-maps)
+docker compose stop "${WORKERS[@]}" >/dev/null || true
 docker compose run --rm --no-deps backend \
   python /workspace/scripts/dev_jobs.py fail-running "Interrupted by scripts/dev-interrupt-worker"
-docker compose up -d worker
+docker compose up -d "${WORKERS[@]}"

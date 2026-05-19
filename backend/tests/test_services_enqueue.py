@@ -8,7 +8,12 @@ from app.services import search_runs
 
 
 def test_enqueue_job_success(db_session, monkeypatch):
-    job = create_job(db_session, kind="test", subject_type="test", subject_id="1")
+    job = create_job(
+        db_session,
+        kind="feedback_reflection",
+        subject_type="feedback_batch",
+        subject_id="1",
+    )
     db_session.commit()
 
     class FakeRqJob:
@@ -23,7 +28,12 @@ def test_enqueue_job_success(db_session, monkeypatch):
 
 
 def test_enqueue_job_failure_marks_failed(db_session):
-    job = create_job(db_session, kind="test", subject_type="test", subject_id="1")
+    job = create_job(
+        db_session,
+        kind="feedback_reflection",
+        subject_type="feedback_batch",
+        subject_id="1",
+    )
     db_session.commit()
 
     with pytest.raises(EnqueueFailed):
@@ -45,7 +55,12 @@ def test_start_daily_search_validation(db_session, monkeypatch):
 
 
 def test_persist_then_enqueue_commits_entities(db_session, monkeypatch):
-    job = create_job(db_session, kind="test", subject_type="test", subject_id="x")
+    job = create_job(
+        db_session,
+        kind="feedback_reflection",
+        subject_type="feedback_batch",
+        subject_id="x",
+    )
     db_session.add(job)
 
     class FakeRqJob:

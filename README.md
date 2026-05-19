@@ -34,7 +34,13 @@ This starts:
 
 - Redis on port 6379
 - FastAPI on http://localhost:8000 with `uvicorn --reload`
-- an RQ worker that restarts on Python file changes
+- three RQ workers (one per queue) that restart on Python file changes:
+  - `worker-interactive` — feedback, documents, onboarding, scholar import
+  - `worker-reports` — daily search and report summary
+  - `worker-idea-maps` — idea map generation
+
+Worker process counts are configured in `.env` via `INTERACTIVE_WORKERS`,
+`REPORT_WORKERS`, and `IDEA_MAP_WORKERS` (default `1` each).
 
 The Docker dev stack stores SQLite in the `backend_data` Docker volume at
 `/workspace/backend/data/paper_search.db`.
@@ -58,7 +64,7 @@ Pull arXiv and LessWrong date manifests and shards from the public R2 buckets in
 scripts/dev-reset
 ```
 
-`scripts/dev-reset` stops the backend and worker, deletes the SQLite database
+`scripts/dev-reset` stops the backend and workers, deletes the SQLite database
 from the Docker volume, flushes Redis queue state, runs sync, then starts the app
 services again. Re-run this when the published R2 indexes change. HTML for paper
 viewing is still fetched from R2 on demand.
@@ -69,14 +75,14 @@ viewing is still fetched from R2 on demand.
 scripts/dev-worker-logs
 ```
 
-Follows worker-only logs, hiding Redis, backend, and one-off sync container
-output.
+Follows all three worker service logs, hiding Redis, backend, and one-off sync
+container output.
 
 ```bash
 scripts/dev-interrupt-worker
 ```
 
-Restarts the worker container to interrupt running worker code, then marks
+Restarts the worker containers to interrupt running worker code, then marks
 SQLite jobs that were still `running` as failed so the UI does not show stale
 progress.
 
@@ -84,8 +90,8 @@ progress.
 scripts/dev-clear-jobs
 ```
 
-Stops the worker, flushes Redis, marks SQLite jobs that were `queued` or
-`running` as failed, then starts the worker again.
+Stops the workers, flushes Redis, marks SQLite jobs that were `queued` or
+`running` as failed, then starts the workers again.
 
 ```bash
 scripts/dev-flush-redis

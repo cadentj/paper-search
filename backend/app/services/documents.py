@@ -6,7 +6,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.jobs.documents import process_document
-from app.jobs.queue import get_queue
+from app.jobs.queues import enqueue_for_job
 from app.models.document import SQLADocument
 from app.models.job import SQLAJob
 from app.services.errors import NotFound
@@ -73,7 +73,9 @@ def start_document_processing(
         db,
         job=job_record,
         entities=(document,),
-        enqueue=lambda: get_queue().enqueue(process_document, document.id, job_record.id),
+        enqueue=lambda: enqueue_for_job(
+            job_record, process_document, document.id, job_record.id
+        ),
         on_failure=on_failure,
         log_context=f"document={document.id}",
     )

@@ -6,6 +6,14 @@ import { api, DailySchedule, FilterDefinition, FilterResponse, PaperMatch } from
 
 const ACTIVE_JOB_STATUSES = new Set(["queued", "running"]);
 
+export function useJobsOverview() {
+  return useQuery({
+    queryKey: ["jobs", "overview"],
+    queryFn: api.getJobsOverview,
+    refetchInterval: 2000,
+  });
+}
+
 export function useJob(id: string | null) {
   return useQuery({
     queryKey: ["jobs", id],
@@ -290,6 +298,7 @@ export function useFeedbackStatus() {
   return useQuery({
     queryKey: ["feedback", "status"],
     queryFn: api.getFeedbackStatus,
+    refetchInterval: 10_000,
   });
 }
 
@@ -300,6 +309,28 @@ export function useProcessFeedback() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["feedback", "status"] });
       qc.invalidateQueries({ queryKey: ["filters"] });
+      qc.invalidateQueries({ queryKey: ["jobs", "overview"] });
+    },
+  });
+}
+
+export function useSubmitMatchFeedback() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ matchId, value }: { matchId: string; value: "up" | "down" }) =>
+      api.submitMatchFeedback(matchId, value),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["feedback", "status"] });
+    },
+  });
+}
+
+export function useSubmitPaperFeedback() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (paperId: string) => api.submitPaperFeedback(paperId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["feedback", "status"] });
     },
   });
 }
@@ -416,6 +447,7 @@ export function useUpdatePaperNotes(paperId: string) {
     mutationFn: (text: string) => api.updatePaperNotes(paperId, text),
     onSuccess: (note) => {
       qc.setQueryData(["papers", paperId, "notes"], note);
+      qc.invalidateQueries({ queryKey: ["feedback", "status"] });
     },
   });
 }

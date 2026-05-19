@@ -3,4 +3,5 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-docker compose logs -f --tail=200 worker
+docker compose logs -f --tail=200 \
+  worker-interactive worker-reports worker-idea-maps

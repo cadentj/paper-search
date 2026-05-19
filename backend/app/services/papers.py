@@ -8,7 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.jobs.idea_map import generate_idea_map
-from app.jobs.queue import get_queue
+from app.jobs.queues import enqueue_for_job
 from app.models.idea_map import SQLAIdeaMap
 from paper_search_core.models.paper import SQLAPaper
 from app.models.paper_note import SQLAPaperNote
@@ -156,7 +156,9 @@ def _enqueue_idea_map(db: Session, idea_map: SQLAIdeaMap, job_record: SQLAJob) -
     enqueue_job(
         db,
         job=job_record,
-        enqueue=lambda: get_queue().enqueue(generate_idea_map, idea_map.id, job_record.id),
+        enqueue=lambda: enqueue_for_job(
+            job_record, generate_idea_map, idea_map.id, job_record.id
+        ),
         on_failure=on_failure,
         log_context=f"idea map={idea_map.id}",
     )

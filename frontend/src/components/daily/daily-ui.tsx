@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import type { DailySearchSummary, Job, Paper, PaperMatch, ClaimFilterResult } from "@/lib/api";
 import { api } from "@/lib/api";
+import { useSubmitMatchFeedback, useSubmitPaperFeedback } from "@/hooks/use-queries";
 import { cn } from "@/lib/utils";
 
 type MatchGroup = {
@@ -390,6 +391,7 @@ function MatchResultDisplay({ match }: { match: PaperMatch }) {
 }
 
 function FeedbackButtons({ matchId }: { matchId: string }) {
+  const submitMatchFeedback = useSubmitMatchFeedback();
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
   const [pending, setPending] = useState<"up" | "down" | null>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -402,7 +404,7 @@ function FeedbackButtons({ matchId }: { matchId: string }) {
     debounceRef.current = setTimeout(async () => {
       setSubmitted(true);
       try {
-        await api.submitMatchFeedback(matchId, value);
+        await submitMatchFeedback.mutateAsync({ matchId, value });
         setFeedback(value);
       } catch {
         setSubmitted(false);
@@ -496,20 +498,17 @@ function AllPaperCard({
   isSelected: boolean;
   onSelect: () => void;
 }) {
+  const submitPaperFeedback = useSubmitPaperFeedback();
   const [liked, setLiked] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
 
   const handleLike = async (event: React.MouseEvent) => {
     event.stopPropagation();
-    if (liked || submitting) return;
-    setSubmitting(true);
+    if (liked || submitPaperFeedback.isPending) return;
     try {
-      await api.submitPaperFeedback(paper.id);
+      await submitPaperFeedback.mutateAsync(paper.id);
       setLiked(true);
     } catch {
       // ignore
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -562,7 +561,7 @@ function AllPaperCard({
             className={`p-1 rounded hover:bg-muted ${liked ? "text-green-600" : "text-muted-foreground"} ${liked ? "opacity-50 cursor-not-allowed" : ""}`}
             aria-label="Thumbs up"
           >
-            {submitting ? (
+            {submitPaperFeedback.isPending ? (
               <Loader2 className="size-3.5 animate-spin" />
             ) : (
               <ThumbsUp className="size-3.5" />

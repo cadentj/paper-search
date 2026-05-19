@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from app.jobs.queues import queue_for_kind
 from app.models.job import SQLAJob
 
 
@@ -39,7 +40,7 @@ def create_job(
     subject_type: str | None = None,
     subject_id: str | None = None,
     status: str = "queued",
-    queue_name: str | None = "default",
+    queue_name: str | None = None,
     progress: dict | None = None,
 ) -> SQLAJob:
     now = datetime.now(timezone.utc)
@@ -49,7 +50,7 @@ def create_job(
         status=status,
         subject_type=subject_type,
         subject_id=subject_id,
-        queue_name=queue_name,
+        queue_name=queue_name if queue_name is not None else queue_for_kind(kind),
         progress=progress or {},
         created_at=now,
     )

@@ -14,6 +14,7 @@ from app.models.onboarding_extraction import OnboardingExtraction
 from app.models.paper_match import PaperMatch
 from app.models.search_run import SearchRun
 from app.services import job_views
+from app.services.jobs_overview import JobOverviewEntry, JobsOverview, jobs_overview
 from app.services.search_runs import search_run_payload, summary_payload
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -75,6 +76,43 @@ class DocumentProcessingJob(BaseModel):
     items: list[dict] = Field(default_factory=list)
     next_cursor: str | None = None
     done: bool = False
+
+
+class JobOverviewResponse(BaseModel):
+    job: Job
+    label: str
+    detail: str | None = None
+    href: str | None = None
+
+
+class JobsOverviewResponse(BaseModel):
+    active: list[JobOverviewResponse] = Field(default_factory=list)
+    recent: list[JobOverviewResponse] = Field(default_factory=list)
+
+
+@router.get("/overview", response_model=JobsOverviewResponse)
+def get_jobs_overview(db: Session = Depends(get_db)):
+    overview = jobs_overview(db)
+    return JobsOverviewResponse(
+        active=[
+            JobOverviewResponse(
+                job=entry.job,
+                label=entry.label,
+                detail=entry.detail,
+                href=entry.href,
+            )
+            for entry in overview.active
+        ],
+        recent=[
+            JobOverviewResponse(
+                job=entry.job,
+                label=entry.label,
+                detail=entry.detail,
+                href=entry.href,
+            )
+            for entry in overview.recent
+        ],
+    )
 
 
 @router.get("/{job_id}", response_model=Job)

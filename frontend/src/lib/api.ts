@@ -86,6 +86,18 @@ export interface JobStartResponse {
   job_id: string;
 }
 
+export interface JobOverviewEntry {
+  job: Job;
+  label: string;
+  detail?: string | null;
+  href?: string | null;
+}
+
+export interface JobsOverview {
+  active: JobOverviewEntry[];
+  recent: JobOverviewEntry[];
+}
+
 export interface DocumentResponse {
   id: string;
   job_id?: string | null;
@@ -326,6 +338,7 @@ export const api = {
   health: () => fetchApi<{ status: string }>("/health"),
 
   // Jobs
+  getJobsOverview: () => fetchApi<JobsOverview>("/jobs/overview"),
   getJob: (id: string) => fetchApi<Job>(`/jobs/${id}`),
   getDailySearchJob: (id: string, cursor?: string | null) =>
     fetchApi<DailySearchJobResponse>(
