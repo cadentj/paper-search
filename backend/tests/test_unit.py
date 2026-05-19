@@ -257,9 +257,7 @@ class TestLLMClient:
 
         assert attempts["count"] == 2
         assert parse_calls[0]["model"] == "openai/gpt-oss-120b"
-        assert parse_calls[0]["extra_body"] == {
-            "provider": {"order": ["cerebras"], "allow_fallbacks": False}
-        }
+        assert parse_calls[0]["extra_body"] == {"provider": {"order": ["cerebras"]}}
         assert parse_calls[0]["text_format"] is TopicFilterSearchResponse
         assert result["content"] == {"matches": []}
         assert result["model"] == "test-model"

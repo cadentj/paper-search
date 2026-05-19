@@ -61,12 +61,7 @@ def _response_input(system_prompt: str, user_prompt: str) -> list[dict]:
 
 
 def _provider_body(model_config: LLMModelConfig) -> dict:
-    return {
-        "provider": {
-            "order": [model_config.provider],
-            "allow_fallbacks": False,
-        }
-    }
+    return {"provider": {"order": [model_config.provider]}}
 
 
 def _parse_structured_response(
