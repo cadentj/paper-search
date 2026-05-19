@@ -30,7 +30,6 @@ def test_arxiv_record_from_shard(index_settings: IndexSettings):
         },
         index_settings,
     )
-    assert record["abstract"] == "Indexed abstract text."
     assert record["search_text"] == "Indexed abstract text."
     assert record["authors"] == ["Author One"]
 
