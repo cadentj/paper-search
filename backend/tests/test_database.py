@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.db.session import Database
-from app.models.filter import Filter
+from app.models.filter import SQLAFilter
 
 
 @pytest.fixture
@@ -18,10 +18,10 @@ def test_session_commits_on_success(isolated_database):
     filt_id = str(uuid.uuid4())
     with isolated_database.session() as db:
         db.add(
-            Filter(
+            SQLAFilter(
                 id=filt_id,
-                name="Committed Filter",
-                definition={"name": "Committed Filter", "description": "", "mode": "topic"},
+                name="Committed SQLAFilter",
+                definition={"name": "Committed SQLAFilter", "description": "", "mode": "topic"},
                 status="active",
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
@@ -29,9 +29,9 @@ def test_session_commits_on_success(isolated_database):
         )
 
     with isolated_database.session() as db:
-        filt = db.query(Filter).filter(Filter.id == filt_id).first()
+        filt = db.query(SQLAFilter).filter(SQLAFilter.id == filt_id).first()
         assert filt is not None
-        assert filt.name == "Committed Filter"
+        assert filt.name == "Committed SQLAFilter"
 
 
 def test_session_rolls_back_on_exception(isolated_database):
@@ -39,7 +39,7 @@ def test_session_rolls_back_on_exception(isolated_database):
     with pytest.raises(ValueError):
         with isolated_database.session() as db:
             db.add(
-                Filter(
+                SQLAFilter(
                     id=filt_id,
                     name="Rolled Back",
                     definition={"name": "Rolled Back", "description": "", "mode": "topic"},
@@ -51,14 +51,14 @@ def test_session_rolls_back_on_exception(isolated_database):
             raise ValueError("abort")
 
     with isolated_database.session() as db:
-        assert db.query(Filter).filter(Filter.id == filt_id).first() is None
+        assert db.query(SQLAFilter).filter(SQLAFilter.id == filt_id).first() is None
 
 
 def test_explicit_commit_inside_session_is_harmless(isolated_database):
     filt_id = str(uuid.uuid4())
     with isolated_database.session() as db:
         db.add(
-            Filter(
+            SQLAFilter(
                 id=filt_id,
                 name="Double Commit",
                 definition={"name": "Double Commit", "description": "", "mode": "topic"},
@@ -70,4 +70,4 @@ def test_explicit_commit_inside_session_is_harmless(isolated_database):
         db.commit()
 
     with isolated_database.session() as db:
-        assert db.query(Filter).filter(Filter.id == filt_id).first() is not None
+        assert db.query(SQLAFilter).filter(SQLAFilter.id == filt_id).first() is not None

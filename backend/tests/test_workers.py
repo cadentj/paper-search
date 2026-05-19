@@ -3,11 +3,11 @@
 import uuid
 from datetime import datetime, timezone
 
-from app.models.filter import Filter
-from app.models.onboarding_extraction import OnboardingExtraction
-from app.models.paper import Paper
-from app.models.paper_match import PaperMatch
-from app.models.search_run import SearchRun
+from app.models.filter import SQLAFilter
+from app.models.onboarding_extraction import SQLAOnboardingExtraction
+from app.models.paper import SQLAPaper
+from app.models.paper_match import SQLAPaperMatch
+from app.models.search_run import SQLASearchRun
 from app.llm.config import (
     FILTER_GENERATION_PROFILE,
     JUDGE_PROFILE,
@@ -28,7 +28,7 @@ class TestExtractOnboardingFilters:
     ):
         # Create extraction record
         ext_id = str(uuid.uuid4())
-        extraction = OnboardingExtraction(
+        extraction = SQLAOnboardingExtraction(
             id=ext_id,
             input_text="I study mechanistic interpretability of neural networks",
             status="queued",
@@ -69,8 +69,8 @@ class TestExtractOnboardingFilters:
         extract_onboarding_filters(ext_id)
 
         db_session.expire_all()
-        updated = db_session.query(OnboardingExtraction).filter(
-            OnboardingExtraction.id == ext_id
+        updated = db_session.query(SQLAOnboardingExtraction).filter(
+            SQLAOnboardingExtraction.id == ext_id
         ).first()
         assert updated.status == "completed"
         assert updated.proposed_filters is not None
@@ -97,11 +97,11 @@ def _mock_papers_for_sources(monkeypatch, papers: list) -> None:
 
 
 def _papers_from_dicts(db_session, papers: list[dict]) -> list:
-    from app.models.paper import Paper
+    from app.models.paper import SQLAPaper
 
-    rows: list[Paper] = []
+    rows: list[SQLAPaper] = []
     for p in papers:
-        paper = Paper(
+        paper = SQLAPaper(
             id=str(uuid.uuid4()),
             source_type=p.get("source_type", "arxiv"),
             source_id=p["source_id"],
@@ -120,21 +120,21 @@ def _papers_from_dicts(db_session, papers: list[dict]) -> list:
 
 
 def _daily_job(db_session, run_id: str):
-    from app.models.job import Job
+    from app.models.job import SQLAJob
 
     return (
-        db_session.query(Job)
-        .filter(Job.kind == "daily_search", Job.subject_id == run_id)
+        db_session.query(SQLAJob)
+        .filter(SQLAJob.kind == "daily_search", SQLAJob.subject_id == run_id)
         .first()
     )
 
 
 def _daily_summary_job(db_session, run_id: str):
-    from app.models.job import Job
+    from app.models.job import SQLAJob
 
     return (
-        db_session.query(Job)
-        .filter(Job.kind == "daily_search_summary", Job.subject_id == run_id)
+        db_session.query(SQLAJob)
+        .filter(SQLAJob.kind == "daily_search_summary", SQLAJob.subject_id == run_id)
         .first()
     )
 
@@ -249,7 +249,7 @@ class TestRunDailySearch:
     def test_persists_matches_without_inline_summary(self, db_session, patch_worker_database, monkeypatch):
 
         # Create active filter
-        filt = Filter(
+        filt = SQLAFilter(
             id=str(uuid.uuid4()),
             name="Test Filter",
             definition={
@@ -265,7 +265,7 @@ class TestRunDailySearch:
 
         # Create search run
         run_id = str(uuid.uuid4())
-        run = SearchRun(
+        run = SQLASearchRun(
             id=run_id,
             status="queued",
             run_date=datetime.now(timezone.utc).date(),
@@ -274,8 +274,8 @@ class TestRunDailySearch:
         db_session.add(run)
 
         daily_papers = [
-            _paper_fixture("2605.00001", "Included Scaling Paper"),
-            _paper_fixture("2605.00002", "Another Current Paper"),
+            _paper_fixture("2605.00001", "Included Scaling SQLAPaper"),
+            _paper_fixture("2605.00002", "Another Current SQLAPaper"),
         ]
         db_session.commit()
 
@@ -295,7 +295,7 @@ class TestRunDailySearch:
         _run_daily_search(db_session, run_id, job.id)
 
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
         job = _daily_job(db_session, run_id)
         assert job is not None
         assert job.status == "completed"
@@ -305,15 +305,15 @@ class TestRunDailySearch:
         assert updated_run.candidate_count == len(daily_papers)
         assert job.progress["total"] == len(daily_papers)
         match_count = (
-            db_session.query(PaperMatch)
-            .filter(PaperMatch.search_run_id == run_id)
+            db_session.query(SQLAPaperMatch)
+            .filter(SQLAPaperMatch.search_run_id == run_id)
             .count()
         )
         assert match_count == updated_run.match_count
 
         _run_summary_for_run(db_session, run_id)
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
         summary_job = _daily_summary_job(db_session, run_id)
         assert summary_job is not None
         assert summary_job.status == "completed"
@@ -323,9 +323,9 @@ class TestRunDailySearch:
     def test_ignores_archived_filters(self, db_session, patch_worker_database, monkeypatch):
 
         # Create archived filter only
-        filt = Filter(
+        filt = SQLAFilter(
             id=str(uuid.uuid4()),
-            name="Archived Filter",
+            name="Archived SQLAFilter",
             definition={
                 "name": "Archived",
                 "description": "Test",
@@ -339,7 +339,7 @@ class TestRunDailySearch:
         db_session.add(filt)
 
         run_id = str(uuid.uuid4())
-        run = SearchRun(
+        run = SQLASearchRun(
             id=run_id,
             status="queued",
             run_date=datetime.now(timezone.utc).date(),
@@ -350,14 +350,14 @@ class TestRunDailySearch:
 
         _mock_papers_for_sources(
             monkeypatch,
-            _papers_from_dicts(db_session, [_paper_fixture("2605.00004", "Fetched Paper")]),
+            _papers_from_dicts(db_session, [_paper_fixture("2605.00004", "Fetched SQLAPaper")]),
         )
 
         job = _create_daily_search_job(db_session, run_id)
         _run_daily_search(db_session, run_id, job.id)
 
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
         job = _daily_job(db_session, run_id)
         assert job is not None
         assert job.status == "completed"
@@ -367,13 +367,13 @@ class TestRunDailySearch:
 
         _run_summary_for_run(db_session, run_id)
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
         assert updated_run.status == "completed"
         assert updated_run.summary == "No active filters to search."
 
     def test_searches_only_papers_for_run_date(self, db_session, patch_worker_database, monkeypatch):
 
-        filt = Filter(
+        filt = SQLAFilter(
             id=str(uuid.uuid4()),
             name="Test Filter",
             definition={
@@ -388,7 +388,7 @@ class TestRunDailySearch:
         db_session.add(filt)
 
         run_id = str(uuid.uuid4())
-        run = SearchRun(
+        run = SQLASearchRun(
             id=run_id,
             status="queued",
             run_date=datetime.now(timezone.utc).date(),
@@ -396,11 +396,11 @@ class TestRunDailySearch:
         )
         db_session.add(run)
 
-        excluded = Paper(
+        excluded = SQLAPaper(
             id=str(uuid.uuid4()),
             source_type="arxiv",
             source_id="2401.00002",
-            title="Excluded Paper",
+            title="Excluded SQLAPaper",
             search_text="A cached paper from another run.",
             authors=["Author"],
             created_at=datetime.now(timezone.utc),
@@ -410,12 +410,12 @@ class TestRunDailySearch:
 
         _mock_papers_for_sources(
             monkeypatch,
-            _papers_from_dicts(db_session, [_paper_fixture("2401.00001", "Included Paper")]),
+            _papers_from_dicts(db_session, [_paper_fixture("2401.00001", "Included SQLAPaper")]),
         )
 
         def assert_prompt(user_prompt: str):
-            assert "Included Paper" in user_prompt
-            assert "Excluded Paper" not in user_prompt
+            assert "Included SQLAPaper" in user_prompt
+            assert "Excluded SQLAPaper" not in user_prompt
 
         monkeypatch.setattr(
             "app.jobs.daily_search.async_call_llm",
@@ -428,11 +428,11 @@ class TestRunDailySearch:
         _run_daily_search(db_session, run_id, job.id)
 
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
-        matches = db_session.query(PaperMatch).all()
+        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        matches = db_session.query(SQLAPaperMatch).all()
         included = (
-            db_session.query(Paper)
-            .filter(Paper.source_type == "arxiv", Paper.source_id == "2401.00001")
+            db_session.query(SQLAPaper)
+            .filter(SQLAPaper.source_type == "arxiv", SQLAPaper.source_id == "2401.00001")
             .first()
         )
 
@@ -443,7 +443,7 @@ class TestRunDailySearch:
         self, db_session, patch_worker_database, monkeypatch
     ):
 
-        filt = Filter(
+        filt = SQLAFilter(
             id=str(uuid.uuid4()),
             name="Test Filter",
             definition={
@@ -458,7 +458,7 @@ class TestRunDailySearch:
         db_session.add(filt)
 
         run_id = str(uuid.uuid4())
-        run = SearchRun(
+        run = SQLASearchRun(
             id=run_id,
             status="queued",
             run_date=datetime.now(timezone.utc).date(),
@@ -466,11 +466,11 @@ class TestRunDailySearch:
         )
         db_session.add(run)
 
-        paper = Paper(
+        paper = SQLAPaper(
             id=str(uuid.uuid4()),
             source_type="arxiv",
             source_id="2605.00003",
-            title="Current Paper",
+            title="Current SQLAPaper",
             search_text="A current paper that requires LLM matching.",
             authors=["Author"],
             created_at=datetime.now(timezone.utc),
@@ -491,8 +491,8 @@ class TestRunDailySearch:
             raise AssertionError("Expected missing OPENROUTER_API_KEY to fail")
 
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
-        matches = db_session.query(PaperMatch).all()
+        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        matches = db_session.query(SQLAPaperMatch).all()
         assert updated_run.status == "failed"
         assert "OPENROUTER_API_KEY" in updated_run.error
         assert matches == []
@@ -501,7 +501,7 @@ class TestRunDailySearch:
         self, db_session, patch_worker_database, monkeypatch
     ):
 
-        filt = Filter(
+        filt = SQLAFilter(
             id=str(uuid.uuid4()),
             name="Test Filter",
             definition={
@@ -517,7 +517,7 @@ class TestRunDailySearch:
 
         run_id = str(uuid.uuid4())
         db_session.add(
-            SearchRun(
+            SQLASearchRun(
                 id=run_id,
                 status="queued",
                 run_date=datetime.now(timezone.utc).date(),
@@ -525,8 +525,8 @@ class TestRunDailySearch:
             )
         )
         daily_papers = [
-            _paper_fixture("2605.00010", "Successful Paper"),
-            _paper_fixture("2605.00011", "Failing Paper"),
+            _paper_fixture("2605.00010", "Successful SQLAPaper"),
+            _paper_fixture("2605.00011", "Failing SQLAPaper"),
         ]
         db_session.commit()
 
@@ -549,7 +549,7 @@ class TestRunDailySearch:
         _run_daily_search(db_session, run_id, job.id)
 
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
         job = _daily_job(db_session, run_id)
         assert job is not None
         assert job.status == "completed"
@@ -558,21 +558,21 @@ class TestRunDailySearch:
         assert job.progress["total"] == 2
         assert updated_run.match_count == 1
         match_count = (
-            db_session.query(PaperMatch)
-            .filter(PaperMatch.search_run_id == run_id)
+            db_session.query(SQLAPaperMatch)
+            .filter(SQLAPaperMatch.search_run_id == run_id)
             .count()
         )
         assert match_count == 1
 
         _run_summary_for_run(db_session, run_id)
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
         assert updated_run.status == "completed"
         assert updated_run.summary is not None
 
     def test_all_pair_failures_mark_run_failed(self, db_session, patch_worker_database, monkeypatch):
 
-        filt = Filter(
+        filt = SQLAFilter(
             id=str(uuid.uuid4()),
             name="Test Filter",
             definition={
@@ -588,14 +588,14 @@ class TestRunDailySearch:
 
         run_id = str(uuid.uuid4())
         db_session.add(
-            SearchRun(
+            SQLASearchRun(
                 id=run_id,
                 status="queued",
                 run_date=datetime.now(timezone.utc).date(),
                 created_at=datetime.now(timezone.utc),
             )
         )
-        daily_papers = [_paper_fixture("2605.00012", "Failing Paper")]
+        daily_papers = [_paper_fixture("2605.00012", "Failing SQLAPaper")]
         db_session.commit()
 
         _mock_papers_for_sources(
@@ -619,7 +619,7 @@ class TestRunDailySearch:
             raise AssertionError("Expected all pair failures to fail the run")
 
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
         job = _daily_job(db_session, run_id)
         assert job is not None
         assert updated_run.status == "failed"
@@ -630,7 +630,7 @@ class TestSummarizeDailySearch:
     def test_summarize_reads_matches_from_database(self, db_session, patch_worker_database, monkeypatch):
 
         filt_id = str(uuid.uuid4())
-        filt = Filter(
+        filt = SQLAFilter(
             id=filt_id,
             name="Test Filter",
             definition={
@@ -645,7 +645,7 @@ class TestSummarizeDailySearch:
         db_session.add(filt)
 
         run_id = str(uuid.uuid4())
-        run = SearchRun(
+        run = SQLASearchRun(
             id=run_id,
             status="running",
             run_date=datetime.now(timezone.utc).date(),
@@ -656,11 +656,11 @@ class TestSummarizeDailySearch:
         )
         db_session.add(run)
 
-        paper = Paper(
+        paper = SQLAPaper(
             id=str(uuid.uuid4()),
             source_type="arxiv",
             source_id="2605.00001",
-            title="Included Scaling Paper",
+            title="Included Scaling SQLAPaper",
             search_text="Abstract",
             authors=["Author"],
             created_at=datetime.now(timezone.utc),
@@ -668,7 +668,7 @@ class TestSummarizeDailySearch:
         db_session.add(paper)
         db_session.flush()
         db_session.add(
-            PaperMatch(
+            SQLAPaperMatch(
                 search_run_id=run_id,
                 filter_id=filt_id,
                 paper_id=paper.id,
@@ -689,7 +689,7 @@ class TestSummarizeDailySearch:
         summarize_daily_search(run_id)
 
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
         summary_job = _daily_summary_job(db_session, run_id)
         assert summary_job is not None
         assert summary_job.status == "completed"

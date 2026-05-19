@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models.job import Job
+from app.models.job import SQLAJob
 
 
 def job_progress(*, current: int | None = None, total: int | None = None, **extra) -> dict:
@@ -17,7 +17,7 @@ def job_progress(*, current: int | None = None, total: int | None = None, **extr
 
 
 def set_job_status(
-    job: Job,
+    job: SQLAJob,
     *,
     status: str,
     error: str | None = None,
@@ -41,9 +41,9 @@ def create_job(
     status: str = "queued",
     queue_name: str | None = "default",
     progress: dict | None = None,
-) -> Job:
+) -> SQLAJob:
     now = datetime.now(timezone.utc)
-    job = Job(
+    job = SQLAJob(
         id=str(uuid.uuid4()),
         kind=kind,
         status=status,
@@ -63,14 +63,14 @@ def latest_job_for_subject(
     subject_type: str,
     subject_id: str,
     kind: str | None = None,
-) -> Job | None:
-    query = db.query(Job).filter(
-        Job.subject_type == subject_type,
-        Job.subject_id == subject_id,
+) -> SQLAJob | None:
+    query = db.query(SQLAJob).filter(
+        SQLAJob.subject_type == subject_type,
+        SQLAJob.subject_id == subject_id,
     )
     if kind:
-        query = query.filter(Job.kind == kind)
-    return query.order_by(Job.created_at.desc()).first()
+        query = query.filter(SQLAJob.kind == kind)
+    return query.order_by(SQLAJob.created_at.desc()).first()
 
 
 def get_or_create_job_for_subject(
@@ -79,7 +79,7 @@ def get_or_create_job_for_subject(
     kind: str,
     subject_type: str,
     subject_id: str,
-) -> Job:
+) -> SQLAJob:
     job = latest_job_for_subject(
         db,
         subject_type=subject_type,

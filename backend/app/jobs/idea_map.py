@@ -11,9 +11,9 @@ from datetime import datetime, timezone
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.db.session import database
-from app.models.job import Job
-from app.models.paper import Paper
-from app.models.idea_map import IdeaMap
+from app.models.job import SQLAJob
+from app.models.paper import SQLAPaper
+from app.models.idea_map import SQLAIdeaMap
 from app.services import papers as papers_service
 from app.services.jobs import job_progress, set_job_status
 from app.core.config import LLM_MAX_CONCURRENCY
@@ -47,14 +47,14 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
     """Worker job: generate idea map from arXiv HTML."""
     with database.session() as db:
         try:
-            idea_map = db.query(IdeaMap).filter(IdeaMap.id == idea_map_id).first()
+            idea_map = db.query(SQLAIdeaMap).filter(SQLAIdeaMap.id == idea_map_id).first()
             if not idea_map:
                 return
 
             job = papers_service.resolve_idea_map_job(db, idea_map_id, job_id)
             papers_service.mark_idea_map_running(db, idea_map, job)
 
-            paper = db.query(Paper).filter(Paper.id == idea_map.paper_id).first()
+            paper = db.query(SQLAPaper).filter(SQLAPaper.id == idea_map.paper_id).first()
             if not paper or paper.source_type != "arxiv" or not paper.source_id:
                 papers_service.mark_idea_map_skipped(
                     db,
@@ -338,7 +338,7 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
 
         except Exception as e:
             db.rollback()
-            idea_map = db.query(IdeaMap).filter(IdeaMap.id == idea_map_id).first()
+            idea_map = db.query(SQLAIdeaMap).filter(SQLAIdeaMap.id == idea_map_id).first()
             if idea_map:
                 job = papers_service.resolve_idea_map_job(db, idea_map_id, job_id)
                 papers_service.fail_idea_map(db, idea_map, job, str(e))
@@ -354,7 +354,7 @@ def _preview(value: object, limit: int = 500) -> str:
 
 def _stream_claims(
     db,
-    idea_map: IdeaMap,
+    idea_map: SQLAIdeaMap,
     blocks_text: str,
     progress: tqdm | None = None,
 ) -> dict:
@@ -406,7 +406,7 @@ def _count_warrants(claims: list[dict] | None) -> int:
     return sum(len(claim.get("warrants", [])) for claim in claims or [])
 
 
-def _set_claims(idea_map: IdeaMap, claims: list[dict]) -> None:
+def _set_claims(idea_map: SQLAIdeaMap, claims: list[dict]) -> None:
     idea_map.claims = claims
     flag_modified(idea_map, "claims")
 
@@ -545,7 +545,7 @@ def _merge_claims(existing: list[dict], incoming: list[dict]) -> list[dict]:
 
 def _persist_warrants(
     db,
-    idea_map: IdeaMap,
+    idea_map: SQLAIdeaMap,
     blocks,
     block_map,
     claim_id: str,

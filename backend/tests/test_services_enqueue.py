@@ -1,6 +1,6 @@
 import pytest
 
-from app.models.job import Job
+from app.models.job import SQLAJob
 from app.services.errors import EnqueueFailed, ValidationFailed
 from app.services.job_enqueue import enqueue_job, persist_then_enqueue
 from app.services.jobs import create_job
@@ -58,6 +58,6 @@ def test_persist_then_enqueue_commits_entities(db_session, monkeypatch):
         enqueue=lambda: FakeRqJob(),
         on_failure=lambda sess, err: None,
     )
-    refreshed = db_session.query(Job).filter(Job.id == job.id).first()
+    refreshed = db_session.query(SQLAJob).filter(SQLAJob.id == job.id).first()
     assert refreshed is not None
     assert refreshed.queue_job_id == "rq-456"

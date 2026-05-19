@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models.job import Job
+from app.models.job import SQLAJob
 from app.services.errors import EnqueueFailed
 from app.services.jobs import set_job_status
 
@@ -23,7 +23,7 @@ def commit_entities(db: Session, *entities) -> None:
 def enqueue_job(
     db: Session,
     *,
-    job: Job,
+    job: SQLAJob,
     enqueue: Callable[[], object],
     on_failure: Callable[[Session, str], None] | None = None,
     store_queue_job_id: bool = True,
@@ -49,7 +49,7 @@ def enqueue_job(
 def persist_then_enqueue(
     db: Session,
     *,
-    job: Job,
+    job: SQLAJob,
     enqueue: Callable[[], object],
     on_failure: Callable[[Session, str], None],
     entities: tuple = (),
@@ -67,5 +67,5 @@ def persist_then_enqueue(
     )
 
 
-def mark_job_failed(db: Session, job: Job, error: str) -> None:
+def mark_job_failed(db: Session, job: SQLAJob, error: str) -> None:
     set_job_status(job, status="failed", error=error)

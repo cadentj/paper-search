@@ -1,17 +1,34 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.http_errors import raise_http_from_service
 from app.db.session import get_db
-from app.schemas.filters import FilterCreate, FilterUpdate, FilterResponse
+from app.models.filter import Filter
 from app.services import filters as filter_service
 
 router = APIRouter(prefix="/filters", tags=["filters"])
 
 
-@router.get("", response_model=list[FilterResponse])
+class FilterDefinition(BaseModel):
+    name: str
+    description: str
+    mode: Literal["claim", "topic"] = "topic"
+
+
+class FilterCreate(BaseModel):
+    name: str
+    definition: FilterDefinition
+
+
+class FilterUpdate(BaseModel):
+    name: Optional[str] = None
+    definition: Optional[FilterDefinition] = None
+
+
+@router.get("", response_model=list[Filter])
 def list_filters(
     status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
@@ -19,13 +36,13 @@ def list_filters(
     return [filt.to_pydantic() for filt in filter_service.list_filters(db, status=status)]
 
 
-@router.post("", response_model=FilterResponse)
+@router.post("", response_model=Filter)
 def create_filter(body: FilterCreate, db: Session = Depends(get_db)):
     filt = filter_service.create_filter(db, body)
     return filt.to_pydantic()
 
 
-@router.patch("/{filter_id}", response_model=FilterResponse)
+@router.patch("/{filter_id}", response_model=Filter)
 def update_filter(filter_id: str, body: FilterUpdate, db: Session = Depends(get_db)):
     try:
         filt = filter_service.update_filter(db, filter_id, body)
@@ -34,7 +51,7 @@ def update_filter(filter_id: str, body: FilterUpdate, db: Session = Depends(get_
     return filt.to_pydantic()
 
 
-@router.post("/{filter_id}/archive", response_model=FilterResponse)
+@router.post("/{filter_id}/archive", response_model=Filter)
 def archive_filter(filter_id: str, db: Session = Depends(get_db)):
     try:
         filt = filter_service.archive_filter(db, filter_id)
@@ -43,7 +60,7 @@ def archive_filter(filter_id: str, db: Session = Depends(get_db)):
     return filt.to_pydantic()
 
 
-@router.post("/{filter_id}/restore", response_model=FilterResponse)
+@router.post("/{filter_id}/restore", response_model=Filter)
 def restore_filter(filter_id: str, db: Session = Depends(get_db)):
     try:
         filt = filter_service.restore_filter(db, filter_id)
@@ -52,7 +69,7 @@ def restore_filter(filter_id: str, db: Session = Depends(get_db)):
     return filt.to_pydantic()
 
 
-@router.post("/{filter_id}/accept", response_model=FilterResponse)
+@router.post("/{filter_id}/accept", response_model=Filter)
 def accept_proposal(filter_id: str, db: Session = Depends(get_db)):
     try:
         filt = filter_service.accept_proposal(db, filter_id)
@@ -61,7 +78,7 @@ def accept_proposal(filter_id: str, db: Session = Depends(get_db)):
     return filt.to_pydantic()
 
 
-@router.post("/{filter_id}/reject", response_model=FilterResponse)
+@router.post("/{filter_id}/reject", response_model=Filter)
 def reject_proposal(filter_id: str, db: Session = Depends(get_db)):
     try:
         filt = filter_service.reject_proposal(db, filter_id)

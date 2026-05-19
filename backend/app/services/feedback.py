@@ -7,28 +7,28 @@ from sqlalchemy.orm import Session
 
 from app.jobs.feedback_reflection import process_all_feedback
 from app.jobs.queue import get_queue
-from app.models.filter import Filter
-from app.models.paper import Paper
-from app.models.paper_match import PaperMatch
-from app.models.paper_match_feedback import PaperMatchFeedback
-from app.models.paper_note import PaperNote
+from app.models.filter import SQLAFilter
+from app.models.paper import SQLAPaper
+from app.models.paper_match import SQLAPaperMatch
+from app.models.paper_match_feedback import SQLAPaperMatchFeedback
+from app.models.paper_note import SQLAPaperNote
 from app.services.errors import NotFound, ValidationFailed
 from app.services.job_enqueue import commit_entities, enqueue_job, mark_job_failed
 from app.services.jobs import create_job
 
 
-def upsert_match_feedback(db: Session, match_id: str, value: str) -> PaperMatchFeedback:
+def upsert_match_feedback(db: Session, match_id: str, value: str) -> SQLAPaperMatchFeedback:
     if value not in ("up", "down"):
         raise ValidationFailed("value must be 'up' or 'down'")
 
-    match = db.query(PaperMatch).filter(PaperMatch.id == match_id).first()
+    match = db.query(SQLAPaperMatch).filter(SQLAPaperMatch.id == match_id).first()
     if not match:
         raise NotFound("Match not found")
 
     now = datetime.now(timezone.utc)
     existing = (
-        db.query(PaperMatchFeedback)
-        .filter(PaperMatchFeedback.paper_match_id == match_id)
+        db.query(SQLAPaperMatchFeedback)
+        .filter(SQLAPaperMatchFeedback.paper_match_id == match_id)
         .first()
     )
     if existing:
@@ -37,7 +37,7 @@ def upsert_match_feedback(db: Session, match_id: str, value: str) -> PaperMatchF
         existing.processed = False
         feedback = existing
     else:
-        feedback = PaperMatchFeedback(
+        feedback = SQLAPaperMatchFeedback(
             id=str(uuid.uuid4()),
             paper_match_id=match_id,
             search_run_id=match.search_run_id,
@@ -54,20 +54,20 @@ def upsert_match_feedback(db: Session, match_id: str, value: str) -> PaperMatchF
     return feedback
 
 
-def upsert_paper_feedback(db: Session, paper_id: str, value: str) -> PaperMatchFeedback:
+def upsert_paper_feedback(db: Session, paper_id: str, value: str) -> SQLAPaperMatchFeedback:
     if value != "up":
         raise ValidationFailed("Only 'up' is allowed for unmatched papers")
 
-    paper = db.query(Paper).filter(Paper.id == paper_id).first()
+    paper = db.query(SQLAPaper).filter(SQLAPaper.id == paper_id).first()
     if not paper:
         raise NotFound("Paper not found")
 
     now = datetime.now(timezone.utc)
     existing = (
-        db.query(PaperMatchFeedback)
+        db.query(SQLAPaperMatchFeedback)
         .filter(
-            PaperMatchFeedback.paper_id == paper_id,
-            PaperMatchFeedback.paper_match_id.is_(None),
+            SQLAPaperMatchFeedback.paper_id == paper_id,
+            SQLAPaperMatchFeedback.paper_match_id.is_(None),
         )
         .first()
     )
@@ -76,7 +76,7 @@ def upsert_paper_feedback(db: Session, paper_id: str, value: str) -> PaperMatchF
         existing.processed = False
         feedback = existing
     else:
-        feedback = PaperMatchFeedback(
+        feedback = SQLAPaperMatchFeedback(
             id=str(uuid.uuid4()),
             paper_id=paper_id,
             value="up",
@@ -92,18 +92,18 @@ def upsert_paper_feedback(db: Session, paper_id: str, value: str) -> PaperMatchF
 
 def feedback_counts(db: Session) -> tuple[int, int, int]:
     pending_votes = (
-        db.query(PaperMatchFeedback)
-        .filter(PaperMatchFeedback.processed == False)
+        db.query(SQLAPaperMatchFeedback)
+        .filter(SQLAPaperMatchFeedback.processed == False)
         .count()
     )
     pending_notes = (
-        db.query(PaperNote)
-        .filter(PaperNote.processed == False, PaperNote.text != "")
+        db.query(SQLAPaperNote)
+        .filter(SQLAPaperNote.processed == False, SQLAPaperNote.text != "")
         .count()
     )
     pending_proposals = (
-        db.query(Filter)
-        .filter(Filter.status.in_(["pending_create", "pending_revision", "pending_deletion"]))
+        db.query(SQLAFilter)
+        .filter(SQLAFilter.status.in_(["pending_create", "pending_revision", "pending_deletion"]))
         .count()
     )
     return pending_votes, pending_notes, pending_proposals

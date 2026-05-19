@@ -7,21 +7,21 @@ from sqlalchemy.orm import Session
 
 from app.jobs.documents import process_document
 from app.jobs.queue import get_queue
-from app.models.document import Document
-from app.models.job import Job
+from app.models.document import SQLADocument
+from app.models.job import SQLAJob
 from app.services.errors import NotFound
 from app.services.job_enqueue import persist_then_enqueue
 from app.services.jobs import create_job, job_progress, latest_job_for_subject, set_job_status
 
 
-def get_document(db: Session, document_id: str) -> Document:
-    document = db.query(Document).filter(Document.id == document_id).first()
+def get_document(db: Session, document_id: str) -> SQLADocument:
+    document = db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
     if not document:
         raise NotFound("Document not found")
     return document
 
 
-def document_payload(db: Session, document: Document):
+def document_payload(db: Session, document: SQLADocument):
     job = latest_job_for_subject(
         db,
         subject_type="document",
@@ -40,9 +40,9 @@ def start_document_processing(
     size_bytes: int,
     page_count: int,
     storage_path: str,
-) -> tuple[Document, str]:
+) -> tuple[SQLADocument, str]:
     now = datetime.now(timezone.utc)
-    document = Document(
+    document = SQLADocument(
         id=document_id,
         original_filename=original_filename,
         content_type=content_type,
@@ -80,14 +80,14 @@ def start_document_processing(
     return document, job_record.id
 
 
-def mark_document_processing(db: Session, document: Document, job: Job) -> None:
+def mark_document_processing(db: Session, document: SQLADocument, job: SQLAJob) -> None:
     document.status = "processing"
     document.updated_at = datetime.now(timezone.utc)
     set_job_status(job, status="running")
     db.commit()
 
 
-def complete_document_needs_ocr(db: Session, document: Document, job: Job, error: str) -> None:
+def complete_document_needs_ocr(db: Session, document: SQLADocument, job: SQLAJob, error: str) -> None:
     document.status = "needs_ocr"
     document.error = error
     set_job_status(job, status="completed")
@@ -98,7 +98,7 @@ def commit_document_progress(db: Session) -> None:
     db.commit()
 
 
-def complete_document(db: Session, document: Document, job: Job, *, summary: str) -> None:
+def complete_document(db: Session, document: SQLADocument, job: SQLAJob, *, summary: str) -> None:
     document.summary = summary
     document.status = "ready"
     document.error = None
@@ -107,7 +107,7 @@ def complete_document(db: Session, document: Document, job: Job, *, summary: str
     db.commit()
 
 
-def fail_document(db: Session, document: Document | None, job: Job | None, error: str) -> None:
+def fail_document(db: Session, document: SQLADocument | None, job: SQLAJob | None, error: str) -> None:
     now = datetime.now(timezone.utc)
     if document:
         document.status = "failed"

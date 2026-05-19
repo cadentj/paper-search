@@ -5,10 +5,10 @@ import uuid
 from datetime import datetime, timezone
 
 from app.db.session import database
-from app.models.document import Document
-from app.models.filter import Filter
-from app.models.job import Job
-from app.models.onboarding_extraction import OnboardingExtraction
+from app.models.document import SQLADocument
+from app.models.filter import SQLAFilter
+from app.models.job import SQLAJob
+from app.models.onboarding_extraction import SQLAOnboardingExtraction
 from app.services.jobs import get_or_create_job_for_subject, set_job_status
 from app.llm.client import stream_structured_response
 from app.llm.config import FILTER_GENERATION_PROFILE
@@ -74,9 +74,9 @@ def _merge_filters(existing: list[dict], incoming: list[dict]) -> list[dict]:
     return merged
 
 
-def _resolve_onboarding_job(db, extraction_id: str, job_id: str | None) -> Job:
+def _resolve_onboarding_job(db, extraction_id: str, job_id: str | None) -> SQLAJob:
     if job_id:
-        job = db.query(Job).filter(Job.id == job_id).first()
+        job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
         if job:
             return job
     return get_or_create_job_for_subject(
@@ -96,10 +96,10 @@ def _draft_filter_definition(raw: dict, job_id: str) -> dict:
     }
 
 
-def _create_draft_filter(db, raw: dict, job_id: str) -> Filter:
+def _create_draft_filter(db, raw: dict, job_id: str) -> SQLAFilter:
     now = datetime.now(timezone.utc)
     definition = _draft_filter_definition(raw, job_id)
-    filt = Filter(
+    filt = SQLAFilter(
         id=str(uuid.uuid4()),
         name=definition["name"],
         definition=definition,
@@ -115,7 +115,7 @@ def _create_draft_filter(db, raw: dict, job_id: str) -> Filter:
 def _document_summaries(db, document_ids: list[str]) -> list[str]:
     if not document_ids:
         return []
-    documents = db.query(Document).filter(Document.id.in_(document_ids)).all()
+    documents = db.query(SQLADocument).filter(SQLADocument.id.in_(document_ids)).all()
     by_id = {document.id: document for document in documents}
     summaries: list[str] = []
     for document_id in document_ids:
@@ -123,7 +123,7 @@ def _document_summaries(db, document_ids: list[str]) -> list[str]:
         if not document or document.status != "ready" or not document.summary:
             continue
         summaries.append(
-            f"Document: {document.original_filename}\nSummary: {document.summary}"
+            f"SQLADocument: {document.original_filename}\nSummary: {document.summary}"
         )
     return summaries
 
@@ -136,7 +136,7 @@ def generate_onboarding_draft_filters(
     """Worker job: generate draft filters from text and ready document summaries."""
     with database.session() as db:
         try:
-            job = db.query(Job).filter(Job.id == job_id).first()
+            job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
             if not job:
                 return
 
@@ -195,7 +195,7 @@ def generate_onboarding_draft_filters(
             db.commit()
         except Exception as e:
             db.rollback()
-            job = db.query(Job).filter(Job.id == job_id).first()
+            job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
             if job:
                 set_job_status(job, status="failed", error=str(e))
                 db.commit()
@@ -206,8 +206,8 @@ def extract_onboarding_filters(extraction_id: str, job_id: str | None = None) ->
     """Worker job: extract proposed filters from onboarding text."""
     with database.session() as db:
         try:
-            extraction = db.query(OnboardingExtraction).filter(
-                OnboardingExtraction.id == extraction_id
+            extraction = db.query(SQLAOnboardingExtraction).filter(
+                SQLAOnboardingExtraction.id == extraction_id
             ).first()
             if not extraction:
                 return
@@ -266,8 +266,8 @@ def extract_onboarding_filters(extraction_id: str, job_id: str | None = None) ->
 
         except Exception as e:
             db.rollback()
-            extraction = db.query(OnboardingExtraction).filter(
-                OnboardingExtraction.id == extraction_id
+            extraction = db.query(SQLAOnboardingExtraction).filter(
+                SQLAOnboardingExtraction.id == extraction_id
             ).first()
             if extraction:
                 now = datetime.now(timezone.utc)

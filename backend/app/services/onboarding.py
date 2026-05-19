@@ -2,23 +2,28 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.jobs.onboarding import extract_onboarding_filters, generate_onboarding_draft_filters
 from app.jobs.queue import get_queue
-from app.models.filter import Filter
-from app.models.onboarding_extraction import OnboardingExtraction
-from app.schemas.onboarding import OnboardingCompleteRequest, OnboardingGenerationCreate
+from app.jobs.scholar_import import run_scholar_import
+from app.models.filter import SQLAFilter
+from app.models.onboarding_extraction import SQLAOnboardingExtraction
+from app.models.research_profile_import import SQLAResearchProfileImport
 from app.services.errors import EnqueueFailed, NotFound, ValidationFailed
 from app.services.job_enqueue import commit_entities, enqueue_job, persist_then_enqueue
 from app.services.jobs import create_job, latest_job_for_subject, set_job_status
 
+if TYPE_CHECKING:
+    from app.api.onboarding import OnboardingCompleteRequest, OnboardingGenerationCreate
+
 
 def onboarding_status(db: Session) -> tuple[bool, int]:
     active_count = (
-        db.query(Filter).filter(Filter.status == "active").count()
+        db.query(SQLAFilter).filter(SQLAFilter.status == "active").count()
     )
     return active_count > 0, active_count
 
@@ -66,7 +71,7 @@ def start_generation(db: Session, body: OnboardingGenerationCreate) -> str:
 
 def start_extraction(db: Session, *, input_text: str) -> str:
     now = datetime.now(timezone.utc)
-    extraction = OnboardingExtraction(
+    extraction = SQLAOnboardingExtraction(
         id=str(uuid.uuid4()),
         input_text=input_text,
         status="queued",
@@ -104,10 +109,10 @@ def start_extraction(db: Session, *, input_text: str) -> str:
     return job_record.id
 
 
-def get_extraction(db: Session, extraction_id: str) -> OnboardingExtraction:
+def get_extraction(db: Session, extraction_id: str) -> SQLAOnboardingExtraction:
     extraction = (
-        db.query(OnboardingExtraction)
-        .filter(OnboardingExtraction.id == extraction_id)
+        db.query(SQLAOnboardingExtraction)
+        .filter(SQLAOnboardingExtraction.id == extraction_id)
         .first()
     )
     if not extraction:
@@ -115,7 +120,7 @@ def get_extraction(db: Session, extraction_id: str) -> OnboardingExtraction:
     return extraction
 
 
-def extraction_payload(db: Session, extraction: OnboardingExtraction):
+def extraction_payload(db: Session, extraction: SQLAOnboardingExtraction):
     job = latest_job_for_subject(
         db,
         subject_type="onboarding_extraction",
@@ -125,12 +130,12 @@ def extraction_payload(db: Session, extraction: OnboardingExtraction):
     return extraction.to_pydantic(job_id=job.id if job else None)
 
 
-def promote_draft_filters(db: Session, filter_ids: list[str]) -> list[Filter]:
+def promote_draft_filters(db: Session, filter_ids: list[str]) -> list[SQLAFilter]:
     if not filter_ids:
         return []
 
     now = datetime.now(timezone.utc)
-    filters = db.query(Filter).filter(Filter.id.in_(filter_ids)).all()
+    filters = db.query(SQLAFilter).filter(SQLAFilter.id.in_(filter_ids)).all()
     by_id = {filt.id: filt for filt in filters}
     ordered = [by_id[fid] for fid in filter_ids if fid in by_id]
     missing = [fid for fid in filter_ids if fid not in by_id]
@@ -149,7 +154,7 @@ def promote_draft_filters(db: Session, filter_ids: list[str]) -> list[Filter]:
     return ordered
 
 
-def complete_onboarding(db: Session, body: OnboardingCompleteRequest) -> list[Filter]:
+def complete_onboarding(db: Session, body: OnboardingCompleteRequest) -> list[SQLAFilter]:
     created_filters = []
     now = datetime.now(timezone.utc)
 
@@ -161,7 +166,7 @@ def complete_onboarding(db: Session, body: OnboardingCompleteRequest) -> list[Fi
             "description": definition.get("description", ""),
             "mode": definition.get("mode", "topic"),
         }
-        filt = Filter(
+        filt = SQLAFilter(
             id=str(uuid.uuid4()),
             name=name,
             definition=definition,
@@ -176,3 +181,58 @@ def complete_onboarding(db: Session, body: OnboardingCompleteRequest) -> list[Fi
     for filt in created_filters:
         db.refresh(filt)
     return created_filters
+
+
+def start_profile_import(
+    db: Session,
+    *,
+    url: str,
+    author_id: str,
+    display_name: str,
+) -> tuple[str, str]:
+    now = datetime.now(timezone.utc)
+    profile_import = SQLAResearchProfileImport(
+        id=str(uuid.uuid4()),
+        status="pending",
+        source_type="semantic_scholar",
+        source_url=url,
+        external_author_id=author_id,
+        display_name=display_name,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(profile_import)
+    job_record = create_job(
+        db,
+        kind="scholar_import",
+        subject_type="research_profile_import",
+        subject_id=profile_import.id,
+    )
+
+    def on_failure(sess: Session, error: str) -> None:
+        profile_import.status = "failed"
+        profile_import.error = error
+        set_job_status(job_record, status="failed", error=error)
+
+    persist_then_enqueue(
+        db,
+        job=job_record,
+        entities=(profile_import,),
+        enqueue=lambda: get_queue().enqueue(
+            run_scholar_import, profile_import.id, job_record.id
+        ),
+        on_failure=on_failure,
+        store_queue_job_id=False,
+    )
+    return profile_import.id, job_record.id
+
+
+def get_import(db: Session, import_id: str) -> SQLAResearchProfileImport:
+    profile_import = (
+        db.query(SQLAResearchProfileImport)
+        .filter(SQLAResearchProfileImport.id == import_id)
+        .first()
+    )
+    if not profile_import:
+        raise NotFound("Import not found")
+    return profile_import

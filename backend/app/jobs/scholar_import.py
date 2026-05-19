@@ -5,9 +5,9 @@ import uuid
 from datetime import datetime, timezone
 
 from app.db.session import database
-from app.models.filter import Filter
-from app.models.job import Job
-from app.models.research_profile_import import ResearchProfileImport
+from app.models.filter import SQLAFilter
+from app.models.job import SQLAJob
+from app.models.research_profile_import import SQLAResearchProfileImport
 from app.services.jobs import set_job_status
 from app.services.semantic_scholar import get_author_papers, build_publications_text
 from app.llm.client import call_llm
@@ -21,13 +21,13 @@ logger = logging.getLogger(__name__)
 def run_scholar_import(import_id: str, job_id: str) -> None:
     with database.session() as db:
         try:
-            job = db.query(Job).filter(Job.id == job_id).first()
+            job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
             if not job:
                 return
             set_job_status(job, status="running")
 
-            profile_import = db.query(ResearchProfileImport).filter(
-                ResearchProfileImport.id == import_id
+            profile_import = db.query(SQLAResearchProfileImport).filter(
+                SQLAResearchProfileImport.id == import_id
             ).first()
             if not profile_import:
                 set_job_status(job, status="failed", error="Import not found")
@@ -81,7 +81,7 @@ def run_scholar_import(import_id: str, job_id: str) -> None:
             now = datetime.now(timezone.utc)
 
             for raw in proposed[:10]:
-                filt = Filter(
+                filt = SQLAFilter(
                     id=str(uuid.uuid4()),
                     name=raw.get("name", "Unnamed Filter"),
                     definition={
@@ -102,13 +102,13 @@ def run_scholar_import(import_id: str, job_id: str) -> None:
 
         except Exception as e:
             db.rollback()
-            profile_import = db.query(ResearchProfileImport).filter(
-                ResearchProfileImport.id == import_id
+            profile_import = db.query(SQLAResearchProfileImport).filter(
+                SQLAResearchProfileImport.id == import_id
             ).first()
             if profile_import:
                 profile_import.status = "failed"
                 profile_import.error = str(e)
-            job = db.query(Job).filter(Job.id == job_id).first()
+            job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
             if job:
                 set_job_status(job, status="failed", error=str(e))
             db.commit()

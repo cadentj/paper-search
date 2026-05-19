@@ -3,15 +3,15 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.models.idea_map import IdeaMap
-from app.models.paper import Paper
+from app.models.idea_map import SQLAIdeaMap
+from app.models.paper import SQLAPaper
 from app.services.errors import NotFound
 from app.services import papers as papers_service
 
 
-def _paper(db_session) -> Paper:
+def _paper(db_session) -> SQLAPaper:
     now = datetime.now(timezone.utc)
-    paper = Paper(
+    paper = SQLAPaper(
         id=str(uuid.uuid4()),
         title="Test Paper",
         source_type="arxiv",
@@ -39,7 +39,7 @@ def test_start_idea_map_creates_new(db_session, monkeypatch):
 
     job_id = papers_service.start_idea_map(db_session, paper.id)
     assert job_id
-    idea_map = db_session.query(IdeaMap).filter(IdeaMap.paper_id == paper.id).first()
+    idea_map = db_session.query(SQLAIdeaMap).filter(SQLAIdeaMap.paper_id == paper.id).first()
     assert idea_map is not None
     assert idea_map.status == "queued"
 
@@ -47,7 +47,7 @@ def test_start_idea_map_creates_new(db_session, monkeypatch):
 def test_start_idea_map_in_flight_returns_existing_job(db_session, monkeypatch):
     paper = _paper(db_session)
     now = datetime.now(timezone.utc)
-    idea_map = IdeaMap(
+    idea_map = SQLAIdeaMap(
         id=str(uuid.uuid4()),
         paper_id=paper.id,
         status="running",

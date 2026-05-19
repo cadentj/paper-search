@@ -42,7 +42,7 @@ Write a compact summary focused on:
 
 Do not critique the document. Do not include markdown."""
 
-DOCUMENT_SUMMARY_USER_PROMPT = """Document title: {filename}
+DOCUMENT_SUMMARY_USER_PROMPT = """SQLADocument title: {filename}
 
 Extracted text:
 
@@ -69,7 +69,7 @@ For each item, return:
 
 Only include items that genuinely relate to the topic. Be selective."""
 
-CLAIM_FILTER_SEARCH_USER_PROMPT = """Claim Filter:
+CLAIM_FILTER_SEARCH_USER_PROMPT = """Claim SQLAFilter:
 Name: {filter_name}
 Claim: {filter_description}
 
@@ -78,7 +78,7 @@ Item to evaluate:
 
 Determine whether this item supports or refutes the claim. Return an empty matches array if it does not relate."""
 
-TOPIC_FILTER_SEARCH_USER_PROMPT = """Topic Filter:
+TOPIC_FILTER_SEARCH_USER_PROMPT = """Topic SQLAFilter:
 Name: {filter_name}
 Topic: {filter_description}
 
@@ -186,7 +186,7 @@ Each filter should be one of two types:
 
 Generate 2-5 filters. Prefer fewer high-quality filters."""
 
-PAPER_NOTES_USER_PROMPT = """Paper: {paper_title}
+PAPER_NOTES_USER_PROMPT = """SQLAPaper: {paper_title}
 Authors: {paper_authors}
 Abstract: {paper_abstract}
 

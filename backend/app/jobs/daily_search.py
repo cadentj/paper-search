@@ -6,10 +6,10 @@ from datetime import datetime, timezone
 
 from app.core.config import LLM_MAX_CONCURRENCY
 from app.db.session import database
-from app.models.paper import Paper
-from app.models.paper_match import PaperMatch
-from app.models.search_run import SearchRun
-from app.models.job import Job
+from app.models.paper import SQLAPaper
+from app.models.paper_match import SQLAPaperMatch
+from app.models.search_run import SQLASearchRun
+from app.models.job import SQLAJob
 from app.services import filters as filter_service
 from app.services import search_runs
 from app.services.sources import enabled_source_types, papers_for_sources
@@ -22,8 +22,9 @@ from app.llm.prompts import (
     TOPIC_FILTER_SEARCH_USER_PROMPT,
 )
 from app.llm.schemas import ClaimFilterSearchResponse, TopicFilterSearchResponse
-from app.schemas.daily_search import FilterPayload, PairEvaluation
+from app.models.filter import FilterPayload
 from paper_search_core.schemas.daily_search import PaperPayload
+from pydantic import BaseModel
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,21 @@ PAIR_TIMEOUT_SECONDS = 30.0
 PAIRING_PHASE_TIMEOUT_SECONDS = 180.0
 
 
-def _candidate_counts_by_source(papers: list[Paper]) -> dict[str, int]:
+class PairEvaluation(BaseModel):
+    filter_id: str
+    filter_name: str
+    paper_id: str
+    paper_title: str
+    source_type: str
+    source_id: str
+    item_id: str
+    result: dict | None = None
+    model: str | None = None
+    response_id: str | None = None
+    error: str | None = None
+
+
+def _candidate_counts_by_source(papers: list[SQLAPaper]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for paper in papers:
         source_type = paper.source_type or "arxiv"
@@ -193,11 +208,11 @@ async def _evaluate_pairs(
 def run_daily_search(search_run_id: str, job_id: str) -> None:
     """Worker job: evaluate filters against daily papers and persist matches."""
     with database.session() as db:
-        run = db.query(SearchRun).filter(SearchRun.id == search_run_id).first()
+        run = db.query(SQLASearchRun).filter(SQLASearchRun.id == search_run_id).first()
         if not run:
             return
 
-        job = db.query(Job).filter(Job.id == job_id).first()
+        job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
         if not job:
             return
 
@@ -246,7 +261,7 @@ def run_daily_search(search_run_id: str, job_id: str) -> None:
                     has_content = result and result.get("reason", "").strip()
                     if has_content:
                         db.add(
-                            PaperMatch(
+                            SQLAPaperMatch(
                                 search_run_id=search_run_id,
                                 filter_id=evaluation.filter_id,
                                 paper_id=evaluation.paper_id,
@@ -279,8 +294,8 @@ def run_daily_search(search_run_id: str, job_id: str) -> None:
                 )
 
             match_count = (
-                db.query(PaperMatch)
-                .filter(PaperMatch.search_run_id == search_run_id)
+                db.query(SQLAPaperMatch)
+                .filter(SQLAPaperMatch.search_run_id == search_run_id)
                 .count()
             )
             search_runs.set_match_count(db, run, match_count)
@@ -288,7 +303,7 @@ def run_daily_search(search_run_id: str, job_id: str) -> None:
 
         except Exception as e:
             db.rollback()
-            run = db.query(SearchRun).filter(SearchRun.id == search_run_id).first()
+            run = db.query(SQLASearchRun).filter(SQLASearchRun.id == search_run_id).first()
             if run:
                 job = search_runs.resolve_daily_search_job(db, search_run_id, job_id)
                 search_runs.fail_run(db, run, job, str(e))

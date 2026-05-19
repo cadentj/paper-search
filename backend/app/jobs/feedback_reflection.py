@@ -6,13 +6,13 @@ import uuid
 from datetime import datetime, timezone
 
 from app.db.session import database
-from app.models.filter import Filter
+from app.models.filter import SQLAFilter
 from app.services import filters as filter_service
-from app.models.job import Job
-from app.models.paper import Paper
-from app.models.paper_match import PaperMatch
-from app.models.paper_match_feedback import PaperMatchFeedback
-from app.models.paper_note import PaperNote
+from app.models.job import SQLAJob
+from app.models.paper import SQLAPaper
+from app.models.paper_match import SQLAPaperMatch
+from app.models.paper_match_feedback import SQLAPaperMatchFeedback
+from app.models.paper_note import SQLAPaperNote
 from app.services.jobs import set_job_status
 from app.llm.client import call_llm
 from app.llm.config import FILTER_GENERATION_PROFILE
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 def process_all_feedback(job_id: str) -> None:
     with database.session() as db:
         try:
-            job = db.query(Job).filter(Job.id == job_id).first()
+            job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
             if not job:
                 return
             set_job_status(job, status="running")
@@ -33,15 +33,15 @@ def process_all_feedback(job_id: str) -> None:
 
             # Gather pending votes
             votes = (
-                db.query(PaperMatchFeedback)
-                .filter(PaperMatchFeedback.processed == False)
+                db.query(SQLAPaperMatchFeedback)
+                .filter(SQLAPaperMatchFeedback.processed == False)
                 .all()
             )
 
             # Gather pending notes
             notes = (
-                db.query(PaperNote)
-                .filter(PaperNote.processed == False, PaperNote.text != "")
+                db.query(SQLAPaperNote)
+                .filter(SQLAPaperNote.processed == False, SQLAPaperNote.text != "")
                 .all()
             )
 
@@ -61,13 +61,13 @@ def process_all_feedback(job_id: str) -> None:
 
             vote_descriptions = []
             for v in votes:
-                paper = db.query(Paper).filter(Paper.id == v.paper_id).first()
+                paper = db.query(SQLAPaper).filter(SQLAPaper.id == v.paper_id).first()
                 paper_title = paper.title if paper else "Unknown"
                 paper_abstract = paper.abstract if paper else ""
 
                 if v.paper_match_id and v.filter_id:
-                    match = db.query(PaperMatch).filter(PaperMatch.id == v.paper_match_id).first()
-                    match_filter = db.query(Filter).filter(Filter.id == v.filter_id).first()
+                    match = db.query(SQLAPaperMatch).filter(SQLAPaperMatch.id == v.paper_match_id).first()
+                    match_filter = db.query(SQLAFilter).filter(SQLAFilter.id == v.filter_id).first()
                     filter_name = match_filter.name if match_filter else "Unknown"
                     match_result = ""
                     if match and match.result:
@@ -84,7 +84,7 @@ def process_all_feedback(job_id: str) -> None:
 
             note_descriptions = []
             for n in notes:
-                paper = db.query(Paper).filter(Paper.id == n.paper_id).first()
+                paper = db.query(SQLAPaper).filter(SQLAPaper.id == n.paper_id).first()
                 paper_title = paper.title if paper else "Unknown"
                 paper_abstract = paper.abstract if paper else ""
                 note_descriptions.append(
@@ -110,7 +110,7 @@ def process_all_feedback(job_id: str) -> None:
             for action in actions:
                 action_type = action.get("action")
                 if action_type == "create":
-                    filt = Filter(
+                    filt = SQLAFilter(
                         id=str(uuid.uuid4()),
                         name=action.get("name", "New Filter"),
                         definition={
@@ -130,7 +130,7 @@ def process_all_feedback(job_id: str) -> None:
                     target_id = action.get("target_filter_id")
                     if not target_id:
                         continue
-                    filt = Filter(
+                    filt = SQLAFilter(
                         id=str(uuid.uuid4()),
                         name=action.get("name", "Revised Filter"),
                         definition={
@@ -151,10 +151,10 @@ def process_all_feedback(job_id: str) -> None:
                     target_id = action.get("target_filter_id")
                     if not target_id:
                         continue
-                    target = db.query(Filter).filter(Filter.id == target_id).first()
+                    target = db.query(SQLAFilter).filter(SQLAFilter.id == target_id).first()
                     if not target:
                         continue
-                    filt = Filter(
+                    filt = SQLAFilter(
                         id=str(uuid.uuid4()),
                         name=target.name,
                         definition=dict(target.definition or {}),
@@ -178,7 +178,7 @@ def process_all_feedback(job_id: str) -> None:
 
         except Exception as e:
             db.rollback()
-            job = db.query(Job).filter(Job.id == job_id).first()
+            job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
             if job:
                 set_job_status(job, status="failed", error=str(e))
                 db.commit()

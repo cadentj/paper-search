@@ -4,9 +4,9 @@ import logging
 from datetime import datetime, timezone
 
 from app.db.session import database
-from app.models.search_run import SearchRun
+from app.models.search_run import SQLASearchRun
 from app.services import filters as filter_service
-from app.models.job import Job
+from app.models.job import SQLAJob
 from app.services import search_runs
 from app.llm.client import call_llm
 from app.llm.config import SUMMARY_PROFILE
@@ -16,7 +16,7 @@ from app.llm.schemas import SearchSummaryResponse
 logger = logging.getLogger(__name__)
 
 
-def _fallback_summary(db, run: SearchRun) -> dict:
+def _fallback_summary(db, run: SQLASearchRun) -> dict:
     active_filters = len(filter_service.list_active_filters(db))
     if active_filters == 0:
         return {"summary": "No active filters to search.", "citations": []}
@@ -35,7 +35,7 @@ def summarize_daily_search(search_run_id: str, job_id: str | None = None) -> Non
     """Worker job: summarize persisted matches for a daily search run."""
     with database.session() as db:
         try:
-            run = db.query(SearchRun).filter(SearchRun.id == search_run_id).first()
+            run = db.query(SQLASearchRun).filter(SQLASearchRun.id == search_run_id).first()
             if not run:
                 return
             job = search_runs.resolve_summary_job(db, search_run_id, job_id)
@@ -65,7 +65,7 @@ def summarize_daily_search(search_run_id: str, job_id: str | None = None) -> Non
 
         except Exception as e:
             db.rollback()
-            run = db.query(SearchRun).filter(SearchRun.id == search_run_id).first()
+            run = db.query(SQLASearchRun).filter(SQLASearchRun.id == search_run_id).first()
             if run:
                 run.error = str(e)
                 run.completed_at = datetime.now(timezone.utc)

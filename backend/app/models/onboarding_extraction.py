@@ -1,13 +1,35 @@
 import uuid
 from datetime import datetime, timezone
+from typing import Literal, Optional
 
-from sqlalchemy import Column, Text, DateTime, JSON
+from pydantic import BaseModel
+from sqlalchemy import Column, DateTime, JSON, Text
 
 from app.models.base import Base
-from app.schemas.onboarding import OnboardingExtractionResponse
 
 
-class OnboardingExtraction(Base):
+class ProposedFilter(BaseModel):
+    id: str
+    name: str
+    description: str
+    mode: Literal["claim", "topic"] = "topic"
+
+
+class OnboardingExtraction(BaseModel):
+    id: str
+    job_id: Optional[str] = None
+    status: str
+    input_text: str
+    proposed_filters: list[ProposedFilter | dict]
+    error: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class SQLAOnboardingExtraction(Base):
     __tablename__ = "onboarding_extractions"
 
     id = Column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -24,8 +46,8 @@ class OnboardingExtraction(Base):
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     completed_at = Column(DateTime, nullable=True)
 
-    def to_pydantic(self, *, job_id: str | None = None) -> OnboardingExtractionResponse:
-        resp = OnboardingExtractionResponse.model_validate(self)
+    def to_pydantic(self, *, job_id: str | None = None) -> OnboardingExtraction:
+        resp = OnboardingExtraction.model_validate(self)
         if job_id is not None:
             return resp.model_copy(update={"job_id": job_id})
         return resp

@@ -2,35 +2,38 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
-from app.models.filter import Filter
-from app.schemas.filters import FilterCreate, FilterUpdate
+from app.models.filter import SQLAFilter
 from app.services.errors import NotFound, ValidationFailed
 
+if TYPE_CHECKING:
+    from app.api.filters import FilterCreate, FilterUpdate
 
-def list_filters(db: Session, *, status: str | None = None) -> list[Filter]:
-    query = db.query(Filter)
+
+def list_filters(db: Session, *, status: str | None = None) -> list[SQLAFilter]:
+    query = db.query(SQLAFilter)
     if status:
-        query = query.filter(Filter.status == status)
-    return query.order_by(Filter.created_at.desc()).all()
+        query = query.filter(SQLAFilter.status == status)
+    return query.order_by(SQLAFilter.created_at.desc()).all()
 
 
-def list_active_filters(db: Session) -> list[Filter]:
-    return db.query(Filter).filter(Filter.status == "active").all()
+def list_active_filters(db: Session) -> list[SQLAFilter]:
+    return db.query(SQLAFilter).filter(SQLAFilter.status == "active").all()
 
 
-def get_filter(db: Session, filter_id: str) -> Filter:
-    filt = db.query(Filter).filter(Filter.id == filter_id).first()
+def get_filter(db: Session, filter_id: str) -> SQLAFilter:
+    filt = db.query(SQLAFilter).filter(SQLAFilter.id == filter_id).first()
     if not filt:
         raise NotFound("Filter not found")
     return filt
 
 
-def create_filter(db: Session, body: FilterCreate) -> Filter:
+def create_filter(db: Session, body: FilterCreate) -> SQLAFilter:
     now = datetime.now(timezone.utc)
-    filt = Filter(
+    filt = SQLAFilter(
         id=str(uuid.uuid4()),
         name=body.name,
         definition=body.definition.model_dump(),
@@ -44,7 +47,7 @@ def create_filter(db: Session, body: FilterCreate) -> Filter:
     return filt
 
 
-def update_filter(db: Session, filter_id: str, body: FilterUpdate) -> Filter:
+def update_filter(db: Session, filter_id: str, body: FilterUpdate) -> SQLAFilter:
     filt = get_filter(db, filter_id)
     if body.name is not None:
         filt.name = body.name
@@ -57,7 +60,7 @@ def update_filter(db: Session, filter_id: str, body: FilterUpdate) -> Filter:
     return filt
 
 
-def archive_filter(db: Session, filter_id: str) -> Filter:
+def archive_filter(db: Session, filter_id: str) -> SQLAFilter:
     filt = get_filter(db, filter_id)
     now = datetime.now(timezone.utc)
     filt.status = "archived"
@@ -68,7 +71,7 @@ def archive_filter(db: Session, filter_id: str) -> Filter:
     return filt
 
 
-def restore_filter(db: Session, filter_id: str) -> Filter:
+def restore_filter(db: Session, filter_id: str) -> SQLAFilter:
     filt = get_filter(db, filter_id)
     filt.status = "active"
     filt.archived_at = None
@@ -78,7 +81,7 @@ def restore_filter(db: Session, filter_id: str) -> Filter:
     return filt
 
 
-def accept_proposal(db: Session, filter_id: str) -> Filter:
+def accept_proposal(db: Session, filter_id: str) -> SQLAFilter:
     filt = get_filter(db, filter_id)
     now = datetime.now(timezone.utc)
 
@@ -87,7 +90,7 @@ def accept_proposal(db: Session, filter_id: str) -> Filter:
         filt.proposed_action = None
         filt.updated_at = now
     elif filt.proposed_action == "revise" and filt.target_filter_id:
-        target = db.query(Filter).filter(Filter.id == filt.target_filter_id).first()
+        target = db.query(SQLAFilter).filter(SQLAFilter.id == filt.target_filter_id).first()
         if target:
             target.definition = dict(filt.definition or {})
             target.name = filt.name
@@ -96,7 +99,7 @@ def accept_proposal(db: Session, filter_id: str) -> Filter:
         filt.archived_at = now
         filt.updated_at = now
     elif filt.proposed_action == "delete" and filt.target_filter_id:
-        target = db.query(Filter).filter(Filter.id == filt.target_filter_id).first()
+        target = db.query(SQLAFilter).filter(SQLAFilter.id == filt.target_filter_id).first()
         if target:
             target.status = "archived"
             target.archived_at = now
@@ -112,7 +115,7 @@ def accept_proposal(db: Session, filter_id: str) -> Filter:
     return filt
 
 
-def reject_proposal(db: Session, filter_id: str) -> Filter:
+def reject_proposal(db: Session, filter_id: str) -> SQLAFilter:
     filt = get_filter(db, filter_id)
     if not filt.proposed_action:
         raise ValidationFailed("Not a pending proposal")

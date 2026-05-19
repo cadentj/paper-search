@@ -1,14 +1,31 @@
+from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel
 from paper_search_core.models.paper import Paper as _Paper
 
-from app.schemas.papers import PaperResponse
-
-Paper = _Paper
+SQLAPaper = _Paper
 
 
-def to_pydantic(self) -> PaperResponse:
-    return PaperResponse.model_validate(self)
+class Paper(BaseModel):
+    id: str
+    source_type: str = "arxiv"
+    source_id: Optional[str] = None
+    title: str
+    search_text: str
+    authors: list
+    published_at: Optional[datetime] = None
+    html_url: Optional[str] = None
+    source_url: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
-Paper.to_pydantic = to_pydantic  # type: ignore[method-assign]
+def to_pydantic(self) -> Paper:
+    return Paper.model_validate(self)
 
-__all__ = ["Paper"]
+
+SQLAPaper.to_pydantic = to_pydantic  # type: ignore[method-assign]
+
+__all__ = ["SQLAPaper", "Paper"]

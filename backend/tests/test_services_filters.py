@@ -3,14 +3,14 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.models.filter import Filter
+from app.models.filter import SQLAFilter
 from app.services.errors import ValidationFailed
 from app.services import filters as filter_service
 
 
-def _proposal_filter(db_session, *, action: str, target_id: str | None = None) -> Filter:
+def _proposal_filter(db_session, *, action: str, target_id: str | None = None) -> SQLAFilter:
     now = datetime.now(timezone.utc)
-    filt = Filter(
+    filt = SQLAFilter(
         id=str(uuid.uuid4()),
         name="Proposal",
         definition={"name": "Proposal", "description": "", "mode": "topic"},
@@ -33,7 +33,7 @@ def test_accept_proposal_create(db_session):
 
 
 def test_accept_proposal_revise(db_session):
-    target = Filter(
+    target = SQLAFilter(
         id=str(uuid.uuid4()),
         name="Target",
         definition={"name": "Target", "description": "old", "mode": "topic"},

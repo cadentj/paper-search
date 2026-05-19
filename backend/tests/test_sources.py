@@ -3,13 +3,13 @@
 import uuid
 from datetime import date, datetime, timezone
 
-from app.models.paper import Paper
+from app.models.paper import SQLAPaper
 from app.services.sources import count_papers_for_source, papers_for_source
 
 
 def test_papers_for_source_uses_injected_session(db_session):
     run_date = date(2026, 5, 1)
-    paper = Paper(
+    paper = SQLAPaper(
         id=str(uuid.uuid4()),
         source_type="arxiv",
         source_id="2605.00001",

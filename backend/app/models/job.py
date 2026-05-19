@@ -1,17 +1,34 @@
 import uuid
 from datetime import datetime, timezone
 
+from pydantic import BaseModel, Field
 from sqlalchemy import Column, DateTime, Index, JSON, Text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.models.base import Base
-from app.schemas.jobs import JobResponse
 
 
 ProgressJSON = JSON().with_variant(JSONB, "postgresql")
 
 
-class Job(Base):
+class Job(BaseModel):
+    id: str
+    kind: str
+    status: str
+    subject_type: str | None = None
+    subject_id: str | None = None
+    queue_name: str | None = None
+    queue_job_id: str | None = None
+    progress: dict = Field(default_factory=dict)
+    error: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SQLAJob(Base):
     __tablename__ = "jobs"
     __table_args__ = (
         Index("ix_jobs_subject", "subject_type", "subject_id"),
@@ -31,5 +48,5 @@ class Job(Base):
     completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
-    def to_pydantic(self) -> JobResponse:
-        return JobResponse.model_validate(self)
+    def to_pydantic(self) -> Job:
+        return Job.model_validate(self)

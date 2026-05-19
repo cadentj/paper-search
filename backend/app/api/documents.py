@@ -3,15 +3,20 @@ from pathlib import Path
 
 import pymupdf
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.http_errors import raise_http_from_service
 from app.core.config import BACKEND_DIR, settings
 from app.db.session import get_db
-from app.schemas.documents import DocumentResponse, DocumentUploadResponse
+from app.models.document import Document
 from app.services import documents as documents_service
 
 router = APIRouter(prefix="/documents", tags=["documents"])
+
+
+class DocumentUpload(Document):
+    job_id: str
 
 
 def _documents_dir() -> Path:
@@ -41,7 +46,7 @@ def _validate_pdf(content: bytes) -> int:
     return page_count
 
 
-@router.post("", response_model=DocumentUploadResponse)
+@router.post("", response_model=DocumentUpload)
 async def upload_document(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -68,13 +73,13 @@ async def upload_document(
     except Exception as exc:
         raise_http_from_service(exc)
 
-    return DocumentUploadResponse(
+    return DocumentUpload(
         **document.to_pydantic().model_dump(),
         job_id=job_id,
     )
 
 
-@router.get("/{document_id}", response_model=DocumentResponse)
+@router.get("/{document_id}", response_model=Document)
 def get_document(document_id: str, db: Session = Depends(get_db)):
     try:
         document = documents_service.get_document(db, document_id)

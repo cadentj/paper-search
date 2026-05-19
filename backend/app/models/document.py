@@ -1,13 +1,32 @@
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 
+from pydantic import BaseModel
 from sqlalchemy import Column, DateTime, Integer, Text
 
 from app.models.base import Base
-from app.schemas.documents import DocumentResponse
 
 
-class Document(Base):
+class Document(BaseModel):
+    id: str
+    job_id: Optional[str] = None
+    original_filename: str
+    content_type: str
+    size_bytes: int
+    page_count: int
+    storage_path: str
+    extracted_text_path: str | None = None
+    summary: str | None = None
+    status: str
+    error: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SQLADocument(Base):
     __tablename__ = "documents"
 
     id = Column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -29,8 +48,8 @@ class Document(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    def to_pydantic(self, *, job_id: str | None = None) -> DocumentResponse:
-        resp = DocumentResponse.model_validate(self)
+    def to_pydantic(self, *, job_id: str | None = None) -> Document:
+        resp = Document.model_validate(self)
         if job_id is not None:
             return resp.model_copy(update={"job_id": job_id})
         return resp

@@ -21,7 +21,7 @@ class PaperFeedbackRequest(BaseModel):
     value: str
 
 
-class FeedbackResponse(BaseModel):
+class Feedback(BaseModel):
     id: str
     paper_id: str
     value: str
@@ -29,19 +29,19 @@ class FeedbackResponse(BaseModel):
     created_at: datetime
 
 
-class FeedbackStatusResponse(BaseModel):
+class FeedbackStatus(BaseModel):
     pending_votes: int
     pending_notes: int
     pending_proposals: int
 
 
-@router.post("/paper-matches/{match_id}/feedback", response_model=FeedbackResponse)
+@router.post("/paper-matches/{match_id}/feedback", response_model=Feedback)
 def submit_match_feedback(match_id: str, body: MatchFeedbackRequest, db: Session = Depends(get_db)):
     try:
         feedback = feedback_service.upsert_match_feedback(db, match_id, body.value)
     except Exception as exc:
         raise_http_from_service(exc)
-    return FeedbackResponse(
+    return Feedback(
         id=feedback.id,
         paper_id=feedback.paper_id,
         value=feedback.value,
@@ -50,13 +50,13 @@ def submit_match_feedback(match_id: str, body: MatchFeedbackRequest, db: Session
     )
 
 
-@router.post("/papers/{paper_id}/feedback", response_model=FeedbackResponse)
+@router.post("/papers/{paper_id}/feedback", response_model=Feedback)
 def submit_paper_feedback(paper_id: str, body: PaperFeedbackRequest, db: Session = Depends(get_db)):
     try:
         feedback = feedback_service.upsert_paper_feedback(db, paper_id, body.value)
     except Exception as exc:
         raise_http_from_service(exc)
-    return FeedbackResponse(
+    return Feedback(
         id=feedback.id,
         paper_id=feedback.paper_id,
         value=feedback.value,
@@ -64,10 +64,10 @@ def submit_paper_feedback(paper_id: str, body: PaperFeedbackRequest, db: Session
     )
 
 
-@router.get("/feedback/status", response_model=FeedbackStatusResponse)
+@router.get("/feedback/status", response_model=FeedbackStatus)
 def get_feedback_status(db: Session = Depends(get_db)):
     pending_votes, pending_notes, pending_proposals = feedback_service.feedback_counts(db)
-    return FeedbackStatusResponse(
+    return FeedbackStatus(
         pending_votes=pending_votes,
         pending_notes=pending_notes,
         pending_proposals=pending_proposals,

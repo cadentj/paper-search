@@ -1,13 +1,30 @@
 import uuid
-from datetime import datetime, date, timezone
+from datetime import date, datetime, timezone
+from typing import Optional
 
-from sqlalchemy import Column, Text, DateTime, Date, Integer, JSON
+from pydantic import BaseModel
+from sqlalchemy import Column, Date, DateTime, Integer, JSON, Text
 
 from app.models.base import Base
-from app.schemas.search import SearchRunResponse
 
 
-class SearchRun(Base):
+class SearchRun(BaseModel):
+    id: str
+    job_id: Optional[str] = None
+    status: str
+    run_date: date
+    candidate_count: Optional[int] = None
+    candidate_counts: dict | None = None
+    match_count: Optional[int] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SQLASearchRun(Base):
     __tablename__ = "search_runs"
 
     id = Column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -25,8 +42,8 @@ class SearchRun(Base):
     error = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
-    def to_pydantic(self, *, job_id: str | None = None) -> SearchRunResponse:
-        resp = SearchRunResponse.model_validate(self)
+    def to_pydantic(self, *, job_id: str | None = None) -> SearchRun:
+        resp = SearchRun.model_validate(self)
         if job_id is not None:
             return resp.model_copy(update={"job_id": job_id})
         return resp

@@ -1,4 +1,4 @@
-"""Daily search sources: index reads, HTML, and DataSource settings."""
+"""Daily search sources: index reads, HTML, and SQLADataSource settings."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ import httpx
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.data_source import DataSource
-from app.models.paper import Paper
+from app.models.data_source import SQLADataSource
+from app.models.paper import SQLAPaper
 from app.services.errors import NotFound
 from app.utils.html_parser import prepare_arxiv_html_for_viewer
 
@@ -35,9 +35,9 @@ KNOWN_SOURCE_TYPES = frozenset(DEFAULT_SOURCES)
 
 
 def _papers_query(db: Session, source_type: str, run_date: date):
-    return db.query(Paper).filter(
-        Paper.source_type == source_type,
-        func.date(Paper.published_at) == run_date,
+    return db.query(SQLAPaper).filter(
+        SQLAPaper.source_type == source_type,
+        func.date(SQLAPaper.published_at) == run_date,
     )
 
 
@@ -51,7 +51,7 @@ def count_papers_for_source(db: Session, source_type: str, run_date: date) -> in
         return 0
 
 
-def papers_for_source(db: Session, source_type: str, run_date: date) -> list[Paper]:
+def papers_for_source(db: Session, source_type: str, run_date: date) -> list[SQLAPaper]:
     return _papers_query(db, source_type, run_date).all()
 
 
@@ -64,14 +64,14 @@ def _fetch_url_text(url: str) -> str | None:
         return None
 
 
-def _default_paper_html(paper: Paper) -> dict[str, str | None]:
+def _default_paper_html(paper: SQLAPaper) -> dict[str, str | None]:
     return {
         "html": _fetch_url_text(paper.html_url) if paper.html_url else None,
         "source_url": paper.source_url,
     }
 
 
-def _arxiv_paper_html(paper: Paper) -> dict[str, str | None]:
+def _arxiv_paper_html(paper: SQLAPaper) -> dict[str, str | None]:
     if not paper.html_url:
         return {"html": None, "source_url": paper.source_url}
     raw = _fetch_url_text(paper.html_url)
@@ -83,7 +83,7 @@ def _arxiv_paper_html(paper: Paper) -> dict[str, str | None]:
     }
 
 
-def paper_html(paper: Paper) -> dict[str, str | None]:
+def paper_html(paper: SQLAPaper) -> dict[str, str | None]:
     if paper.source_type == "arxiv":
         return _arxiv_paper_html(paper)
     return _default_paper_html(paper)
@@ -102,8 +102,8 @@ def counts_by_source_for_date(
 
 def papers_for_sources(
     db: Session, source_types: set[str], run_date: date
-) -> list[Paper]:
-    papers: list[Paper] = []
+) -> list[SQLAPaper]:
+    papers: list[SQLAPaper] = []
     for source_type in sorted(source_types):
         if source_type not in KNOWN_SOURCE_TYPES:
             raise ValueError(f"Unknown source provider: {source_type}")
@@ -111,14 +111,14 @@ def papers_for_sources(
     return papers
 
 
-def ensure_default_data_sources(db: Session) -> list[DataSource]:
+def ensure_default_data_sources(db: Session) -> list[SQLADataSource]:
     for source_type, defaults in DEFAULT_SOURCES.items():
-        existing = db.query(DataSource).filter(DataSource.source_type == source_type).first()
+        existing = db.query(SQLADataSource).filter(SQLADataSource.source_type == source_type).first()
         if existing:
             continue
         now = datetime.now(timezone.utc)
         db.add(
-            DataSource(
+            SQLADataSource(
                 source_type=source_type,
                 name=defaults["name"],
                 enabled=defaults["enabled"],
@@ -131,8 +131,8 @@ def ensure_default_data_sources(db: Session) -> list[DataSource]:
     return list_data_sources(db)
 
 
-def list_data_sources(db: Session) -> list[DataSource]:
-    sources = db.query(DataSource).order_by(DataSource.name.asc()).all()
+def list_data_sources(db: Session) -> list[SQLADataSource]:
+    sources = db.query(SQLADataSource).order_by(SQLADataSource.name.asc()).all()
     order = {"arxiv": 0, "lesswrong": 1}
     return sorted(sources, key=lambda source: order.get(source.source_type, 99))
 
@@ -151,9 +151,9 @@ def update_data_source(
     *,
     enabled: bool | None = None,
     settings: dict | None = None,
-) -> DataSource:
+) -> SQLADataSource:
     ensure_default_data_sources(db)
-    source = db.query(DataSource).filter(DataSource.source_type == source_type).first()
+    source = db.query(SQLADataSource).filter(SQLADataSource.source_type == source_type).first()
     if not source:
         raise NotFound("Data source not found")
 

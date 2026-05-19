@@ -13,20 +13,25 @@ from app.api.search import router as search_router
 from app.api.papers import router as papers_router
 from app.api.feedback import router as feedback_router
 from app.api.settings import router as settings_router
-from app.api.scholar import router as scholar_router
+from app.api.jobs import DailySearchSummaryJob
+from app.api.search import DailySearchSummary
 from app.models import Base
 from app.db.session import database, engine
-from app.models.paper import Paper
+from app.models.paper import SQLAPaper
 from paper_search_core.daily_dates import DEFAULT_DAILY_SEARCH_DATE
 
 logger = logging.getLogger(__name__)
+
+DailySearchSummaryJob.model_rebuild(
+    _types_namespace={"DailySearchSummary": DailySearchSummary}
+)
 
 Base.metadata.create_all(bind=engine)
 
 with database.session() as db:
     if (
-        db.query(Paper)
-        .filter(func.date(Paper.published_at) == DEFAULT_DAILY_SEARCH_DATE)
+        db.query(SQLAPaper)
+        .filter(func.date(SQLAPaper.published_at) == DEFAULT_DAILY_SEARCH_DATE)
         .count()
         == 0
     ):
@@ -58,4 +63,3 @@ app.include_router(search_router)
 app.include_router(papers_router)
 app.include_router(feedback_router)
 app.include_router(settings_router)
-app.include_router(scholar_router)

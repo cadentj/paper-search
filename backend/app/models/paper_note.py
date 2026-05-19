@@ -1,12 +1,12 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, Text, DateTime, ForeignKey
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Text
 
 from app.models.base import Base
 
 
-class PaperNote(Base):
+class SQLAPaperNote(Base):
     __tablename__ = "paper_notes"
 
     id = Column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
