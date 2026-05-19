@@ -14,7 +14,6 @@ from app.models.onboarding_extraction import SQLAOnboardingExtraction
 from app.models.paper_match import PaperMatch, SQLAPaperMatch
 from app.models.search_run import SQLASearchRun
 from app.models.job import Job
-from app.services.errors import NotFound, ValidationFailed
 from app.services.jobs import latest_job_for_subject
 from app.services.search_runs import search_run_payload, summary_payload
 
@@ -24,14 +23,14 @@ DONE_STATUSES = {"completed", "failed", "skipped"}
 def get_job(db: Session, job_id: str) -> SQLAJob:
     job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
     if not job:
-        raise NotFound("Job not found")
+        raise LookupError("Job not found")
     return job
 
 
 def get_job_of_kind(db: Session, job_id: str, kind: str) -> SQLAJob:
     job = get_job(db, job_id)
     if job.kind != kind:
-        raise ValidationFailed(f"Job is not a {kind} job")
+        raise ValueError(f"Job is not a {kind} job")
     return job
 
 
@@ -73,7 +72,7 @@ def decode_cursor(cursor: str | None) -> tuple[datetime, str] | None:
             value = value.replace(tzinfo=None)
         return value, str(payload["id"])
     except Exception as exc:
-        raise ValidationFailed("Invalid cursor") from exc
+        raise ValueError("Invalid cursor") from exc
 
 
 def apply_cursor(items: list, cursor: str | None) -> list:
@@ -147,14 +146,14 @@ def serialize_document_job(job: SQLAJob, document: SQLADocument) -> Job:
 def get_search_run_for_job(db: Session, job: SQLAJob) -> SQLASearchRun:
     run = db.query(SQLASearchRun).filter(SQLASearchRun.id == job.subject_id).first()
     if not run:
-        raise NotFound("Search run not found")
+        raise LookupError("Search run not found")
     return run
 
 
 def get_idea_map_for_job(db: Session, job: SQLAJob) -> SQLAIdeaMap:
     idea_map = db.query(SQLAIdeaMap).filter(SQLAIdeaMap.id == job.subject_id).first()
     if not idea_map:
-        raise NotFound("Idea map not found")
+        raise LookupError("Idea map not found")
     return idea_map
 
 
@@ -165,14 +164,14 @@ def get_extraction_for_job(db: Session, job: SQLAJob) -> SQLAOnboardingExtractio
         .first()
     )
     if not extraction:
-        raise NotFound("Extraction not found")
+        raise LookupError("Extraction not found")
     return extraction
 
 
 def get_document_for_job(db: Session, job: SQLAJob) -> SQLADocument:
     document = db.query(SQLADocument).filter(SQLADocument.id == job.subject_id).first()
     if not document:
-        raise NotFound("Document not found")
+        raise LookupError("Document not found")
     return document
 
 

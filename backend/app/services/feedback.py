@@ -12,7 +12,6 @@ from paper_search_core.models.paper import SQLAPaper
 from app.models.paper_match import SQLAPaperMatch
 from app.models.paper_match_feedback import SQLAPaperMatchFeedback
 from app.models.paper_note import SQLAPaperNote
-from app.services.errors import NotFound, ValidationFailed
 from app.services.job_enqueue import commit_entities, enqueue_job, mark_job_failed
 from app.services.jobs import create_job
 
@@ -21,11 +20,11 @@ def upsert_match_feedback(
     db: Session, match_id: str, value: str
 ) -> SQLAPaperMatchFeedback:
     if value not in ("up", "down"):
-        raise ValidationFailed("value must be 'up' or 'down'")
+        raise ValueError("value must be 'up' or 'down'")
 
     match = db.query(SQLAPaperMatch).filter(SQLAPaperMatch.id == match_id).first()
     if not match:
-        raise NotFound("Match not found")
+        raise LookupError("Match not found")
 
     now = datetime.now(timezone.utc)
     existing = (
@@ -60,11 +59,11 @@ def upsert_paper_feedback(
     db: Session, paper_id: str, value: str
 ) -> SQLAPaperMatchFeedback:
     if value != "up":
-        raise ValidationFailed("Only 'up' is allowed for unmatched papers")
+        raise ValueError("Only 'up' is allowed for unmatched papers")
 
     paper = db.query(SQLAPaper).filter(SQLAPaper.id == paper_id).first()
     if not paper:
-        raise NotFound("Paper not found")
+        raise LookupError("Paper not found")
 
     now = datetime.now(timezone.utc)
     existing = (
@@ -120,7 +119,7 @@ def feedback_counts(db: Session) -> tuple[int, int, int]:
 def start_feedback_processing(db: Session) -> str:
     pending_votes, pending_notes, _ = feedback_counts(db)
     if pending_votes == 0 and pending_notes == 0:
-        raise ValidationFailed("No pending feedback to process")
+        raise ValueError("No pending feedback to process")
 
     job_record = create_job(
         db,

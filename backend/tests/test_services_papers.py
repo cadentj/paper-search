@@ -5,7 +5,6 @@ import pytest
 
 from app.models.idea_map import SQLAIdeaMap
 from paper_search_core.models.paper import SQLAPaper
-from app.services.errors import NotFound
 from app.services import papers as papers_service
 
 
@@ -73,5 +72,5 @@ def test_start_idea_map_in_flight_returns_existing_job(db_session, monkeypatch):
 
 
 def test_get_paper_not_found(db_session):
-    with pytest.raises(NotFound):
+    with pytest.raises(LookupError):
         papers_service.get_paper(db_session, "missing")

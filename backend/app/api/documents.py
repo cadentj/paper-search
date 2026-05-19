@@ -3,11 +3,10 @@ from pathlib import Path
 
 import pymupdf
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.http_errors import raise_http_from_service
-from app.core.config import BACKEND_DIR, settings
+from app.config import BACKEND_DIR, settings
 from app.db.session import get_db
 from app.models.document import Document
 from app.services import documents as documents_service

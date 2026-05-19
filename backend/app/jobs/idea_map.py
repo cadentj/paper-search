@@ -16,7 +16,7 @@ from paper_search_core.models.paper import SQLAPaper
 from app.models.idea_map import SQLAIdeaMap
 from app.services import papers as papers_service
 from app.services.jobs import job_progress, set_job_status
-from app.core.config import LLM_MAX_CONCURRENCY
+from app.config import LLM_MAX_CONCURRENCY
 from app.utils.html_parser import (
     MAX_PROMPT_BLOCKS,
     blocks_to_prompt_text,

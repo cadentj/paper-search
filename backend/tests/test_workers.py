@@ -576,7 +576,7 @@ class TestRunDailySearch:
         db_session.commit()
 
         _mock_papers_for_sources(monkeypatch, [paper])
-        monkeypatch.setattr("app.core.config.settings.OPENROUTER_API_KEY", "")
+        monkeypatch.setattr("app.config.settings.OPENROUTER_API_KEY", "")
 
         job = _create_daily_search_job(db_session, run_id)
 

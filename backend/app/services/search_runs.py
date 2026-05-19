@@ -14,7 +14,6 @@ from paper_search_core.models.paper import SQLAPaper
 from app.models.paper_match import PaperMatch, SQLAPaperMatch
 from app.models.search_run import SQLASearchRun, SearchRun
 from paper_search_core.daily_dates import DEFAULT_DAILY_SEARCH_DATE
-from app.services.errors import Conflict, NotFound, ValidationFailed
 from app.services.job_enqueue import commit_entities, enqueue_job, persist_then_enqueue
 from app.services.jobs import get_or_create_job_for_subject
 from app.services.jobs import create_job, latest_job_for_subject, set_job_status
@@ -26,7 +25,7 @@ ACTIVE_SUMMARY_JOB_STATUSES = {"queued", "running"}
 def get_search_run(db: Session, search_run_id: str) -> SQLASearchRun:
     run = db.query(SQLASearchRun).filter(SQLASearchRun.id == search_run_id).first()
     if not run:
-        raise NotFound("Search run not found")
+        raise LookupError("Search run not found")
     return run
 
 
@@ -86,9 +85,9 @@ def start_daily_search(
 ) -> SQLAJob:
     requested_date = run_date or DEFAULT_DAILY_SEARCH_DATE
     if not requested_date:
-        raise ValidationFailed("No daily search dates are configured")
+        raise ValueError("No daily search dates are configured")
     if not enabled_source_types(db):
-        raise ValidationFailed("No data sources are enabled")
+        raise ValueError("No data sources are enabled")
 
     now = datetime.now(timezone.utc)
     run = SQLASearchRun(
@@ -135,7 +134,7 @@ def start_daily_summary(db: Session, search_run_id: str) -> SQLAJob:
         kind="daily_search",
     )
     if not search_job or search_job.status != "completed":
-        raise ValidationFailed("Daily search must complete before starting summary")
+        raise ValueError("Daily search must complete before starting summary")
 
     existing_summary = latest_job_for_subject(
         db,
@@ -144,7 +143,9 @@ def start_daily_summary(db: Session, search_run_id: str) -> SQLAJob:
         kind="daily_search_summary",
     )
     if existing_summary and existing_summary.status in ACTIVE_SUMMARY_JOB_STATUSES:
-        raise Conflict("A summary job is already in progress for this search run")
+        raise FileExistsError(
+            "A summary job is already in progress for this search run"
+        )
 
     summary_job = create_job(
         db,

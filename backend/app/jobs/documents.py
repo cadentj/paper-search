@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pymupdf
 
-from app.core.config import settings
+from app.config import settings
 from app.db.session import database
 from app.llm.client import call_llm
 from app.llm.config import SUMMARY_PROFILE

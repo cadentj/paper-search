@@ -1,7 +1,6 @@
 import pytest
 
 from app.models.job import SQLAJob
-from app.services.errors import EnqueueFailed, ValidationFailed
 from app.services.job_enqueue import enqueue_job, persist_then_enqueue
 from app.services.jobs import create_job
 from app.services import search_runs
@@ -36,7 +35,7 @@ def test_enqueue_job_failure_marks_failed(db_session):
     )
     db_session.commit()
 
-    with pytest.raises(EnqueueFailed):
+    with pytest.raises(ConnectionError):
         enqueue_job(
             db_session,
             job=job,
@@ -50,7 +49,7 @@ def test_start_daily_search_validation(db_session, monkeypatch):
     monkeypatch.setattr(
         "app.services.search_runs.enabled_source_types", lambda db: set()
     )
-    with pytest.raises(ValidationFailed, match="No data sources are enabled"):
+    with pytest.raises(ValueError, match="No data sources are enabled"):
         search_runs.start_daily_search(db_session)
 
 

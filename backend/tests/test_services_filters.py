@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 import pytest
 
 from app.models.filter import SQLAFilter
-from app.services.errors import ValidationFailed
 from app.services import filters as filter_service
 
 
@@ -60,5 +59,5 @@ def test_accept_proposal_invalid(db_session):
     filt = _proposal_filter(db_session, action="create")
     filt.proposed_action = None
     db_session.flush()
-    with pytest.raises(ValidationFailed):
+    with pytest.raises(ValueError):
         filter_service.accept_proposal(db_session, filt.id)

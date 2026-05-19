@@ -1,15 +1,13 @@
 from fastapi import HTTPException
 
-from app.services.errors import Conflict, EnqueueFailed, NotFound, ValidationFailed
-
 
 def raise_http_from_service(exc: Exception) -> None:
-    if isinstance(exc, NotFound):
+    if isinstance(exc, LookupError):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if isinstance(exc, ValidationFailed):
+    if isinstance(exc, ValueError):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if isinstance(exc, Conflict):
+    if isinstance(exc, FileExistsError):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    if isinstance(exc, EnqueueFailed):
+    if isinstance(exc, ConnectionError):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     raise exc

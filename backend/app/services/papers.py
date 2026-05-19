@@ -13,7 +13,6 @@ from app.models.idea_map import SQLAIdeaMap
 from paper_search_core.models.paper import SQLAPaper
 from app.models.paper_note import SQLAPaperNote
 from app.models.job import SQLAJob
-from app.services.errors import NotFound
 from app.services.job_enqueue import commit_entities, enqueue_job
 from app.services.jobs import create_job, latest_job_for_subject, set_job_status
 
@@ -30,7 +29,7 @@ IN_FLIGHT_IDEA_MAP_STATUSES = {
 def get_paper(db: Session, paper_id: str) -> SQLAPaper:
     paper = db.query(SQLAPaper).filter(SQLAPaper.id == paper_id).first()
     if not paper:
-        raise NotFound("Paper not found")
+        raise LookupError("Paper not found")
     return paper
 
 
@@ -51,7 +50,7 @@ def list_papers_for_date(
 def get_idea_map_for_paper(db: Session, paper_id: str) -> SQLAIdeaMap:
     idea_map = db.query(SQLAIdeaMap).filter(SQLAIdeaMap.paper_id == paper_id).first()
     if not idea_map:
-        raise NotFound("Idea map not found")
+        raise LookupError("Idea map not found")
     return idea_map
 
 

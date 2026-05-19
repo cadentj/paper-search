@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 from sqlalchemy.orm import Session
 
 from app.models.filter import SQLAFilter
-from app.services.errors import NotFound, ValidationFailed
 
 if TYPE_CHECKING:
     from app.api.filters import FilterCreate, FilterUpdate
@@ -27,7 +26,7 @@ def list_active_filters(db: Session) -> list[SQLAFilter]:
 def get_filter(db: Session, filter_id: str) -> SQLAFilter:
     filt = db.query(SQLAFilter).filter(SQLAFilter.id == filter_id).first()
     if not filt:
-        raise NotFound("Filter not found")
+        raise LookupError("Filter not found")
     return filt
 
 
@@ -112,7 +111,7 @@ def accept_proposal(db: Session, filter_id: str) -> SQLAFilter:
         filt.archived_at = now
         filt.updated_at = now
     else:
-        raise ValidationFailed("Not a pending proposal")
+        raise ValueError("Not a pending proposal")
 
     db.flush()
     db.refresh(filt)
@@ -122,7 +121,7 @@ def accept_proposal(db: Session, filter_id: str) -> SQLAFilter:
 def reject_proposal(db: Session, filter_id: str) -> SQLAFilter:
     filt = get_filter(db, filter_id)
     if not filt.proposed_action:
-        raise ValidationFailed("Not a pending proposal")
+        raise ValueError("Not a pending proposal")
     now = datetime.now(timezone.utc)
     filt.status = "archived"
     filt.archived_at = now

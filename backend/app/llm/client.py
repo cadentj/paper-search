@@ -13,7 +13,7 @@ from openai import (
     OpenAI,
 )
 from pydantic import BaseModel
-from app.core.config import LLM_MAX_RETRIES, LLM_RETRY_BASE_SECONDS, settings
+from app.config import LLM_MAX_RETRIES, LLM_RETRY_BASE_SECONDS, settings
 from app.llm.config import JUDGE_PROFILE, LLMModelConfig, get_llm_config
 
 

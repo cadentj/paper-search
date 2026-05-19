@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from app.core.config import LLM_MAX_CONCURRENCY
+from app.config import LLM_MAX_CONCURRENCY
 from app.db.session import database
 from paper_search_core.models.paper import SQLAPaper
 from app.models.paper_match import SQLAPaperMatch

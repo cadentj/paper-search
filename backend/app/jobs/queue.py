@@ -3,7 +3,7 @@
 from redis import Redis
 from rq import Queue
 
-from app.core.config import settings
+from app.config import settings
 
 
 def get_redis_connection() -> Redis:

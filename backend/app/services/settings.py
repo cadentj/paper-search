@@ -7,7 +7,6 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models.app_setting import SQLAAppSetting
-from app.services.errors import NotFound
 
 DAILY_SCHEDULE_KEY = "daily_search_schedule"
 DATA_SOURCES_KEY = "data_sources"
@@ -127,7 +126,7 @@ def update_data_source(
     settings: dict | None = None,
 ) -> dict[str, Any]:
     if source_type not in SOURCE_CATALOG:
-        raise NotFound("Data source not found")
+        raise LookupError("Data source not found")
 
     stored = _get_stored_data_sources(db)
     row = stored[source_type]

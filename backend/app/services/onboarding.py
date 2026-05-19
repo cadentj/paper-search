@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
+from app.config import settings
 from app.jobs.onboarding import (
     extract_onboarding_filters,
     generate_onboarding_draft_filters,
@@ -16,7 +16,6 @@ from app.jobs.scholar_import import run_scholar_import
 from app.models.filter import SQLAFilter
 from app.models.onboarding_extraction import SQLAOnboardingExtraction
 from app.models.research_profile_import import SQLAResearchProfileImport
-from app.services.errors import EnqueueFailed, NotFound, ValidationFailed
 from app.services.job_enqueue import commit_entities, enqueue_job, persist_then_enqueue
 from app.services.jobs import create_job, latest_job_for_subject, set_job_status
 
@@ -32,11 +31,11 @@ def onboarding_status(db: Session) -> tuple[bool, int]:
 def start_generation(db: Session, body: OnboardingGenerationCreate) -> str:
     input_text = body.input_text.strip()
     if len(input_text) > settings.ONBOARDING_INPUT_MAX_CHARS:
-        raise ValidationFailed(
+        raise ValueError(
             f"Input text must be {settings.ONBOARDING_INPUT_MAX_CHARS} characters or fewer"
         )
     if not input_text and not body.document_ids:
-        raise ValidationFailed("Add text or at least one document")
+        raise ValueError("Add text or at least one document")
 
     job_record = create_job(
         db,
@@ -106,8 +105,8 @@ def start_extraction(db: Session, *, input_text: str) -> str:
             on_failure=on_failure,
             log_context=f"onboarding extraction={extraction.id}",
         )
-    except EnqueueFailed as exc:
-        raise EnqueueFailed(extraction.error or str(exc)) from exc
+    except ConnectionError as exc:
+        raise ConnectionError(extraction.error or str(exc)) from exc
     return job_record.id
 
 
@@ -118,7 +117,7 @@ def get_extraction(db: Session, extraction_id: str) -> SQLAOnboardingExtraction:
         .first()
     )
     if not extraction:
-        raise NotFound("Extraction not found")
+        raise LookupError("Extraction not found")
     return extraction
 
 
@@ -142,11 +141,11 @@ def promote_draft_filters(db: Session, filter_ids: list[str]) -> list[SQLAFilter
     ordered = [by_id[fid] for fid in filter_ids if fid in by_id]
     missing = [fid for fid in filter_ids if fid not in by_id]
     if missing:
-        raise NotFound(f"Draft filter not found: {missing[0]}")
+        raise LookupError(f"Draft filter not found: {missing[0]}")
 
     for filt in ordered:
         if filt.status != "draft":
-            raise ValidationFailed(f"Filter is not a draft: {filt.id}")
+            raise ValueError(f"Filter is not a draft: {filt.id}")
         filt.status = "active"
         filt.updated_at = now
 
@@ -238,5 +237,5 @@ def get_import(db: Session, import_id: str) -> SQLAResearchProfileImport:
         .first()
     )
     if not profile_import:
-        raise NotFound("Import not found")
+        raise LookupError("Import not found")
     return profile_import

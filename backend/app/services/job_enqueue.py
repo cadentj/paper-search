@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.models.job import SQLAJob
-from app.services.errors import EnqueueFailed
 from app.services.jobs import set_job_status
 
 logger = logging.getLogger(__name__)
@@ -45,7 +44,7 @@ def enqueue_job(
         else:
             set_job_status(job, status="failed", error=error)
         db.commit()
-        raise EnqueueFailed(error) from exc
+        raise ConnectionError(error) from exc
 
 
 def persist_then_enqueue(

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.http_errors import raise_http_from_service
 from app.api.jobs import JobStart
-from app.core.config import settings
+from app.config import settings
 from app.db.session import get_db
 from app.models.filter import Filter
 from app.models.onboarding_extraction import OnboardingExtraction

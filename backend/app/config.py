@@ -4,7 +4,7 @@ from pydantic import ValidationInfo, field_validator
 from pydantic_settings import BaseSettings
 
 
-BACKEND_DIR = Path(__file__).resolve().parents[2]
+BACKEND_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_DIR.parent
 LLM_MAX_CONCURRENCY = 50
 LLM_MAX_RETRIES = 3

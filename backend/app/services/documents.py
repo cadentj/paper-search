@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 from app.jobs.queues import enqueue_for_job
 from app.models.document import SQLADocument
 from app.models.job import SQLAJob
-from app.services.errors import NotFound
 from app.services.job_enqueue import persist_then_enqueue
 from app.services.jobs import (
     create_job,
@@ -21,7 +20,7 @@ from app.services.jobs import (
 def get_document(db: Session, document_id: str) -> SQLADocument:
     document = db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
     if not document:
-        raise NotFound("Document not found")
+        raise LookupError("Document not found")
     return document
 
 

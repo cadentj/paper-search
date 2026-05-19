@@ -5,7 +5,7 @@ from typing import Iterator
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.config import settings
+from app.config import settings
 
 
 def _get_db_path(url: str) -> str:

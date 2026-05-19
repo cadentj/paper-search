@@ -143,7 +143,6 @@ pnpm test
 ├── backend/
 │   ├── app/
 │   │   ├── api/          # FastAPI route handlers
-│   │   ├── core/         # Configuration
 │   │   ├── db/           # Database session & init
 │   │   ├── jobs/         # RQ worker jobs
 │   │   ├── llm/          # OpenRouter client & prompts
