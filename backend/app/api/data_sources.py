@@ -1,12 +1,10 @@
-from datetime import datetime, timezone
-
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.api.http_errors import raise_http_from_service
 from app.db.session import get_db
-from app.models.data_source import DataSource
 from app.schemas.data_sources import DataSourceResponse, UpdateDataSourceRequest
-from app.services.source_settings import ensure_default_data_sources, list_data_sources
+from app.services.source_settings import ensure_default_data_sources, list_data_sources, update_data_source
 
 router = APIRouter(prefix="/data-sources", tags=["data-sources"])
 
@@ -18,21 +16,18 @@ def get_data_sources(db: Session = Depends(get_db)):
 
 
 @router.patch("/{source_type}", response_model=DataSourceResponse)
-def update_data_source(
+def update_data_source_route(
     source_type: str,
     request: UpdateDataSourceRequest,
     db: Session = Depends(get_db),
 ):
-    ensure_default_data_sources(db)
-    source = db.query(DataSource).filter(DataSource.source_type == source_type).first()
-    if not source:
-        raise HTTPException(status_code=404, detail="Data source not found")
-
-    if request.enabled is not None:
-        source.enabled = request.enabled
-    if request.settings is not None:
-        source.settings = {**(source.settings or {}), **request.settings}
-    source.updated_at = datetime.now(timezone.utc)
-    db.flush()
-    db.refresh(source)
+    try:
+        source = update_data_source(
+            db,
+            source_type,
+            enabled=request.enabled,
+            settings=request.settings,
+        )
+    except Exception as exc:
+        raise_http_from_service(exc)
     return source.to_pydantic()

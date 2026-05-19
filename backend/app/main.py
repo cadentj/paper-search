@@ -17,7 +17,7 @@ from app.api.scholar import router as scholar_router
 from app.models import Base
 from app.db.session import database, engine
 from app.models.paper import Paper
-from app.services.daily_dates import DEFAULT_DAILY_SEARCH_DATE
+from paper_search_core.daily_dates import DEFAULT_DAILY_SEARCH_DATE
 
 logger = logging.getLogger(__name__)
 

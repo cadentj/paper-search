@@ -12,7 +12,8 @@ from app.db.session import database
 from app.models.job import Job
 from app.models.paper import Paper
 from app.models.idea_map import IdeaMap
-from app.services.jobs import get_or_create_job_for_subject, job_progress, set_job_status
+from app.services import papers as papers_service
+from app.services.jobs import job_progress, set_job_status
 from app.core.config import LLM_MAX_CONCURRENCY
 from app.services.html_parser import (
     MAX_PROMPT_BLOCKS,
@@ -41,19 +42,6 @@ from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 
-def _resolve_idea_map_job(db, idea_map_id: str, job_id: str | None) -> Job:
-    if job_id:
-        job = db.query(Job).filter(Job.id == job_id).first()
-        if job:
-            return job
-    return get_or_create_job_for_subject(
-        db,
-        kind="idea_map",
-        subject_type="idea_map",
-        subject_id=idea_map_id,
-    )
-
-
 def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
     """Worker job: generate idea map from arXiv HTML."""
     with database.session() as db:
@@ -62,19 +50,17 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
             if not idea_map:
                 return
 
-            job = _resolve_idea_map_job(db, idea_map_id, job_id)
-            idea_map.status = "running"
-            idea_map.updated_at = datetime.now(timezone.utc)
-            set_job_status(job, status="running")
-            db.commit()
+            job = papers_service.resolve_idea_map_job(db, idea_map_id, job_id)
+            papers_service.mark_idea_map_running(db, idea_map, job)
 
             paper = db.query(Paper).filter(Paper.id == idea_map.paper_id).first()
             if not paper or paper.source_type != "arxiv" or not paper.source_id:
-                idea_map.status = "skipped"
-                idea_map.dropped_reason = "Paper not found or not an arXiv paper with source_id"
-                idea_map.updated_at = datetime.now(timezone.utc)
-                set_job_status(job, status="skipped")
-                db.commit()
+                papers_service.mark_idea_map_skipped(
+                    db,
+                    idea_map,
+                    job,
+                    "Paper not found or not an arXiv paper with source_id",
+                )
                 return
 
             html_url = paper.html_url or paper.source_url
@@ -344,12 +330,8 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
             db.rollback()
             idea_map = db.query(IdeaMap).filter(IdeaMap.id == idea_map_id).first()
             if idea_map:
-                idea_map.status = "failed"
-                idea_map.error = str(e)
-                idea_map.updated_at = datetime.now(timezone.utc)
-                job = _resolve_idea_map_job(db, idea_map_id, job_id)
-                set_job_status(job, status="failed", error=idea_map.error)
-                db.commit()
+                job = papers_service.resolve_idea_map_job(db, idea_map_id, job_id)
+                papers_service.fail_idea_map(db, idea_map, job, str(e))
             raise
 
 

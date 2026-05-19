@@ -1,18 +1,13 @@
-import uuid
-from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from typing import Optional
 
+from app.api.http_errors import raise_http_from_service
 from app.db.session import get_db
-from app.models.research_profile_import import ResearchProfileImport
-from app.schemas.jobs import JobStartResponse
-from app.services.jobs import create_job
 from app.services.semantic_scholar import extract_author_id, get_author
-from app.jobs.queue import get_queue
-from app.jobs.scholar_import import run_scholar_import
+from app.services import scholar as scholar_service
 
 router = APIRouter(prefix="/onboarding/scholar", tags=["scholar"])
 
@@ -51,7 +46,10 @@ class ImportStatusResponse(BaseModel):
 def verify_profile(body: VerifyRequest):
     author_id = extract_author_id(body.url)
     if not author_id:
-        raise HTTPException(status_code=400, detail="Could not parse Semantic Scholar author ID from URL")
+        raise HTTPException(
+            status_code=400,
+            detail="Could not parse Semantic Scholar author ID from URL",
+        )
 
     author = get_author(author_id)
     if not author:
@@ -68,49 +66,24 @@ def verify_profile(body: VerifyRequest):
 
 @router.post("/imports", response_model=ImportResponse)
 def start_import(body: ImportRequest, db: Session = Depends(get_db)):
-    now = datetime.now(timezone.utc)
-    profile_import = ResearchProfileImport(
-        id=str(uuid.uuid4()),
-        status="pending",
-        source_type="semantic_scholar",
-        source_url=body.url,
-        external_author_id=body.author_id,
-        display_name=body.display_name,
-        created_at=now,
-        updated_at=now,
-    )
-    db.add(profile_import)
-
-    job_record = create_job(
-        db,
-        kind="scholar_import",
-        subject_type="research_profile_import",
-        subject_id=profile_import.id,
-    )
-    db.commit()
-
     try:
-        q = get_queue()
-        q.enqueue(run_scholar_import, profile_import.id, job_record.id)
+        import_id, job_id = scholar_service.start_profile_import(
+            db,
+            url=body.url,
+            author_id=body.author_id,
+            display_name=body.display_name,
+        )
     except Exception as exc:
-        profile_import.status = "failed"
-        profile_import.error = str(exc)
-        job_record.status = "failed"
-        job_record.error = str(exc)
-        job_record.completed_at = datetime.now(timezone.utc)
-        db.commit()
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    return ImportResponse(id=profile_import.id, job_id=job_record.id)
+        raise_http_from_service(exc)
+    return ImportResponse(id=import_id, job_id=job_id)
 
 
 @router.get("/imports/{import_id}", response_model=ImportStatusResponse)
 def get_import_status(import_id: str, db: Session = Depends(get_db)):
-    profile_import = db.query(ResearchProfileImport).filter(
-        ResearchProfileImport.id == import_id
-    ).first()
-    if not profile_import:
-        raise HTTPException(status_code=404, detail="Import not found")
+    try:
+        profile_import = scholar_service.get_import(db, import_id)
+    except Exception as exc:
+        raise_http_from_service(exc)
     return ImportStatusResponse(
         id=profile_import.id,
         status=profile_import.status,

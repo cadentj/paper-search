@@ -1,18 +1,15 @@
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pymupdf
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from app.api.http_errors import raise_http_from_service
 from app.core.config import BACKEND_DIR, settings
 from app.db.session import get_db
-from app.jobs.documents import process_document
-from app.jobs.queue import get_queue
-from app.models.document import Document
 from app.schemas.documents import DocumentResponse, DocumentUploadResponse
-from app.services.jobs import create_job, job_progress, latest_job_for_subject
+from app.services import documents as documents_service
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -58,64 +55,29 @@ async def upload_document(
     storage_path = _documents_dir() / f"{document_id}.pdf"
     storage_path.write_bytes(content)
 
-    now = datetime.now(timezone.utc)
-    document = Document(
-        id=document_id,
-        original_filename=file.filename or "document.pdf",
-        content_type=file.content_type or "application/pdf",
-        size_bytes=len(content),
-        page_count=page_count,
-        storage_path=str(storage_path),
-        status="queued",
-        created_at=now,
-        updated_at=now,
-    )
-    db.add(document)
-    job_record = create_job(
-        db,
-        kind="document_processing",
-        subject_type="document",
-        subject_id=document.id,
-        status="queued",
-        progress=job_progress(total=2),
-    )
-    db.commit()
-    db.refresh(document)
-    db.refresh(job_record)
-
     try:
-        job = get_queue().enqueue(process_document, document.id, job_record.id)
-        job_record.queue_job_id = getattr(job, "id", None)
-        db.commit()
+        document, job_id = documents_service.start_document_processing(
+            db,
+            document_id=document_id,
+            original_filename=file.filename or "document.pdf",
+            content_type=file.content_type or "application/pdf",
+            size_bytes=len(content),
+            page_count=page_count,
+            storage_path=str(storage_path),
+        )
     except Exception as exc:
-        document.status = "failed"
-        document.error = f"Could not enqueue document processing: {exc}"
-        document.updated_at = datetime.now(timezone.utc)
-        job_record.status = "failed"
-        job_record.error = document.error
-        job_record.completed_at = document.updated_at
-        db.commit()
-        raise HTTPException(status_code=503, detail=document.error) from exc
+        raise_http_from_service(exc)
 
     return DocumentUploadResponse(
         **document.to_pydantic().model_dump(),
-        job_id=job_record.id,
+        job_id=job_id,
     )
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)
 def get_document(document_id: str, db: Session = Depends(get_db)):
-    document = db.query(Document).filter(Document.id == document_id).first()
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
-    return _document_payload(document, db)
-
-
-def _document_payload(document: Document, db: Session) -> DocumentResponse:
-    job = latest_job_for_subject(
-        db,
-        subject_type="document",
-        subject_id=document.id,
-        kind="document_processing",
-    )
-    return document.to_pydantic(job_id=job.id if job else None)
+    try:
+        document = documents_service.get_document(db, document_id)
+    except Exception as exc:
+        raise_http_from_service(exc)
+    return documents_service.document_payload(db, document)

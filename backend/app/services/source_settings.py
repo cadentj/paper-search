@@ -55,3 +55,27 @@ def enabled_source_types(db: Session) -> set[str]:
         for source in ensure_default_data_sources(db)
         if source.enabled
     }
+
+
+def update_data_source(
+    db: Session,
+    source_type: str,
+    *,
+    enabled: bool | None = None,
+    settings: dict | None = None,
+) -> DataSource:
+    from app.services.errors import NotFound
+
+    ensure_default_data_sources(db)
+    source = db.query(DataSource).filter(DataSource.source_type == source_type).first()
+    if not source:
+        raise NotFound("Data source not found")
+
+    if enabled is not None:
+        source.enabled = enabled
+    if settings is not None:
+        source.settings = {**(source.settings or {}), **settings}
+    source.updated_at = datetime.now(timezone.utc)
+    db.flush()
+    db.refresh(source)
+    return source

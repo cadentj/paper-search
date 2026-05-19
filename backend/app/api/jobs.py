@@ -1,20 +1,8 @@
-import base64
-import json
-from datetime import datetime
-
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import and_, or_
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.api.http_errors import raise_http_from_service
 from app.db.session import get_db
-from app.models.document import Document
-from app.models.filter import Filter
-from app.models.idea_map import IdeaMap
-from app.models.job import Job
-from app.models.onboarding_extraction import OnboardingExtraction
-from app.models.paper import Paper
-from app.models.paper_match import PaperMatch
-from app.models.search_run import SearchRun
 from app.schemas.jobs import (
     DailySearchJobResponse,
     DailySearchSummaryJobResponse,
@@ -24,138 +12,19 @@ from app.schemas.jobs import (
     OnboardingExtractionJobResponse,
     OnboardingGenerationJobResponse,
 )
-from app.api.search import _search_run_payload, _summary_payload
-from app.schemas.search import PaperMatchResponse
-from app.services.jobs import latest_job_for_subject
+from app.services import job_views
+from app.services.search_runs import search_run_payload, summary_payload
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
-DONE_STATUSES = {"completed", "failed", "skipped"}
 
 
 @router.get("/{job_id}", response_model=JobResponse)
 def get_job(job_id: str, db: Session = Depends(get_db)):
-    job = db.query(Job).filter(Job.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return job.to_pydantic()
-
-
-def _get_job(db: Session, job_id: str, kind: str) -> Job:
-    job = db.query(Job).filter(Job.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if job.kind != kind:
-        raise HTTPException(status_code=400, detail=f"Job is not a {kind} job")
-    return job
-
-
-def _is_done(job: Job) -> bool:
-    return job.status in DONE_STATUSES
-
-
-def _serialize_job(job: Job) -> JobResponse:
-    return job.to_pydantic()
-
-
-def _with_progress(job: Job, **fields) -> JobResponse:
-    response = job.to_pydantic()
-    progress = dict(response.progress or {})
-    progress.update(fields)
-    response.progress = progress
-    return response
-
-
-def _serialize_daily_search_job(db: Session, job: Job, run: SearchRun) -> JobResponse:
-    stored = dict((job.progress or {}))
-    match_count = db.query(PaperMatch).filter(PaperMatch.search_run_id == run.id).count()
-    return _with_progress(
-        job,
-        current=match_count,
-        total=stored.get("total", max(match_count, 1)),
-    )
-
-
-def _draft_filters_for_generation(db: Session, job_id: str) -> list[Filter]:
-    return [
-        filt
-        for filt in db.query(Filter)
-        .filter(Filter.status == "draft")
-        .order_by(Filter.created_at.asc(), Filter.id.asc())
-        .all()
-        if (filt.definition or {}).get("onboarding_generation_job_id") == job_id
-    ]
-
-
-def _serialize_onboarding_generation_job(db: Session, job: Job) -> JobResponse:
-    count = len(_draft_filters_for_generation(db, job.id))
-    return _with_progress(job, current=count, total=max(count, 1))
-
-
-def _serialize_onboarding_extraction_job(
-    db: Session,
-    job: Job,
-    extraction: OnboardingExtraction,
-) -> JobResponse:
-    count = len(extraction.proposed_filters or [])
-    return _with_progress(job, current=count, total=max(count, 1))
-
-
-def _serialize_idea_map_job(db: Session, job: Job, idea_map: IdeaMap) -> JobResponse:
-    claims = list(idea_map.claims or [])
-    claim_count = len(claims)
-    stored_total = (job.progress or {}).get("total")
-    if idea_map.status == "warrants_running" and stored_total:
-        return _with_progress(job, current=claim_count, total=int(stored_total))
-    return _with_progress(job, current=claim_count, total=max(claim_count, 1))
-
-
-def _serialize_document_job(job: Job, document: Document) -> JobResponse:
-    if document.status in {"ready", "needs_ocr", "failed"}:
-        current, total = 2, 2
-    elif document.status == "processing":
-        current, total = 1, 2
-    else:
-        current, total = 0, 2
-    return _with_progress(job, current=current, total=total)
-
-
-def _encode_cursor(value: datetime, item_id: str) -> str:
-    payload = {"at": value.isoformat(), "id": item_id}
-    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    return base64.urlsafe_b64encode(raw).decode("ascii")
-
-
-def _decode_cursor(cursor: str | None) -> tuple[datetime, str] | None:
-    if not cursor:
-        return None
     try:
-        raw = base64.urlsafe_b64decode(cursor.encode("ascii"))
-        payload = json.loads(raw.decode("utf-8"))
-        value = datetime.fromisoformat(payload["at"])
-        if value.tzinfo is not None:
-            value = value.replace(tzinfo=None)
-        return value, str(payload["id"])
+        job = job_views.get_job(db, job_id)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail="Invalid cursor") from exc
-
-
-def _apply_cursor(items: list, cursor: str | None):
-    decoded = _decode_cursor(cursor)
-    if not decoded:
-        return items
-    value, item_id = decoded
-    return [
-        item
-        for item in items
-        if item.created_at > value
-        or (item.created_at == value and item.id > item_id)
-    ]
-
-
-def _paper_match_response(db: Session, match: PaperMatch) -> PaperMatchResponse:
-    paper = db.query(Paper).filter(Paper.id == match.paper_id).first()
-    filt = db.query(Filter).filter(Filter.id == match.filter_id).first()
-    return match.to_pydantic(paper=paper, filt=filt)
+        raise_http_from_service(exc)
+    return job.to_pydantic()
 
 
 @router.get("/daily-search/{job_id}", response_model=DailySearchJobResponse)
@@ -164,30 +33,24 @@ def get_daily_search_job(
     cursor: str | None = None,
     db: Session = Depends(get_db),
 ):
-    job = _get_job(db, job_id, "daily_search")
-    run = db.query(SearchRun).filter(SearchRun.id == job.subject_id).first()
-    if not run:
-        raise HTTPException(status_code=404, detail="Search run not found")
-
-    all_matches = (
-        db.query(PaperMatch)
-        .filter(PaperMatch.search_run_id == run.id)
-        .order_by(PaperMatch.created_at.asc(), PaperMatch.id.asc())
-        .all()
-    )
-    matches = _apply_cursor(all_matches, cursor)
-    next_cursor = cursor
-    if matches:
-        latest = matches[-1]
-        next_cursor = _encode_cursor(latest.created_at, latest.id)
-
-    return DailySearchJobResponse(
-        job=_serialize_daily_search_job(db, job, run),
-        subject=run.to_pydantic(job_id=job.id),
-        items=[_paper_match_response(db, match) for match in matches],
-        next_cursor=next_cursor,
-        done=_is_done(job),
-    )
+    try:
+        job = job_views.get_job_of_kind(db, job_id, "daily_search")
+        run = job_views.get_search_run_for_job(db, job)
+        all_matches = job_views.list_matches_for_run_ordered(db, run.id)
+        matches = job_views.apply_cursor(all_matches, cursor)
+        next_cursor = cursor
+        if matches:
+            latest = matches[-1]
+            next_cursor = job_views.encode_cursor(latest.created_at, latest.id)
+        return DailySearchJobResponse(
+            job=job_views.serialize_daily_search_job(db, job, run),
+            subject=run.to_pydantic(job_id=job.id),
+            items=[job_views.paper_match_response(db, match) for match in matches],
+            next_cursor=next_cursor,
+            done=job_views.is_done(job),
+        )
+    except Exception as exc:
+        raise_http_from_service(exc)
 
 
 @router.get(
@@ -195,31 +58,32 @@ def get_daily_search_job(
     response_model=DailySearchSummaryJobResponse,
 )
 def get_daily_search_summary_job(job_id: str, db: Session = Depends(get_db)):
-    job = _get_job(db, job_id, "daily_search_summary")
-    run = db.query(SearchRun).filter(SearchRun.id == job.subject_id).first()
-    if not run:
-        raise HTTPException(status_code=404, detail="Search run not found")
-
+    try:
+        job = job_views.get_job_of_kind(db, job_id, "daily_search_summary")
+        run = job_views.get_search_run_for_job(db, job)
+    except Exception as exc:
+        raise_http_from_service(exc)
     return DailySearchSummaryJobResponse(
         job=job.to_pydantic(),
-        run=_search_run_payload(run, db),
-        summary=_summary_payload(run),
-        done=_is_done(job),
+        run=search_run_payload(db, run),
+        summary=summary_payload(run),
+        done=job_views.is_done(job),
     )
 
 
 @router.get("/idea-map/{job_id}", response_model=IdeaMapJobResponse)
 def get_idea_map_job(job_id: str, db: Session = Depends(get_db)):
-    job = _get_job(db, job_id, "idea_map")
-    idea_map = db.query(IdeaMap).filter(IdeaMap.id == job.subject_id).first()
-    if not idea_map:
-        raise HTTPException(status_code=404, detail="Idea map not found")
+    try:
+        job = job_views.get_job_of_kind(db, job_id, "idea_map")
+        idea_map = job_views.get_idea_map_for_job(db, job)
+    except Exception as exc:
+        raise_http_from_service(exc)
     return IdeaMapJobResponse(
-        job=_serialize_idea_map_job(db, job, idea_map),
+        job=job_views.serialize_idea_map_job(db, job, idea_map),
         subject=idea_map.to_pydantic(job_id=job.id),
         items=[],
         next_cursor=None,
-        done=_is_done(job),
+        done=job_views.is_done(job),
     )
 
 
@@ -232,20 +96,23 @@ def get_onboarding_generation_job(
     cursor: str | None = None,
     db: Session = Depends(get_db),
 ):
-    job = _get_job(db, job_id, "onboarding_generation")
-    all_filters = _draft_filters_for_generation(db, job.id)
-    filters = _apply_cursor(all_filters, cursor)
-    next_cursor = cursor
-    if filters:
-        latest = filters[-1]
-        next_cursor = _encode_cursor(latest.created_at, latest.id)
-    return OnboardingGenerationJobResponse(
-        job=_serialize_onboarding_generation_job(db, job),
-        subject=_serialize_job(job),
-        items=[item.to_pydantic() for item in filters],
-        next_cursor=next_cursor,
-        done=_is_done(job),
-    )
+    try:
+        job = job_views.get_job_of_kind(db, job_id, "onboarding_generation")
+        all_filters = job_views.draft_filters_for_generation(db, job.id)
+        filters = job_views.apply_cursor(all_filters, cursor)
+        next_cursor = cursor
+        if filters:
+            latest = filters[-1]
+            next_cursor = job_views.encode_cursor(latest.created_at, latest.id)
+        return OnboardingGenerationJobResponse(
+            job=job_views.serialize_onboarding_generation_job(db, job),
+            subject=job.to_pydantic(),
+            items=[item.to_pydantic() for item in filters],
+            next_cursor=next_cursor,
+            done=job_views.is_done(job),
+        )
+    except Exception as exc:
+        raise_http_from_service(exc)
 
 
 @router.get(
@@ -253,18 +120,17 @@ def get_onboarding_generation_job(
     response_model=OnboardingExtractionJobResponse,
 )
 def get_onboarding_extraction_job(job_id: str, db: Session = Depends(get_db)):
-    job = _get_job(db, job_id, "onboarding_extraction")
-    extraction = db.query(OnboardingExtraction).filter(
-        OnboardingExtraction.id == job.subject_id
-    ).first()
-    if not extraction:
-        raise HTTPException(status_code=404, detail="Extraction not found")
+    try:
+        job = job_views.get_job_of_kind(db, job_id, "onboarding_extraction")
+        extraction = job_views.get_extraction_for_job(db, job)
+    except Exception as exc:
+        raise_http_from_service(exc)
     return OnboardingExtractionJobResponse(
-        job=_serialize_onboarding_extraction_job(db, job, extraction),
+        job=job_views.serialize_onboarding_extraction_job(db, job, extraction),
         subject=extraction.to_pydantic(job_id=job.id),
         items=[],
         next_cursor=None,
-        done=_is_done(job),
+        done=job_views.is_done(job),
     )
 
 
@@ -273,14 +139,15 @@ def get_onboarding_extraction_job(job_id: str, db: Session = Depends(get_db)):
     response_model=DocumentProcessingJobResponse,
 )
 def get_document_processing_job(job_id: str, db: Session = Depends(get_db)):
-    job = _get_job(db, job_id, "document_processing")
-    document = db.query(Document).filter(Document.id == job.subject_id).first()
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
+    try:
+        job = job_views.get_job_of_kind(db, job_id, "document_processing")
+        document = job_views.get_document_for_job(db, job)
+    except Exception as exc:
+        raise_http_from_service(exc)
     return DocumentProcessingJobResponse(
-        job=_serialize_document_job(job, document),
+        job=job_views.serialize_document_job(job, document),
         subject=document.to_pydantic(job_id=job.id),
         items=[],
         next_cursor=None,
-        done=_is_done(job),
+        done=job_views.is_done(job),
     )

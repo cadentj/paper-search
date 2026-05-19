@@ -13,7 +13,7 @@ from app.llm.prompts import DOCUMENT_SUMMARY_SYSTEM_PROMPT, DOCUMENT_SUMMARY_USE
 from app.llm.schemas import DocumentSummaryResponse
 from app.models.document import Document
 from app.models.job import Job
-from app.services.jobs import set_job_status
+from app.services import documents as documents_service
 
 
 def _now():
@@ -36,10 +36,7 @@ def process_document(document_id: str, job_id: str) -> None:
             if not document or not job:
                 return
 
-            document.status = "processing"
-            document.updated_at = _now()
-            set_job_status(job, status="running")
-            db.commit()
+            documents_service.mark_document_processing(db, document, job)
 
             pdf_path = Path(document.storage_path)
             text = _extract_text(pdf_path)
@@ -54,13 +51,12 @@ def process_document(document_id: str, job_id: str) -> None:
             document.updated_at = _now()
 
             if len(text) < settings.DOCUMENT_MIN_TEXT_CHARS:
-                document.status = "needs_ocr"
-                document.error = "No usable embedded PDF text found."
-                set_job_status(job, status="completed")
-                db.commit()
+                documents_service.complete_document_needs_ocr(
+                    db, document, job, "No usable embedded PDF text found."
+                )
                 return
 
-            db.commit()
+            documents_service.commit_document_progress(db)
 
             summary_input = text[: settings.DOCUMENT_SUMMARY_MAX_CHARS]
             result = call_llm(
@@ -80,22 +76,10 @@ def process_document(document_id: str, job_id: str) -> None:
             job = db.query(Job).filter(Job.id == job_id).first()
             if not document or not job:
                 return
-            document.summary = summary
-            document.status = "ready"
-            document.error = None
-            document.updated_at = _now()
-            set_job_status(job, status="completed")
-            db.commit()
+            documents_service.complete_document(db, document, job, summary=summary)
         except Exception as exc:
             db.rollback()
             document = db.query(Document).filter(Document.id == document_id).first()
             job = db.query(Job).filter(Job.id == job_id).first()
-            now = _now()
-            if document:
-                document.status = "failed"
-                document.error = str(exc)
-                document.updated_at = now
-            if job:
-                set_job_status(job, status="failed", error=str(exc))
-            db.commit()
+            documents_service.fail_document(db, document, job, str(exc))
             raise

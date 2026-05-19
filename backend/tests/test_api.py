@@ -13,7 +13,7 @@ class NoopQueue:
 class TestOnboarding:
     @pytest.fixture(autouse=True)
     def _mock_queue(self, monkeypatch):
-        monkeypatch.setattr("app.api.onboarding.get_queue", lambda: NoopQueue())
+        monkeypatch.setattr("app.services.onboarding.get_queue", lambda: NoopQueue())
 
     def test_onboarding_extraction_and_completion_flow(self, client):
         resp = client.get("/onboarding/status")
@@ -69,7 +69,7 @@ class TestOnboarding:
         def broken_queue():
             raise RuntimeError("redis unavailable")
 
-        monkeypatch.setattr("app.api.onboarding.get_queue", broken_queue)
+        monkeypatch.setattr("app.services.onboarding.get_queue", broken_queue)
         resp = client.post(
             "/onboarding/extractions",
             json={"input_text": "I study mechanistic interpretability"},
@@ -129,7 +129,7 @@ class TestFilters:
 class TestSearchRuns:
     @pytest.fixture(autouse=True)
     def _mock_queue(self, monkeypatch):
-        monkeypatch.setattr("app.api.search.get_queue", lambda: NoopQueue())
+        monkeypatch.setattr("app.services.search_runs.get_queue", lambda: NoopQueue())
 
     def _setup_filters(self, client):
         client.post(
@@ -211,7 +211,7 @@ class TestSearchRuns:
         def broken_queue():
             raise RuntimeError("redis unavailable")
 
-        monkeypatch.setattr("app.api.search.get_queue", broken_queue)
+        monkeypatch.setattr("app.services.search_runs.get_queue", broken_queue)
         resp = client.post("/search-runs/daily")
         assert resp.status_code == 503
 
@@ -248,7 +248,7 @@ class TestPapers:
         def broken_queue():
             raise RuntimeError("redis unavailable")
 
-        monkeypatch.setattr("app.api.papers.get_queue", broken_queue)
+        monkeypatch.setattr("app.services.papers.get_queue", broken_queue)
         resp = client.post("/papers/paper-1/idea-map")
         assert resp.status_code == 503
 

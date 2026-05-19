@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import threading
-from typing import Any
 import httpx
-
-from paper_search_core.r2_urls import has_searchable_text, public_url_for_base
 
 
 _http_client: httpx.Client | None = None
@@ -25,6 +22,14 @@ def _shared_client() -> httpx.Client:
                 ),
             )
         return _http_client
+
+
+def has_searchable_text(record: dict, *, text_fields: tuple[str, ...]) -> bool:
+    for field in text_fields:
+        value = record.get(field)
+        if isinstance(value, str) and value.strip():
+            return True
+    return False
 
 
 def http_get_text(url: str) -> str | None:

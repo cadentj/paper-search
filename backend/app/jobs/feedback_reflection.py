@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from app.db.session import database
 from app.models.filter import Filter
+from app.services import filters as filter_service
 from app.models.job import Job
 from app.models.paper import Paper
 from app.models.paper_match import PaperMatch
@@ -50,7 +51,7 @@ def process_all_feedback(job_id: str) -> None:
                 return
 
             # Build context for the LLM
-            active_filters = db.query(Filter).filter(Filter.status == "active").all()
+            active_filters = filter_service.list_active_filters(db)
             filter_summaries = []
             for f in active_filters:
                 d = f.definition or {}

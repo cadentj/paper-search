@@ -6,12 +6,12 @@ from datetime import datetime, timezone
 
 from app.core.config import LLM_MAX_CONCURRENCY
 from app.db.session import database
-from app.models.filter import Filter
 from app.models.paper import Paper
 from app.models.paper_match import PaperMatch
 from app.models.search_run import SearchRun
 from app.models.job import Job
-from app.services.jobs import get_or_create_job_for_subject, job_progress, set_job_status
+from app.services import filters as filter_service
+from app.services import search_runs
 from app.services.source_providers import papers_for_sources
 from app.services.source_settings import enabled_source_types
 from app.llm.client import async_call_llm
@@ -32,30 +32,12 @@ PAIR_TIMEOUT_SECONDS = 30.0
 PAIRING_PHASE_TIMEOUT_SECONDS = 180.0
 
 
-def _resolve_daily_search_job(db, search_run_id: str, job_id: str | None) -> Job:
-    if job_id:
-        job = db.query(Job).filter(Job.id == job_id).first()
-        if job:
-            return job
-    return get_or_create_job_for_subject(
-        db,
-        kind="daily_search",
-        subject_type="search_run",
-        subject_id=search_run_id,
-    )
-
-
 def _candidate_counts_by_source(papers: list[Paper]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for paper in papers:
         source_type = paper.source_type or "arxiv"
         counts[source_type] = counts.get(source_type, 0) + 1
     return counts
-
-
-def _complete_daily_search_stage(db, run: SearchRun, job: Job) -> None:
-    set_job_status(job, status="completed")
-    db.commit()
 
 
 def _prompts_for_mode(mode: str):
@@ -221,27 +203,26 @@ def run_daily_search(search_run_id: str, job_id: str) -> None:
             return
 
         try:
-            run.status = "running"
-            run.started_at = datetime.now(timezone.utc)
-            set_job_status(job, status="running")
-            db.commit()
+            search_runs.mark_running(db, run, job)
 
             papers = papers_for_sources(db, enabled_source_types(db), run.run_date)
 
-            active_filters = db.query(Filter).filter(Filter.status == "active").all()
+            active_filters = filter_service.list_active_filters(db)
             filter_payloads = [f.to_search_payload() for f in active_filters]
             paper_payloads = [p.to_search_payload() for p in papers]
             pair_total = len(filter_payloads) * len(paper_payloads)
-            job.progress = job_progress(total=pair_total)
-            db.commit()
+            search_runs.set_pair_progress(db, job, total=pair_total)
 
-            run.candidate_count = len(papers)
-            run.candidate_counts = _candidate_counts_by_source(papers)
+            search_runs.update_candidate_counts(
+                db,
+                run,
+                candidate_count=len(papers),
+                candidate_counts=_candidate_counts_by_source(papers),
+            )
 
             if not filter_payloads or not paper_payloads:
-                run.match_count = 0
-                db.commit()
-                _complete_daily_search_stage(db, run, job)
+                search_runs.set_match_count(db, run, 0)
+                search_runs.complete_daily_search_job(db, job)
                 return
 
             completed_pairs = 0
@@ -275,7 +256,7 @@ def run_daily_search(search_run_id: str, job_id: str) -> None:
                                 llm_response_id=evaluation.response_id,
                             )
                         )
-                db.commit()
+                search_runs.commit_progress(db)
                 pair_progress.update(1)
 
             with tqdm(
@@ -298,23 +279,19 @@ def run_daily_search(search_run_id: str, job_id: str) -> None:
                     f"All {pair_total} filter-item evaluations failed. First error: {first_pair_error}"
                 )
 
-            run.match_count = (
+            match_count = (
                 db.query(PaperMatch)
                 .filter(PaperMatch.search_run_id == search_run_id)
                 .count()
             )
-            db.commit()
-            _complete_daily_search_stage(db, run, job)
+            search_runs.set_match_count(db, run, match_count)
+            search_runs.complete_daily_search_job(db, job)
 
         except Exception as e:
             db.rollback()
             run = db.query(SearchRun).filter(SearchRun.id == search_run_id).first()
             if run:
-                run.status = "failed"
-                run.error = str(e)
-                run.completed_at = datetime.now(timezone.utc)
-                job = _resolve_daily_search_job(db, search_run_id, job_id)
-                set_job_status(job, status="failed", error=str(e))
-                db.commit()
+                job = search_runs.resolve_daily_search_job(db, search_run_id, job_id)
+                search_runs.fail_run(db, run, job, str(e))
             logger.exception("daily_search run=%s failed", search_run_id)
             raise
