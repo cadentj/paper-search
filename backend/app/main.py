@@ -12,8 +12,6 @@ from app.api.search import router as search_router
 from app.api.papers import router as papers_router
 from app.api.feedback import router as feedback_router
 from app.api.settings import router as settings_router
-from app.api.jobs import DailySearchSummaryJob
-from app.api.search import DailySearchSummary
 from app.models import Base
 from app.db.session import database, engine
 from app.services.papers_fts import ensure_papers_fts, rebuild_papers_fts
@@ -33,14 +31,21 @@ class JobPollingAccessLogFilter(logging.Filter):
 
         method = str(args[1])
         path = str(args[2]).split("?", 1)[0]
-        return not (method in {"GET", "OPTIONS"} and path.startswith("/jobs/"))
+        if method not in {"GET", "OPTIONS"}:
+            return True
+        job_poll_prefixes = (
+            "/jobs/",
+            "/search-runs/jobs/",
+            "/search-runs/summary-jobs/",
+            "/papers/idea-map/jobs/",
+            "/onboarding/generations/jobs/",
+            "/onboarding/extractions/jobs/",
+            "/documents/jobs/",
+        )
+        return not any(path.startswith(prefix) for prefix in job_poll_prefixes)
 
 
 logging.getLogger("uvicorn.access").addFilter(JobPollingAccessLogFilter())
-
-DailySearchSummaryJob.model_rebuild(
-    _types_namespace={"DailySearchSummary": DailySearchSummary}
-)
 
 Base.metadata.create_all(bind=engine)
 ensure_papers_fts(engine)

@@ -3,19 +3,46 @@ from pathlib import Path
 
 import pymupdf
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.http_errors import raise_http_from_service
 from app.config import BACKEND_DIR, settings
 from app.db.session import get_db
 from app.models.document import Document
+from app.models.job import Job
 from app.services import documents as documents_service
+from app.services import job_views
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 
 class DocumentUpload(Document):
     job_id: str
+
+
+class DocumentProcessingJob(BaseModel):
+    job: Job
+    subject: Document
+    items: list[dict] = Field(default_factory=list)
+    next_cursor: str | None = None
+    done: bool = False
+
+
+@router.get("/jobs/{job_id}", response_model=DocumentProcessingJob)
+def get_document_processing_job(job_id: str, db: Session = Depends(get_db)):
+    job = job_views.get_job_of_kind(db, job_id, "document_processing")
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    document = job_views.get_document_for_job(db, job)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return DocumentProcessingJob(
+        job=job_views.serialize_document_job(job, document),
+        subject=document.to_pydantic(job_id=job.id),
+        items=[],
+        next_cursor=None,
+        done=job_views.is_done(job),
+    )
 
 
 def _documents_dir() -> Path:
@@ -70,7 +97,7 @@ async def upload_document(
             storage_path=str(storage_path),
         )
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return DocumentUpload(
         **document.to_pydantic().model_dump(),

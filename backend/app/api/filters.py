@@ -1,10 +1,9 @@
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.http_errors import raise_http_from_service
 from app.db.session import get_db
 from app.models.filter import Filter
 from app.services import filters as filter_service
@@ -50,7 +49,7 @@ def update_filter(filter_id: str, body: FilterUpdate, db: Session = Depends(get_
     try:
         filter = filter_service.update_filter(db, filter_id, body)
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return filter.to_pydantic()
 
 
@@ -59,7 +58,7 @@ def archive_filter(filter_id: str, db: Session = Depends(get_db)):
     try:
         filter = filter_service.archive_filter(db, filter_id)
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return filter.to_pydantic()
 
 
@@ -68,7 +67,7 @@ def restore_filter(filter_id: str, db: Session = Depends(get_db)):
     try:
         filter = filter_service.restore_filter(db, filter_id)
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return filter.to_pydantic()
 
 
@@ -77,7 +76,7 @@ def accept_proposal(filter_id: str, db: Session = Depends(get_db)):
     try:
         filter = filter_service.accept_proposal(db, filter_id)
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return filter.to_pydantic()
 
 
@@ -86,5 +85,5 @@ def reject_proposal(filter_id: str, db: Session = Depends(get_db)):
     try:
         filter = filter_service.reject_proposal(db, filter_id)
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return filter.to_pydantic()

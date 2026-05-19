@@ -1,11 +1,10 @@
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.http_errors import raise_http_from_service
 from app.db.session import get_db
 from app.services import feedback as feedback_service
 
@@ -42,7 +41,7 @@ def submit_match_feedback(
     try:
         feedback = feedback_service.upsert_match_feedback(db, match_id, body.value)
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Feedback(
         id=feedback.id,
         paper_id=feedback.paper_id,
@@ -59,7 +58,7 @@ def submit_paper_feedback(
     try:
         feedback = feedback_service.upsert_paper_feedback(db, paper_id, body.value)
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Feedback(
         id=feedback.id,
         paper_id=feedback.paper_id,
@@ -85,5 +84,5 @@ def trigger_feedback_processing(db: Session = Depends(get_db)):
     try:
         job_id = feedback_service.start_feedback_processing(db)
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"job_id": job_id}

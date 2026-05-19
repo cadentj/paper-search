@@ -6,11 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.http_errors import raise_http_from_service
-from app.api.jobs import JobStart
+from app.api.schemas.job import JobStart
 from app.db.session import get_db
+from app.models.job import Job
 from app.models.paper_match import PaperMatch
 from app.models.search_run import SearchRun
+from app.services import job_views
 from paper_search_core.daily_dates import DAILY_SEARCH_DATE_SET
 from app.services.sources import counts_by_source_for_date, enabled_source_types
 from app.services import search_runs
@@ -42,6 +43,69 @@ class DailyCandidateCount(BaseModel):
     date: date
     count: int
     counts_by_source: dict = Field(default_factory=dict)
+
+
+class DailySearchJob(BaseModel):
+    job: Job
+    subject: SearchRun
+    items: list[PaperMatch] = Field(default_factory=list)
+    next_cursor: str | None = None
+    done: bool = False
+
+
+class DailySearchSummaryJob(BaseModel):
+    job: Job
+    run: SearchRun
+    summary: DailySearchSummary | None = None
+    done: bool = False
+
+
+@router.get("/jobs/{job_id}", response_model=DailySearchJob)
+def get_daily_search_job(
+    job_id: str,
+    cursor: str | None = None,
+    db: Session = Depends(get_db),
+):
+    job = job_views.get_job_of_kind(db, job_id, "daily_search")
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    run = job_views.get_search_run_for_job(db, job)
+    if not run:
+        raise HTTPException(status_code=404, detail="Search run not found")
+    if cursor is not None:
+        try:
+            job_views.decode_cursor(cursor)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid cursor") from exc
+    all_matches = job_views.list_matches_for_run_ordered(db, run.id)
+    matches = job_views.apply_cursor(all_matches, cursor)
+    next_cursor = cursor
+    if matches:
+        latest = matches[-1]
+        next_cursor = job_views.encode_cursor(latest.created_at, latest.id)
+    return DailySearchJob(
+        job=job_views.serialize_daily_search_job(db, job, run),
+        subject=run.to_pydantic(job_id=job.id),
+        items=[job_views.paper_match_response(db, match) for match in matches],
+        next_cursor=next_cursor,
+        done=job_views.is_done(job),
+    )
+
+
+@router.get("/summary-jobs/{job_id}", response_model=DailySearchSummaryJob)
+def get_daily_search_summary_job(job_id: str, db: Session = Depends(get_db)):
+    job = job_views.get_job_of_kind(db, job_id, "daily_search_summary")
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    run = job_views.get_search_run_for_job(db, job)
+    if not run:
+        raise HTTPException(status_code=404, detail="Search run not found")
+    return DailySearchSummaryJob(
+        job=job.to_pydantic(),
+        run=search_runs.search_run_payload(db, run),
+        summary=search_runs.summary_payload(run),
+        done=job_views.is_done(job),
+    )
 
 
 @router.get("", response_model=list[SearchRun])
@@ -78,7 +142,7 @@ def get_search_run(search_run_id: str, db: Session = Depends(get_db)):
     try:
         run = search_runs.get_search_run(db, search_run_id)
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return search_runs.search_run_payload(db, run)
 
 
@@ -87,7 +151,7 @@ def get_search_run_summary(search_run_id: str, db: Session = Depends(get_db)):
     try:
         run = search_runs.get_search_run(db, search_run_id)
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     summary = search_runs.summary_payload(run)
     if not summary:
         raise HTTPException(status_code=404, detail="Summary not available")
@@ -99,7 +163,7 @@ def get_search_run_matches(search_run_id: str, db: Session = Depends(get_db)):
     try:
         return search_runs.list_matches_for_run(db, search_run_id)
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/daily", response_model=JobStart)
@@ -111,7 +175,7 @@ def create_daily_search_run(
         run_date = request.run_date if request and request.run_date else None
         job = search_runs.start_daily_search(db, run_date=run_date)
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JobStart(job_id=job.id)
 
 
@@ -120,5 +184,5 @@ def create_daily_search_summary(search_run_id: str, db: Session = Depends(get_db
     try:
         job = search_runs.start_daily_summary(db, search_run_id)
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JobStart(job_id=job.id)

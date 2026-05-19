@@ -341,20 +341,20 @@ export const api = {
   getJob: (id: string) => fetchApi<Job>(`/jobs/${id}`),
   getDailySearchJob: (id: string, cursor?: string | null) =>
     fetchApi<DailySearchJobResponse>(
-      `/jobs/daily-search/${id}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
+      `/search-runs/jobs/${id}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
     ),
   getDailySearchSummaryJob: (id: string) =>
-    fetchApi<DailySearchSummaryJobResponse>(`/jobs/daily-search-summary/${id}`),
+    fetchApi<DailySearchSummaryJobResponse>(`/search-runs/summary-jobs/${id}`),
   getIdeaMapJob: (id: string) =>
-    fetchApi<IdeaMapJobResponse>(`/jobs/idea-map/${id}`),
+    fetchApi<IdeaMapJobResponse>(`/papers/idea-map/jobs/${id}`),
   getOnboardingGenerationJob: (id: string, cursor?: string | null) =>
     fetchApi<OnboardingGenerationJobResponse>(
-      `/jobs/onboarding-generation/${id}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
+      `/onboarding/generations/jobs/${id}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
     ),
   getOnboardingExtractionJob: (id: string) =>
-    fetchApi<OnboardingExtractionJobResponse>(`/jobs/onboarding-extraction/${id}`),
+    fetchApi<OnboardingExtractionJobResponse>(`/onboarding/extractions/jobs/${id}`),
   getDocumentProcessingJob: (id: string) =>
-    fetchApi<DocumentProcessingJobResponse>(`/jobs/document-processing/${id}`),
+    fetchApi<DocumentProcessingJobResponse>(`/documents/jobs/${id}`),
 
   // Onboarding
   getOnboardingStatus: () => fetchApi<OnboardingStatus>("/onboarding/status"),

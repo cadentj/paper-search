@@ -1,10 +1,9 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.http_errors import raise_http_from_service
 from app.db.session import get_db
 from app.services import settings as settings_service
 
@@ -63,5 +62,5 @@ def update_data_source_route(
             settings=body.settings,
         )
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return DataSource(**row)

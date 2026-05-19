@@ -1,15 +1,16 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.http_errors import raise_http_from_service
-from app.api.jobs import JobStart
+from app.api.schemas.job import JobStart
 from app.config import settings
 from app.db.session import get_db
 from app.models.filter import Filter
+from app.models.job import Job
 from app.models.onboarding_extraction import OnboardingExtraction
+from app.services import job_views
 from app.services import onboarding as onboarding_service
 from app.services.semantic_scholar import extract_author_id, get_author
 
@@ -68,6 +69,68 @@ class ScholarImportStatus(BaseModel):
     error: Optional[str] = None
 
 
+class OnboardingGenerationJob(BaseModel):
+    job: Job
+    subject: Job
+    items: list[Filter] = Field(default_factory=list)
+    next_cursor: str | None = None
+    done: bool = False
+
+
+class OnboardingExtractionJob(BaseModel):
+    job: Job
+    subject: OnboardingExtraction
+    items: list[dict] = Field(default_factory=list)
+    next_cursor: str | None = None
+    done: bool = False
+
+
+@router.get("/generations/jobs/{job_id}", response_model=OnboardingGenerationJob)
+def get_onboarding_generation_job(
+    job_id: str,
+    cursor: str | None = None,
+    db: Session = Depends(get_db),
+):
+    job = job_views.get_job_of_kind(db, job_id, "onboarding_generation")
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if cursor is not None:
+        try:
+            job_views.decode_cursor(cursor)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid cursor") from exc
+    all_filters = job_views.draft_filters_for_generation(db, job.id)
+    filters = job_views.apply_cursor(all_filters, cursor)
+    next_cursor = cursor
+    if filters:
+        latest = filters[-1]
+        next_cursor = job_views.encode_cursor(latest.created_at, latest.id)
+    return OnboardingGenerationJob(
+        job=job_views.serialize_onboarding_generation_job(db, job),
+        subject=job.to_pydantic(),
+        items=[item.to_pydantic() for item in filters],
+        next_cursor=next_cursor,
+        done=job_views.is_done(job),
+    )
+
+
+@router.get("/extractions/jobs/{job_id}", response_model=OnboardingExtractionJob)
+def get_onboarding_extraction_job(job_id: str, db: Session = Depends(get_db)):
+    job = job_views.get_job_of_kind(db, job_id, "onboarding_extraction")
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    extraction = job_views.get_extraction_for_job(db, job)
+    if not extraction:
+        raise HTTPException(status_code=404, detail="Extraction not found")
+    return OnboardingExtractionJob(
+        job=job_views.serialize_onboarding_extraction_job(db, job, extraction),
+        subject=extraction.to_pydantic(job_id=job.id),
+        items=[],
+        next_cursor=None,
+        done=job_views.is_done(job),
+    )
+
+
 @router.get("/status", response_model=OnboardingStatus)
 def get_onboarding_status(db: Session = Depends(get_db)):
     completed, active_count = onboarding_service.onboarding_status(db)
@@ -82,7 +145,7 @@ def create_generation(body: OnboardingGenerationCreate, db: Session = Depends(ge
     try:
         job_id = onboarding_service.start_generation(db, body)
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JobStart(job_id=job_id)
 
 
@@ -93,7 +156,7 @@ def promote_draft_filters(
     try:
         filters = onboarding_service.promote_draft_filters(db, body.filter_ids)
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return [filter.to_pydantic() for filter in filters]
 
 
@@ -107,7 +170,7 @@ def create_extraction(body: OnboardingExtractionCreate, db: Session = Depends(ge
     try:
         job_id = onboarding_service.start_extraction(db, input_text=body.input_text)
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JobStart(job_id=job_id)
 
 
@@ -116,7 +179,7 @@ def get_extraction(extraction_id: str, db: Session = Depends(get_db)):
     try:
         extraction = onboarding_service.get_extraction(db, extraction_id)
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return onboarding_service.extraction_payload(db, extraction)
 
 
@@ -160,7 +223,7 @@ def start_import(body: ScholarImportRequest, db: Session = Depends(get_db)):
             display_name=body.display_name,
         )
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ScholarImport(id=import_id, job_id=job_id)
 
 
@@ -169,7 +232,7 @@ def get_import_status(import_id: str, db: Session = Depends(get_db)):
     try:
         profile_import = onboarding_service.get_import(db, import_id)
     except Exception as exc:
-        raise_http_from_service(exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ScholarImportStatus(
         id=profile_import.id,
         status=profile_import.status,

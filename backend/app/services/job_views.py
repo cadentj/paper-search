@@ -14,8 +14,6 @@ from app.models.onboarding_extraction import SQLAOnboardingExtraction
 from app.models.paper_match import PaperMatch, SQLAPaperMatch
 from app.models.search_run import SQLASearchRun
 from app.models.job import Job
-from app.services.jobs import latest_job_for_subject
-from app.services.search_runs import search_run_payload, summary_payload
 
 DONE_STATUSES = {"completed", "failed", "skipped"}
 
