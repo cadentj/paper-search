@@ -113,6 +113,65 @@ def feedback_counts(db: Session) -> tuple[int, int, int]:
     return pending_votes, pending_notes, pending_proposals
 
 
+def pending_feedback_items(db: Session) -> list[dict]:
+    vote_rows = (
+        db.query(SQLAPaperMatchFeedback)
+        .filter(SQLAPaperMatchFeedback.processed == False)
+        .order_by(SQLAPaperMatchFeedback.updated_at.desc())
+        .all()
+    )
+    note_rows = (
+        db.query(SQLAPaperNote)
+        .filter(SQLAPaperNote.processed == False, SQLAPaperNote.text != "")
+        .order_by(SQLAPaperNote.updated_at.desc())
+        .all()
+    )
+
+    items: list[dict] = []
+    for vote in vote_rows:
+        paper = db.query(SQLAPaper).filter(SQLAPaper.id == vote.paper_id).first()
+        filter_record = (
+            db.query(SQLAFilter).filter(SQLAFilter.id == vote.filter_id).first()
+            if vote.filter_id
+            else None
+        )
+        items.append(
+            {
+                "id": vote.id,
+                "kind": "vote",
+                "paper_id": vote.paper_id,
+                "paper_title": paper.title if paper else "Unknown paper",
+                "paper_match_id": vote.paper_match_id,
+                "filter_id": vote.filter_id,
+                "filter_name": filter_record.name if filter_record else None,
+                "value": vote.value,
+                "text": None,
+                "created_at": vote.created_at,
+                "updated_at": vote.updated_at,
+            }
+        )
+
+    for note in note_rows:
+        paper = db.query(SQLAPaper).filter(SQLAPaper.id == note.paper_id).first()
+        items.append(
+            {
+                "id": note.id,
+                "kind": "note",
+                "paper_id": note.paper_id,
+                "paper_title": paper.title if paper else "Unknown paper",
+                "paper_match_id": None,
+                "filter_id": None,
+                "filter_name": None,
+                "value": None,
+                "text": note.text,
+                "created_at": note.created_at,
+                "updated_at": note.updated_at,
+            }
+        )
+
+    return sorted(items, key=lambda item: item["updated_at"], reverse=True)
+
+
 def start_feedback_processing(db: Session) -> str:
     pending_votes, pending_notes, _ = feedback_counts(db)
     if pending_votes == 0 and pending_notes == 0:

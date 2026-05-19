@@ -141,11 +141,16 @@ def _sync_subject_failure(db: Session, job: SQLAJob, error: str) -> None:
         subject.completed_at = now
 
 
-def enqueue(db: Session, job: SQLAJob, *, log_context: str = "") -> None:
+def _dispatcher_run_job():
     from app.jobs.dispatcher import run_job
 
-    db.commit()
+    return run_job
+
+
+def enqueue(db: Session, job: SQLAJob, *, log_context: str = "") -> None:
     try:
+        db.commit()
+        run_job = _dispatcher_run_job()
         queue = Queue(job.queue_name, connection=Redis.from_url(settings.REDIS_URL))
         queue.enqueue(run_job, job.id)
         if log_context:
@@ -157,6 +162,7 @@ def enqueue(db: Session, job: SQLAJob, *, log_context: str = "") -> None:
             )
     except Exception as exc:
         error = str(exc)
+        db.rollback()
         set_job_status(job, status="failed", error=error)
         _sync_subject_failure(db, job, error)
         db.commit()

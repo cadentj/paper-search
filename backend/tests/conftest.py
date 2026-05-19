@@ -42,6 +42,8 @@ def db_engine(tmp_path):
     import paper_search_core.models.paper  # noqa: F401
     import app.models.search_run
     import app.models.paper_match
+    import app.models.paper_match_feedback
+    import app.models.paper_note
     import app.models.idea_map
 
     Base.metadata.create_all(bind=engine)

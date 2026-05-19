@@ -27,7 +27,7 @@ function PaperHtmlBody({
       <iframe
         srcDoc={htmlData.html}
         title="Paper HTML"
-        className="min-h-[400px] w-full flex-1 border-0"
+        className="min-h-0 w-full flex-1 border-0"
         sandbox="allow-same-origin"
       />
     );
@@ -35,7 +35,7 @@ function PaperHtmlBody({
 
   if (htmlData?.source_url) {
     return (
-      <div className="flex flex-1 items-center justify-center p-6">
+      <div className="flex min-h-0 flex-1 items-center justify-center p-6">
         <div className="space-y-2 text-center">
           <p className="text-sm text-muted-foreground">HTML not available yet.</p>
           <Button
@@ -59,7 +59,7 @@ function PaperHtmlBody({
   }
 
   return (
-    <div className="flex-1 overflow-auto p-4">
+    <div className="min-h-0 flex-1 overflow-auto p-4">
       <p className="whitespace-pre-wrap text-sm text-muted-foreground">
         {paper?.search_text || "Loading paper…"}
       </p>
@@ -80,8 +80,8 @@ export function PaperReadPreview({
   const sourceLabel = paper?.source_type === "lesswrong" ? "LessWrong" : "arXiv";
 
   return (
-    <div className="flex min-h-[320px] flex-1 flex-col rounded-lg border bg-card lg:min-h-0">
-      <div className="flex items-start gap-2 border-b p-3">
+    <div className="flex min-h-[320px] flex-1 flex-col overflow-hidden rounded-lg border bg-card lg:min-h-0">
+      <div className="flex shrink-0 items-start gap-2 border-b p-3">
         <div className="min-w-0 flex-1 space-y-1">
           <h2 className="text-sm font-semibold leading-snug">
             {paperLoading ? "Loading…" : paper?.title}
@@ -128,7 +128,7 @@ export function PaperReadPreview({
           </Button>
         </div>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {(paperLoading || htmlLoading) && !paper ? (
           <p className="p-4 text-sm text-muted-foreground">Loading paper…</p>
         ) : (

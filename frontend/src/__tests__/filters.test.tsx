@@ -20,6 +20,10 @@ const mockApi = vi.hoisted(() => ({
   createOnboardingGeneration: vi.fn(),
   promoteDraftFilters: vi.fn(),
   getFeedbackStatus: vi.fn(),
+  getPendingFeedbackItems: vi.fn(),
+  processFeedback: vi.fn(),
+  acceptProposal: vi.fn(),
+  rejectProposal: vi.fn(),
   verifyScholarProfile: vi.fn(),
   startScholarImport: vi.fn(),
   getScholarImportStatus: vi.fn(),
@@ -44,6 +48,8 @@ describe("FiltersPage", () => {
       pending_notes: 0,
       pending_proposals: 0,
     });
+    mockApi.getPendingFeedbackItems.mockResolvedValue([]);
+    mockApi.processFeedback.mockResolvedValue({ job_id: "job-feedback" });
   });
 
   it("shows active and archived filters", async () => {
@@ -181,5 +187,61 @@ describe("FiltersPage", () => {
       },
       { timeout: 5000 }
     );
+  });
+
+  it("expands pending feedback and processes the listed items", async () => {
+    mockApi.getFilters.mockImplementation(() => Promise.resolve([]));
+    mockApi.getFeedbackStatus.mockResolvedValue({
+      pending_votes: 1,
+      pending_notes: 1,
+      pending_proposals: 0,
+    });
+    mockApi.getPendingFeedbackItems.mockResolvedValue([
+      {
+        id: "feedback-1",
+        kind: "vote",
+        paper_id: "paper-1",
+        paper_title: "Feedback Paper",
+        paper_match_id: "match-1",
+        filter_id: "filter-1",
+        filter_name: "Relevant Filter",
+        value: "down",
+        text: null,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      },
+      {
+        id: "note-1",
+        kind: "note",
+        paper_id: "paper-2",
+        paper_title: "Noted Paper",
+        paper_match_id: null,
+        filter_id: null,
+        filter_name: null,
+        value: null,
+        text: "This should update future filters.",
+        created_at: "2024-01-02T00:00:00Z",
+        updated_at: "2024-01-02T00:00:00Z",
+      },
+    ]);
+
+    renderWithProviders(<FiltersPage />);
+
+    expect(await screen.findByText(/pending feedback \(2\)/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /show feedback/i }));
+
+    expect(await screen.findByText("Feedback Paper")).toBeInTheDocument();
+    expect(screen.getByText(/thumbs down/i)).toBeInTheDocument();
+    expect(screen.getByText(/relevant filter/i)).toBeInTheDocument();
+    expect(screen.getByText("Noted Paper")).toBeInTheDocument();
+    expect(
+      screen.getByText("This should update future filters.")
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /process feedback/i }));
+
+    await waitFor(() => {
+      expect(mockApi.processFeedback).toHaveBeenCalled();
+    });
   });
 });

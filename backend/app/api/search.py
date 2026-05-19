@@ -14,6 +14,7 @@ from app.models.search_run import SearchRun
 from app.utils.cursor import apply_cursor, decode_cursor, encode_cursor
 from paper_search_core.daily_dates import DAILY_SEARCH_DATE_SET
 from app.services.settings import enabled_source_types
+from app.services.sources import counts_by_source_for_date
 from app.services import jobs, search_runs
 
 router = APIRouter(prefix="/search-runs", tags=["search"])

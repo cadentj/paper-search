@@ -302,12 +302,21 @@ export function useFeedbackStatus() {
   });
 }
 
+export function usePendingFeedbackItems(enabled: boolean) {
+  return useQuery({
+    queryKey: ["feedback", "items", "pending"],
+    queryFn: api.getPendingFeedbackItems,
+    enabled,
+  });
+}
+
 export function useProcessFeedback() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: api.processFeedback,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["feedback", "status"] });
+      qc.invalidateQueries({ queryKey: ["feedback", "items", "pending"] });
       qc.invalidateQueries({ queryKey: ["filters"] });
       qc.invalidateQueries({ queryKey: ["jobs", "overview"] });
     },
@@ -321,6 +330,7 @@ export function useSubmitMatchFeedback() {
       api.submitMatchFeedback(matchId, value),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["feedback", "status"] });
+      qc.invalidateQueries({ queryKey: ["feedback", "items", "pending"] });
     },
   });
 }
@@ -331,6 +341,7 @@ export function useSubmitPaperFeedback() {
     mutationFn: (paperId: string) => api.submitPaperFeedback(paperId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["feedback", "status"] });
+      qc.invalidateQueries({ queryKey: ["feedback", "items", "pending"] });
     },
   });
 }

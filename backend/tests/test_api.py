@@ -1,8 +1,15 @@
 """Backend API integration tests."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pytest
+
+from app.models.filter import SQLAFilter
+from app.models.paper_match import SQLAPaperMatch
+from app.models.paper_match_feedback import SQLAPaperMatchFeedback
+from app.models.paper_note import SQLAPaperNote
+from app.models.search_run import SQLASearchRun
+from paper_search_core.models.paper import SQLAPaper
 
 
 class NoopQueue:
@@ -126,6 +133,150 @@ class TestFilters:
 
         resp = client.post("/filters/nonexistent/archive")
         assert resp.status_code == 404
+
+
+class TestFeedback:
+    def _seed_feedback_context(self, db_session):
+        now = datetime.now(timezone.utc)
+        paper = SQLAPaper(
+            id="paper-1",
+            source_type="arxiv",
+            source_id="2605.00001",
+            title="Visible Feedback Paper",
+            search_text="Abstract",
+            authors=["Author"],
+            created_at=now,
+        )
+        unmatched_paper = SQLAPaper(
+            id="paper-2",
+            source_type="arxiv",
+            source_id="2605.00002",
+            title="Unmatched Feedback Paper",
+            search_text="Abstract",
+            authors=[],
+            created_at=now,
+        )
+        processed_paper = SQLAPaper(
+            id="paper-3",
+            source_type="arxiv",
+            source_id="2605.00003",
+            title="Processed Feedback Paper",
+            search_text="Abstract",
+            authors=[],
+            created_at=now,
+        )
+        filter = SQLAFilter(
+            id="filter-1",
+            name="Relevant Filter",
+            definition={
+                "name": "Relevant Filter",
+                "description": "Test",
+                "mode": "topic",
+            },
+            status="active",
+            created_at=now,
+            updated_at=now,
+        )
+        search_run = SQLASearchRun(
+            id="run-1",
+            status="completed",
+            run_date=date.today(),
+            created_at=now,
+        )
+        db_session.add_all(
+            [paper, unmatched_paper, processed_paper, filter, search_run]
+        )
+        db_session.flush()
+
+        match = SQLAPaperMatch(
+            id="match-1",
+            search_run_id=search_run.id,
+            filter_id=filter.id,
+            paper_id=paper.id,
+            result={"reason": "Relevant"},
+            created_at=now,
+        )
+        db_session.add(match)
+        db_session.flush()
+        db_session.add_all(
+            [
+                SQLAPaperMatchFeedback(
+                    id="feedback-1",
+                    paper_match_id=match.id,
+                    search_run_id=search_run.id,
+                    filter_id=filter.id,
+                    paper_id=paper.id,
+                    value="down",
+                    processed=False,
+                    created_at=now,
+                    updated_at=now,
+                ),
+                SQLAPaperMatchFeedback(
+                    id="feedback-2",
+                    paper_id=unmatched_paper.id,
+                    value="up",
+                    processed=False,
+                    created_at=now,
+                    updated_at=now,
+                ),
+                SQLAPaperMatchFeedback(
+                    id="feedback-processed",
+                    paper_id=processed_paper.id,
+                    value="up",
+                    processed=True,
+                    created_at=now,
+                    updated_at=now,
+                ),
+                SQLAPaperNote(
+                    id="note-1",
+                    paper_id=paper.id,
+                    text="This should inform the filter.",
+                    processed=False,
+                    created_at=now,
+                    updated_at=now,
+                ),
+                SQLAPaperNote(
+                    id="note-processed",
+                    paper_id=processed_paper.id,
+                    text="Already handled",
+                    processed=True,
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ]
+        )
+        db_session.commit()
+
+    def test_pending_feedback_items_include_votes_and_notes(self, client, db_session):
+        self._seed_feedback_context(db_session)
+
+        resp = client.get("/feedback/items?status=pending")
+
+        assert resp.status_code == 200
+        items = resp.json()
+        assert {item["id"] for item in items} == {
+            "feedback-1",
+            "feedback-2",
+            "note-1",
+        }
+
+        matched_vote = next(item for item in items if item["id"] == "feedback-1")
+        assert matched_vote["kind"] == "vote"
+        assert matched_vote["value"] == "down"
+        assert matched_vote["paper_title"] == "Visible Feedback Paper"
+        assert matched_vote["paper_match_id"] == "match-1"
+        assert matched_vote["filter_name"] == "Relevant Filter"
+
+        unmatched_vote = next(item for item in items if item["id"] == "feedback-2")
+        assert unmatched_vote["kind"] == "vote"
+        assert unmatched_vote["value"] == "up"
+        assert unmatched_vote["paper_match_id"] is None
+        assert unmatched_vote["filter_name"] is None
+
+        note = next(item for item in items if item["id"] == "note-1")
+        assert note["kind"] == "note"
+        assert note["text"] == "This should inform the filter."
+        assert note["value"] is None
 
 
 class TestSearchRuns:

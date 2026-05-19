@@ -49,7 +49,7 @@ def _build_reflection_prompt(
     for v in votes:
         paper = db.query(SQLAPaper).filter(SQLAPaper.id == v.paper_id).first()
         paper_title = paper.title if paper else "Unknown"
-        paper_abstract = paper.abstract if paper else ""
+        paper_text = paper.search_text if paper else ""
 
         if v.paper_match_id and v.filter_id:
             match = (
@@ -75,16 +75,16 @@ def _build_reflection_prompt(
         else:
             vote_descriptions.append(
                 f'- UP on unmatched paper "{paper_title}" '
-                f"(abstract: {paper_abstract[:200]}...)"
+                f"(paper text: {paper_text[:200]}...)"
             )
 
     note_descriptions = []
     for n in notes:
         paper = db.query(SQLAPaper).filter(SQLAPaper.id == n.paper_id).first()
         paper_title = paper.title if paper else "Unknown"
-        paper_abstract = paper.abstract if paper else ""
+        paper_text = paper.search_text if paper else ""
         note_descriptions.append(
-            f'- Note on "{paper_title}" (abstract: {paper_abstract[:200]}...): {n.text}'
+            f'- Note on "{paper_title}" (paper text: {paper_text[:200]}...): {n.text}'
         )
 
     return FEEDBACK_REFLECTION_USER_PROMPT.format(

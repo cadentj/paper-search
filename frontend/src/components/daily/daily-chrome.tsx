@@ -37,31 +37,36 @@ export function DailyChrome({ children }: { children: React.ReactNode }) {
   return (
     <div
       className={cn(
-        "flex-1 space-y-6 p-6",
-        isAllPapers && selectedPaperId ? "max-w-7xl" : "max-w-5xl"
+        "flex-1 p-6",
+        isAllPapers
+          ? "flex h-full min-h-0 w-full flex-col gap-6 overflow-hidden"
+          : "max-w-5xl space-y-6",
+        isAllPapers && selectedPaperId && "max-w-7xl"
       )}
     >
-      <DailyHeader
-        selectedDate={effectiveSelectedDate}
-        dateStatus={{
-          hasSelectedDate,
-          count: selectedDateCount,
-          breakdown: selectedDateBreakdown,
-        }}
-        minDate={DAILY_SEARCH_START}
-        maxDate={DAILY_SEARCH_END}
-        availableDateSet={DAILY_SEARCH_DATE_SET}
-        onDateChange={handleDateChange}
-        runAction={
-          showRunSearch
-            ? {
-                isRunning,
-                isCreating,
-                onRunSearch: handleRunSearch,
-              }
-            : undefined
-        }
-      />
+      <div className={cn(isAllPapers && "shrink-0")}>
+        <DailyHeader
+          selectedDate={effectiveSelectedDate}
+          dateStatus={{
+            hasSelectedDate,
+            count: selectedDateCount,
+            breakdown: selectedDateBreakdown,
+          }}
+          minDate={DAILY_SEARCH_START}
+          maxDate={DAILY_SEARCH_END}
+          availableDateSet={DAILY_SEARCH_DATE_SET}
+          onDateChange={handleDateChange}
+          runAction={
+            showRunSearch
+              ? {
+                  isRunning,
+                  isCreating,
+                  onRunSearch: handleRunSearch,
+                }
+              : undefined
+          }
+        />
+      </div>
       {children}
     </div>
   );

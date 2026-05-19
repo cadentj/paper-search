@@ -226,6 +226,20 @@ export interface FeedbackStatus {
   pending_proposals: number;
 }
 
+export interface FeedbackItem {
+  id: string;
+  kind: "vote" | "note";
+  paper_id: string;
+  paper_title: string;
+  paper_match_id?: string | null;
+  filter_id?: string | null;
+  filter_name?: string | null;
+  value?: "up" | "down" | null;
+  text?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PaginatedPapers {
   papers: Paper[];
   total: number;
@@ -473,6 +487,8 @@ export const api = {
     }),
   getFeedbackStatus: () =>
     fetchApi<FeedbackStatus>("/feedback/status"),
+  getPendingFeedbackItems: () =>
+    fetchApi<FeedbackItem[]>("/feedback/items?status=pending"),
   processFeedback: () =>
     fetchApi<{ job_id: string }>("/feedback/process", { method: "POST" }),
 

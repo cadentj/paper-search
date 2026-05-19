@@ -74,4 +74,4 @@ def test_arxiv_paper_html_uses_r2_for_fetch_and_arxiv_for_assets(monkeypatch):
     assert fetched_urls == ["https://r2.example/data/2012/2012.14425.html"]
     assert result["source_url"] == "https://arxiv.org/abs/2012.14425"
     assert '<base href="https://arxiv.org/html/2012.14425"/>' in result["html"]
-    assert "arxiv-html-header" in result["html"]
+    assert "arxiv-html-header" not in result["html"]

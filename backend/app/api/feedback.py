@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -32,6 +32,20 @@ class FeedbackStatus(BaseModel):
     pending_votes: int
     pending_notes: int
     pending_proposals: int
+
+
+class FeedbackItem(BaseModel):
+    id: str
+    kind: Literal["vote", "note"]
+    paper_id: str
+    paper_title: str
+    paper_match_id: Optional[str] = None
+    filter_id: Optional[str] = None
+    filter_name: Optional[str] = None
+    value: Optional[Literal["up", "down"]] = None
+    text: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
 
 
 @router.post("/paper-matches/{match_id}/feedback", response_model=Feedback)
@@ -65,6 +79,14 @@ def submit_paper_feedback(
         value=feedback.value,
         created_at=feedback.created_at,
     )
+
+
+@router.get("/feedback/items", response_model=list[FeedbackItem])
+def list_feedback_items(
+    status: Literal["pending"] = Query("pending"),
+    db: Session = Depends(get_db),
+):
+    return feedback_service.pending_feedback_items(db)
 
 
 @router.get("/feedback/status", response_model=FeedbackStatus)

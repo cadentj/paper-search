@@ -46,6 +46,9 @@ describe("feedback status invalidation", () => {
       expect(invalidateSpy).toHaveBeenCalledWith({
         queryKey: ["feedback", "status"],
       });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ["feedback", "items", "pending"],
+      });
     });
   });
 });

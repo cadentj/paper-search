@@ -8,6 +8,7 @@ import {
   useState,
   type RefObject,
 } from "react";
+import Link from "next/link";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,7 @@ import {
   useFeedbackStatus,
   useFilters,
   useOnboardingGenerationJob,
+  usePendingFeedbackItems,
   useProcessFeedback,
   usePromoteDraftFilters,
   useRestoreFilter,
@@ -48,6 +50,7 @@ import {
   api,
   DocumentProcessingJobResponse,
   DocumentUploadResponse,
+  FeedbackItem,
   FeedbackStatus,
   FilterResponse,
 } from "@/lib/api";
@@ -63,6 +66,9 @@ import {
   Plus,
   RotateCcw,
   Send,
+  StickyNote,
+  ThumbsDown,
+  ThumbsUp,
   X,
 } from "lucide-react";
 
@@ -128,6 +134,19 @@ function documentStatusLabel(status: string) {
     default:
       return status;
   }
+}
+
+function formatFeedbackTimestamp(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function feedbackItemTimestamp(item: FeedbackItem) {
+  return formatFeedbackTimestamp(item.updated_at || item.created_at);
 }
 
 function documentJobRefetchInterval(query: {
@@ -521,7 +540,7 @@ function ProposalCard({
 
   return (
     <Card>
-      <CardContent className="pt-4 space-y-2">
+      <CardContent className="space-y-2">
         <div className="flex items-center gap-2">
           <Badge variant={badgeVariant}>{actionLabel}</Badge>
         </div>
@@ -683,38 +702,154 @@ function DraftFiltersSection({
 
 function FeedbackCard({
   status,
+  items,
+  isLoadingItems,
   isProcessing,
   onProcess,
 }: {
   status?: FeedbackStatus;
+  items: FeedbackItem[];
+  isLoadingItems: boolean;
   isProcessing: boolean;
   onProcess: () => void;
 }) {
+  const [isExpanded, setIsExpanded] = useState(false);
   if (!status || (status.pending_votes === 0 && status.pending_notes === 0)) {
     return null;
   }
 
+  const voteItems = items.filter((item) => item.kind === "vote");
+  const noteItems = items.filter((item) => item.kind === "note");
+  const pendingCount = status.pending_votes + status.pending_notes;
+
   return (
     <Card>
-      <CardContent className="pt-4 flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium">Pending Feedback</p>
-          <p className="text-xs text-muted-foreground">
-            {status.pending_votes} vote{status.pending_votes !== 1 ? "s" : ""}
-            {status.pending_notes > 0 &&
-              `, ${status.pending_notes} note${
-                status.pending_notes !== 1 ? "s" : ""
-              }`}
-          </p>
+      <CardContent className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <button
+            type="button"
+            className="flex min-w-0 items-center gap-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() => setIsExpanded((value) => !value)}
+            aria-expanded={isExpanded}
+          >
+            {isExpanded ? (
+              <ChevronDown className="size-4 shrink-0" />
+            ) : (
+              <ChevronRight className="size-4 shrink-0" />
+            )}
+            <div className="min-w-0">
+              <p className="text-sm font-medium">
+                Pending Feedback ({pendingCount})
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {status.pending_votes} vote
+                {status.pending_votes !== 1 ? "s" : ""}
+                {status.pending_notes > 0 &&
+                  `, ${status.pending_notes} note${
+                    status.pending_notes !== 1 ? "s" : ""
+                  }`}
+              </p>
+            </div>
+          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsExpanded((value) => !value)}
+            >
+              {isExpanded ? "Hide" : "Show"} Feedback
+            </Button>
+            <Button size="sm" onClick={onProcess} disabled={isProcessing}>
+              {isProcessing ? (
+                <Loader2 className="mr-1 size-3 animate-spin" />
+              ) : null}
+              Process Feedback
+            </Button>
+          </div>
         </div>
-        <Button size="sm" onClick={onProcess} disabled={isProcessing}>
-          {isProcessing ? (
-            <Loader2 className="mr-1 size-3 animate-spin" />
-          ) : null}
-          Process Feedback
-        </Button>
+
+        {isExpanded ? (
+          <div className="space-y-4">
+            {isLoadingItems ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Loading feedback…
+              </div>
+            ) : null}
+            {voteItems.length > 0 ? (
+              <FeedbackItemGroup title="Votes" items={voteItems} />
+            ) : null}
+            {noteItems.length > 0 ? (
+              <FeedbackItemGroup title="Notes" items={noteItems} />
+            ) : null}
+          </div>
+        ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+function FeedbackItemGroup({
+  title,
+  items,
+}: {
+  title: string;
+  items: FeedbackItem[];
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium uppercase text-muted-foreground">
+        {title}
+      </p>
+      <div className="divide-y rounded-md border">
+        {items.map((item) => (
+          <FeedbackItemRow key={item.id} item={item} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FeedbackItemRow({ item }: { item: FeedbackItem }) {
+  const isVote = item.kind === "vote";
+  const VoteIcon = item.value === "down" ? ThumbsDown : ThumbsUp;
+  const voteClass = item.value === "down" ? "text-red-600" : "text-green-600";
+  const contextLabel = item.paper_match_id ? "Matched paper" : "Unmatched paper";
+
+  return (
+    <div className="flex gap-3 p-3">
+      <div className="mt-0.5 shrink-0">
+        {isVote ? (
+          <VoteIcon className={`size-4 ${voteClass}`} />
+        ) : (
+          <StickyNote className="size-4 text-muted-foreground" />
+        )}
+      </div>
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <Link
+            href={`/dashboard/papers/${item.paper_id}`}
+            className="truncate text-sm font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {item.paper_title}
+          </Link>
+          <span className="text-xs text-muted-foreground">
+            {feedbackItemTimestamp(item)}
+          </span>
+        </div>
+        {isVote ? (
+          <p className="text-xs text-muted-foreground">
+            {item.value === "down" ? "Thumbs down" : "Thumbs up"} ·{" "}
+            {contextLabel}
+            {item.filter_name ? ` · ${item.filter_name}` : ""}
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {item.text}
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -888,6 +1023,11 @@ export default function FiltersPage() {
   const restoreFilter = useRestoreFilter();
   const processFeedback = useProcessFeedback();
   const { data: feedbackStatus } = useFeedbackStatus();
+  const hasPendingFeedback = feedbackStatus
+    ? feedbackStatus.pending_votes > 0 || feedbackStatus.pending_notes > 0
+    : false;
+  const { data: pendingFeedbackItems = [], isLoading: isLoadingFeedbackItems } =
+    usePendingFeedbackItems(hasPendingFeedback);
   const { data: generationState } = useOnboardingGenerationJob(
     state.generationJobId
   );
@@ -1103,6 +1243,8 @@ export default function FiltersPage() {
 
       <FeedbackCard
         status={feedbackStatus}
+        items={pendingFeedbackItems}
+        isLoadingItems={isLoadingFeedbackItems}
         isProcessing={processFeedback.isPending}
         onProcess={() => processFeedback.mutate()}
       />

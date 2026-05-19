@@ -596,34 +596,38 @@ export function DailyAllPapersContent({
   return (
     <div
       className={cn(
-        "flex w-full flex-col gap-6 lg:flex-row",
-        !selectedPaperId && "mx-auto max-w-2xl"
+        "min-h-0 w-full flex-1 gap-6",
+        selectedPaperId ? "flex flex-col lg:flex-row" : "mx-auto flex max-w-2xl flex-col"
       )}
     >
       <div
         className={cn(
-          "min-w-0 space-y-3",
-          selectedPaperId ? "w-full lg:w-2/5 lg:max-w-md" : "w-full"
+          "flex min-h-0 min-w-0 flex-col",
+          selectedPaperId
+            ? "w-full flex-1 lg:w-2/5 lg:max-w-md lg:flex-none"
+            : "w-full flex-1"
         )}
       >
-        {loading && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" /> Loading papers…
-          </div>
-        )}
-        {data && !loading && data.papers.length === 0 && (
-          <p className="text-sm text-muted-foreground">No papers found for this date.</p>
-        )}
-        {data && !loading && data.papers.map((paper) => (
-          <AllPaperCard
-            key={paper.id}
-            paper={paper}
-            isSelected={selectedPaperId === paper.id}
-            onSelect={() => onSelectPaper(paper.id)}
-          />
-        ))}
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+          {loading && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" /> Loading papers…
+            </div>
+          )}
+          {data && !loading && data.papers.length === 0 && (
+            <p className="text-sm text-muted-foreground">No papers found for this date.</p>
+          )}
+          {data && !loading && data.papers.map((paper) => (
+            <AllPaperCard
+              key={paper.id}
+              paper={paper}
+              isSelected={selectedPaperId === paper.id}
+              onSelect={() => onSelectPaper(paper.id)}
+            />
+          ))}
+        </div>
         {totalPages > 1 && (
-          <div className="flex items-center justify-center gap-2 pt-2">
+          <div className="flex shrink-0 items-center justify-center gap-2 border-t bg-background pt-3">
             <Button
               variant="outline"
               size="sm"

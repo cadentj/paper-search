@@ -26,6 +26,7 @@ import {
   SidebarInset,
 } from "@/components/ui/sidebar";
 import { type ReactNode } from "react";
+import { cn } from "@/lib/utils";
 
 const SETTINGS_HREF = "/dashboard/settings";
 const JOBS_HREF = "/dashboard/jobs";
@@ -45,6 +46,13 @@ function isDailyReportPath(pathname: string) {
   return pathname === "/dashboard/daily" || pathname === "/dashboard/daily/report";
 }
 
+function isScrollContainedPath(pathname: string) {
+  return (
+    pathname.startsWith("/dashboard/papers/") ||
+    pathname.startsWith("/dashboard/daily/all-papers")
+  );
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { data: feedbackStatus } = useFeedbackStatus();
@@ -61,9 +69,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   const hasPendingProposals = feedbackStatus
     ? feedbackStatus.pending_proposals > 0
     : false;
+  const shouldContainScroll = isScrollContainedPath(pathname);
 
   return (
-    <SidebarProvider>
+    <SidebarProvider
+      className={cn(shouldContainScroll && "h-svh min-h-0 overflow-hidden")}
+    >
       <Sidebar>
         <SidebarContent>
           <SidebarGroup>
@@ -144,7 +155,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           </SidebarGroup>
         </SidebarContent>
       </Sidebar>
-      <SidebarInset>{children}</SidebarInset>
+      <SidebarInset
+        className={cn(shouldContainScroll && "h-svh min-h-0 overflow-hidden")}
+      >
+        {children}
+      </SidebarInset>
     </SidebarProvider>
   );
 }

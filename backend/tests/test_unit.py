@@ -55,12 +55,13 @@ class TestHtmlParser:
         assert 'data-paper-block-id="B001"' in html
         assert 'id="title"' in html
 
-    def test_prepares_viewer_html_preserves_arxiv_chrome(self):
+    def test_prepares_viewer_html_removes_arxiv_chrome(self):
         source = """
         <html>
         <head><title>Paper</title></head>
         <body>
             <header class="arxiv-html-header">arXiv header</header>
+            <nav class="arxiv-navbar">arXiv nav</nav>
             <article>
                 <h1 id="title">A Paper Title With Enough Text</h1>
                 <p id="para1">This paragraph has enough text to become addressable.</p>
@@ -71,8 +72,10 @@ class TestHtmlParser:
         """
         html = prepare_arxiv_html_for_viewer(source)
 
-        assert "arxiv-html-header" in html
-        assert 'id="beta-badge"' in html
+        assert "arxiv-html-header" not in html
+        assert "arxiv-navbar" not in html
+        assert 'id="beta-badge"' not in html
+        assert "A Paper Title With Enough Text" in html
 
     def test_prepares_viewer_html_replaces_existing_base(self):
         source = """

@@ -46,6 +46,7 @@ def parse_arxiv_html(html: str, exclude_back_matter: bool = False) -> list[HtmlB
 def prepare_arxiv_html_for_viewer(html: str, source_url: str | None = None) -> str:
     """Inject canonical block markers and a base URL so arXiv assets resolve in srcDoc."""
     _, soup = _parse_arxiv_html_document(html, exclude_back_matter=False)
+    _remove_arxiv_viewer_chrome(soup)
     if source_url:
         head = soup.find("head")
         if not head:
@@ -67,6 +68,13 @@ def prepare_arxiv_html_for_viewer(html: str, source_url: str | None = None) -> s
             head.insert(0, base)
         base["href"] = source_url
     return str(soup)
+
+
+def _remove_arxiv_viewer_chrome(soup: BeautifulSoup) -> None:
+    for element in soup.select(
+        ".arxiv-html-header, #beta-badge, .arxiv-navbar, nav.arxiv-navbar"
+    ):
+        element.decompose()
 
 
 def validate_citation(blocks: list[HtmlBlock], citation: dict) -> bool:
