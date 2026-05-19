@@ -36,7 +36,7 @@ def create_filter(body: FilterCreate, db: Session = Depends(get_db)):
         updated_at=now,
     )
     db.add(filt)
-    db.commit()
+    db.flush()
     db.refresh(filt)
     return filt.to_pydantic()
 
@@ -54,7 +54,7 @@ def update_filter(filter_id: str, body: FilterUpdate, db: Session = Depends(get_
         filt.name = body.definition.name
 
     filt.updated_at = datetime.now(timezone.utc)
-    db.commit()
+    db.flush()
     db.refresh(filt)
     return filt.to_pydantic()
 
@@ -68,7 +68,7 @@ def archive_filter(filter_id: str, db: Session = Depends(get_db)):
     filt.status = "archived"
     filt.archived_at = datetime.now(timezone.utc)
     filt.updated_at = datetime.now(timezone.utc)
-    db.commit()
+    db.flush()
     db.refresh(filt)
     return filt.to_pydantic()
 
@@ -82,7 +82,7 @@ def restore_filter(filter_id: str, db: Session = Depends(get_db)):
     filt.status = "active"
     filt.archived_at = None
     filt.updated_at = datetime.now(timezone.utc)
-    db.commit()
+    db.flush()
     db.refresh(filt)
     return filt.to_pydantic()
 
@@ -123,7 +123,7 @@ def accept_proposal(filter_id: str, db: Session = Depends(get_db)):
     else:
         raise HTTPException(status_code=400, detail="Not a pending proposal")
 
-    db.commit()
+    db.flush()
     db.refresh(filt)
     return filt.to_pydantic()
 
@@ -141,6 +141,6 @@ def reject_proposal(filter_id: str, db: Session = Depends(get_db)):
     filt.status = "archived"
     filt.archived_at = now
     filt.updated_at = now
-    db.commit()
+    db.flush()
     db.refresh(filt)
     return filt.to_pydantic()

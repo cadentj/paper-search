@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.db.session import SessionLocal
+from app.db.session import database
 from app.models.job import Job
 from app.models.paper import Paper
 from app.models.idea_map import IdeaMap
@@ -56,146 +56,242 @@ def _resolve_idea_map_job(db, idea_map_id: str, job_id: str | None) -> Job:
 
 def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
     """Worker job: generate idea map from arXiv HTML."""
-    db = SessionLocal()
-    try:
-        idea_map = db.query(IdeaMap).filter(IdeaMap.id == idea_map_id).first()
-        if not idea_map:
-            return
+    with database.session() as db:
+        try:
+            idea_map = db.query(IdeaMap).filter(IdeaMap.id == idea_map_id).first()
+            if not idea_map:
+                return
 
-        job = _resolve_idea_map_job(db, idea_map_id, job_id)
-        idea_map.status = "running"
-        idea_map.updated_at = datetime.now(timezone.utc)
-        set_job_status(job, status="running")
-        db.commit()
-
-        paper = db.query(Paper).filter(Paper.id == idea_map.paper_id).first()
-        if not paper or paper.source_type != "arxiv" or not paper.source_id:
-            idea_map.status = "skipped"
-            idea_map.dropped_reason = "Paper not found or not an arXiv paper with source_id"
+            job = _resolve_idea_map_job(db, idea_map_id, job_id)
+            idea_map.status = "running"
             idea_map.updated_at = datetime.now(timezone.utc)
-            set_job_status(job, status="skipped")
+            set_job_status(job, status="running")
             db.commit()
-            return
 
-        html_url = paper.html_url or paper.source_url
-        idea_map.source_url = html_url
+            paper = db.query(Paper).filter(Paper.id == idea_map.paper_id).first()
+            if not paper or paper.source_type != "arxiv" or not paper.source_id:
+                idea_map.status = "skipped"
+                idea_map.dropped_reason = "Paper not found or not an arXiv paper with source_id"
+                idea_map.updated_at = datetime.now(timezone.utc)
+                set_job_status(job, status="skipped")
+                db.commit()
+                return
 
-        html_content = http_get_text(paper.html_url) if paper.html_url else None
-        if not html_content:
-            idea_map.status = "skipped"
-            idea_map.dropped_reason = f"HTML not found for {paper.source_id}"
+            html_url = paper.html_url or paper.source_url
+            idea_map.source_url = html_url
+
+            html_content = http_get_text(paper.html_url) if paper.html_url else None
+            if not html_content:
+                idea_map.status = "skipped"
+                idea_map.dropped_reason = f"HTML not found for {paper.source_id}"
+                idea_map.updated_at = datetime.now(timezone.utc)
+                set_job_status(job, status="skipped")
+                db.commit()
+                return
+
+            blocks = parse_arxiv_html(html_content, exclude_back_matter=True)
+            if not blocks:
+                idea_map.status = "skipped"
+                idea_map.dropped_reason = "HTML could not be parsed into addressable blocks"
+                idea_map.updated_at = datetime.now(timezone.utc)
+                set_job_status(job, status="skipped")
+                db.commit()
+                return
+
+            prompt_blocks = blocks[:MAX_PROMPT_BLOCKS]
+            blocks_text = blocks_to_prompt_text(prompt_blocks)
+            block_map = {block.block_id: block for block in prompt_blocks}
+            response_ids: list[str] = []
+            llm_model = ""
+
+            idea_map.status = "claims_running"
+            _set_claims(idea_map, [])
             idea_map.updated_at = datetime.now(timezone.utc)
-            set_job_status(job, status="skipped")
             db.commit()
-            return
 
-        blocks = parse_arxiv_html(html_content, exclude_back_matter=True)
-        if not blocks:
-            idea_map.status = "skipped"
-            idea_map.dropped_reason = "HTML could not be parsed into addressable blocks"
-            idea_map.updated_at = datetime.now(timezone.utc)
-            set_job_status(job, status="skipped")
-            db.commit()
-            return
+            with tqdm(
+                total=None,
+                desc="idea-map claims",
+                unit="claim",
+                dynamic_ncols=True,
+                disable=None,
+            ) as claims_progress:
+                claims_result = _stream_claims(db, idea_map, blocks_text, claims_progress)
+                raw_claims = claims_result["content"].get("claims", [])
+                normalized_claims = [
+                    normalized for raw in raw_claims
+                    if (normalized := _normalize_claim(raw))
+                ]
+                if len(normalized_claims) > claims_progress.n:
+                    claims_progress.update(len(normalized_claims) - claims_progress.n)
+                claims_progress.set_postfix(claims=len(normalized_claims))
 
-        prompt_blocks = blocks[:MAX_PROMPT_BLOCKS]
-        blocks_text = blocks_to_prompt_text(prompt_blocks)
-        block_map = {block.block_id: block for block in prompt_blocks}
-        response_ids: list[str] = []
-        llm_model = ""
+            llm_model = claims_result["model"] or llm_model
+            if claims_result["response_id"]:
+                response_ids.append(claims_result["response_id"])
 
-        idea_map.status = "claims_running"
-        _set_claims(idea_map, [])
-        idea_map.updated_at = datetime.now(timezone.utc)
-        db.commit()
+            if normalized_claims:
+                _set_claims(
+                    idea_map,
+                    _merge_claims(list(idea_map.claims or []), normalized_claims),
+                )
+                idea_map.updated_at = datetime.now(timezone.utc)
+                db.commit()
 
-        with tqdm(
-            total=None,
-            desc="idea-map claims",
-            unit="claim",
-            dynamic_ncols=True,
-            disable=None,
-        ) as claims_progress:
-            claims_result = _stream_claims(db, idea_map, blocks_text, claims_progress)
-            raw_claims = claims_result["content"].get("claims", [])
-            normalized_claims = [
-                normalized for raw in raw_claims
-                if (normalized := _normalize_claim(raw))
-            ]
-            if len(normalized_claims) > claims_progress.n:
-                claims_progress.update(len(normalized_claims) - claims_progress.n)
-            claims_progress.set_postfix(claims=len(normalized_claims))
-
-        llm_model = claims_result["model"] or llm_model
-        if claims_result["response_id"]:
-            response_ids.append(claims_result["response_id"])
-
-        if normalized_claims:
-            _set_claims(
-                idea_map,
-                _merge_claims(list(idea_map.claims or []), normalized_claims),
+            claims = list(idea_map.claims or [])
+            logger.info(
+                "idea_map run=%s paper=%s arxiv=%s streamed_claims=%s final_claims=%s blocks=%s",
+                idea_map.id,
+                paper.id,
+                paper.source_id,
+                len(idea_map.claims or []),
+                len(claims),
+                len(blocks),
             )
+
+            if not claims:
+                idea_map.status = "completed"
+                idea_map.llm_model = llm_model
+                idea_map.llm_response_id = ",".join(response_ids)
+                idea_map.updated_at = datetime.now(timezone.utc)
+                set_job_status(job, status="completed")
+                db.commit()
+                return
+
+            idea_map.status = "warrants_running"
             idea_map.updated_at = datetime.now(timezone.utc)
+            job.progress = job_progress(total=len(claims))
             db.commit()
 
-        claims = list(idea_map.claims or [])
-        logger.info(
-            "idea_map run=%s paper=%s arxiv=%s streamed_claims=%s final_claims=%s blocks=%s",
-            idea_map.id,
-            paper.id,
-            paper.source_id,
-            len(idea_map.claims or []),
-            len(claims),
-            len(blocks),
-        )
+            warrant_queue: Queue[tuple[str, list[dict]]] = Queue()
+            rejected_warrant_count = 0
+            rejected_warrant_keys: set[tuple[str, str]] = set()
+            warrant_failures = 0
+            valid_warrant_count = _count_warrants(idea_map.claims)
+            max_workers = max(1, min(len(claims), LLM_MAX_CONCURRENCY))
+            with tqdm(
+                total=len(claims),
+                desc="idea-map warrants",
+                unit="claim",
+                dynamic_ncols=True,
+                disable=None,
+            ) as warrants_progress, ThreadPoolExecutor(max_workers=max_workers) as executor:
+                _set_warrant_progress(
+                    warrants_progress,
+                    valid=valid_warrant_count,
+                    rejected=rejected_warrant_count,
+                    failures=warrant_failures,
+                )
+                future_to_claim = {
+                    executor.submit(
+                        _stream_warrants_for_claim,
+                        claim,
+                        blocks_text,
+                        warrant_queue,
+                    ): claim
+                    for claim in claims
+                }
+                pending = set(future_to_claim)
 
-        if not claims:
-            idea_map.status = "completed"
-            idea_map.llm_model = llm_model
-            idea_map.llm_response_id = ",".join(response_ids)
-            idea_map.updated_at = datetime.now(timezone.utc)
-            set_job_status(job, status="completed")
-            db.commit()
-            return
+                while pending:
+                    try:
+                        claim_id, warrants = warrant_queue.get(timeout=0.2)
+                        logger.info(
+                            "idea_map run=%s paper=%s claim=%s streamed_warrants normalized_count=%s preview=%s",
+                            idea_map.id,
+                            paper.id,
+                            claim_id,
+                            len(warrants),
+                            _json_preview(warrants),
+                        )
+                        rejected_warrant_count += _persist_warrants(
+                            db,
+                            idea_map,
+                            prompt_blocks,
+                            block_map,
+                            claim_id,
+                            warrants,
+                            rejected_warrant_keys,
+                        )
+                        valid_warrant_count = _count_warrants(idea_map.claims)
+                        _set_warrant_progress(
+                            warrants_progress,
+                            valid=valid_warrant_count,
+                            rejected=rejected_warrant_count,
+                            failures=warrant_failures,
+                        )
+                    except Empty:
+                        pass
 
-        idea_map.status = "warrants_running"
-        idea_map.updated_at = datetime.now(timezone.utc)
-        job.progress = job_progress(total=len(claims))
-        db.commit()
+                    done = {future for future in pending if future.done()}
+                    for future in done:
+                        pending.remove(future)
+                        claim = future_to_claim[future]
+                        try:
+                            result = future.result()
+                            llm_model = result["model"] or llm_model
+                            if result["response_id"]:
+                                response_ids.append(result["response_id"])
+                            raw_warrants = result["content"].get("warrants", [])
+                            final_warrants = []
+                            dropped_warrants = 0
+                            for raw in raw_warrants:
+                                normalized = _normalize_warrant(
+                                    raw,
+                                    idea_map_id=idea_map.id,
+                                    paper_id=paper.id,
+                                    claim_id=claim.get("id", ""),
+                                )
+                                if normalized:
+                                    final_warrants.append(normalized)
+                                else:
+                                    dropped_warrants += 1
+                            logger.info(
+                                "idea_map run=%s paper=%s claim=%s warrant_llm_response raw_count=%s normalized_count=%s dropped_count=%s raw_preview=%s",
+                                idea_map.id,
+                                paper.id,
+                                claim.get("id", ""),
+                                len(raw_warrants),
+                                len(final_warrants),
+                                dropped_warrants,
+                                _json_preview(raw_warrants),
+                            )
+                            rejected_warrant_count += _persist_warrants(
+                                db,
+                                idea_map,
+                                prompt_blocks,
+                                block_map,
+                                claim["id"],
+                                final_warrants,
+                                rejected_warrant_keys,
+                            )
+                            valid_warrant_count = _count_warrants(idea_map.claims)
+                        except Exception:
+                            warrant_failures += 1
+                            tqdm.write(
+                                f"Idea map warrant generation failed for "
+                                f"{paper.source_id} claim={claim.get('id', '')}"
+                            )
+                            logger.exception(
+                                "idea_map run=%s paper=%s claim=%s warrant_generation_failed",
+                                idea_map.id,
+                                paper.id,
+                                claim.get("id", ""),
+                            )
+                        warrants_progress.update(1)
+                        db.commit()
+                        _set_warrant_progress(
+                            warrants_progress,
+                            valid=valid_warrant_count,
+                            rejected=rejected_warrant_count,
+                            failures=warrant_failures,
+                        )
 
-        warrant_queue: Queue[tuple[str, list[dict]]] = Queue()
-        rejected_warrant_count = 0
-        rejected_warrant_keys: set[tuple[str, str]] = set()
-        warrant_failures = 0
-        valid_warrant_count = _count_warrants(idea_map.claims)
-        max_workers = max(1, min(len(claims), LLM_MAX_CONCURRENCY))
-        with tqdm(
-            total=len(claims),
-            desc="idea-map warrants",
-            unit="claim",
-            dynamic_ncols=True,
-            disable=None,
-        ) as warrants_progress, ThreadPoolExecutor(max_workers=max_workers) as executor:
-            _set_warrant_progress(
-                warrants_progress,
-                valid=valid_warrant_count,
-                rejected=rejected_warrant_count,
-                failures=warrant_failures,
-            )
-            future_to_claim = {
-                executor.submit(
-                    _stream_warrants_for_claim,
-                    claim,
-                    blocks_text,
-                    warrant_queue,
-                ): claim
-                for claim in claims
-            }
-            pending = set(future_to_claim)
-
-            while pending:
-                try:
-                    claim_id, warrants = warrant_queue.get(timeout=0.2)
+                while True:
+                    try:
+                        claim_id, warrants = warrant_queue.get_nowait()
+                    except Empty:
+                        break
                     logger.info(
                         "idea_map run=%s paper=%s claim=%s streamed_warrants normalized_count=%s preview=%s",
                         idea_map.id,
@@ -220,139 +316,41 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
                         rejected=rejected_warrant_count,
                         failures=warrant_failures,
                     )
-                except Empty:
-                    pass
 
-                done = {future for future in pending if future.done()}
-                for future in done:
-                    pending.remove(future)
-                    claim = future_to_claim[future]
-                    try:
-                        result = future.result()
-                        llm_model = result["model"] or llm_model
-                        if result["response_id"]:
-                            response_ids.append(result["response_id"])
-                        raw_warrants = result["content"].get("warrants", [])
-                        final_warrants = []
-                        dropped_warrants = 0
-                        for raw in raw_warrants:
-                            normalized = _normalize_warrant(
-                                raw,
-                                idea_map_id=idea_map.id,
-                                paper_id=paper.id,
-                                claim_id=claim.get("id", ""),
-                            )
-                            if normalized:
-                                final_warrants.append(normalized)
-                            else:
-                                dropped_warrants += 1
-                        logger.info(
-                            "idea_map run=%s paper=%s claim=%s warrant_llm_response raw_count=%s normalized_count=%s dropped_count=%s raw_preview=%s",
-                            idea_map.id,
-                            paper.id,
-                            claim.get("id", ""),
-                            len(raw_warrants),
-                            len(final_warrants),
-                            dropped_warrants,
-                            _json_preview(raw_warrants),
-                        )
-                        rejected_warrant_count += _persist_warrants(
-                            db,
-                            idea_map,
-                            prompt_blocks,
-                            block_map,
-                            claim["id"],
-                            final_warrants,
-                            rejected_warrant_keys,
-                        )
-                        valid_warrant_count = _count_warrants(idea_map.claims)
-                    except Exception:
-                        warrant_failures += 1
-                        tqdm.write(
-                            f"Idea map warrant generation failed for "
-                            f"{paper.source_id} claim={claim.get('id', '')}"
-                        )
-                        logger.exception(
-                            "idea_map run=%s paper=%s claim=%s warrant_generation_failed",
-                            idea_map.id,
-                            paper.id,
-                            claim.get("id", ""),
-                        )
-                    warrants_progress.update(1)
-                    db.commit()
-                    _set_warrant_progress(
-                        warrants_progress,
-                        valid=valid_warrant_count,
-                        rejected=rejected_warrant_count,
-                        failures=warrant_failures,
-                    )
-
-            while True:
-                try:
-                    claim_id, warrants = warrant_queue.get_nowait()
-                except Empty:
-                    break
-                logger.info(
-                    "idea_map run=%s paper=%s claim=%s streamed_warrants normalized_count=%s preview=%s",
-                    idea_map.id,
-                    paper.id,
-                    claim_id,
-                    len(warrants),
-                    _json_preview(warrants),
-                )
-                rejected_warrant_count += _persist_warrants(
-                    db,
-                    idea_map,
-                    prompt_blocks,
-                    block_map,
-                    claim_id,
-                    warrants,
-                    rejected_warrant_keys,
-                )
-                valid_warrant_count = _count_warrants(idea_map.claims)
-                _set_warrant_progress(
-                    warrants_progress,
-                    valid=valid_warrant_count,
-                    rejected=rejected_warrant_count,
-                    failures=warrant_failures,
+            if rejected_warrant_count:
+                tqdm.write(
+                    f"Idea map rejected {rejected_warrant_count} invalid warrant "
+                    f"citations for {paper.source_id}"
                 )
 
-        if rejected_warrant_count:
-            tqdm.write(
-                f"Idea map rejected {rejected_warrant_count} invalid warrant "
-                f"citations for {paper.source_id}"
+            logger.info(
+                "idea_map run=%s paper=%s validated_claims=%s validated_warrants=%s rejected_warrants=%s warrant_failures=%s",
+                idea_map.id,
+                paper.id,
+                len(idea_map.claims or []),
+                sum(len(claim.get("warrants", [])) for claim in idea_map.claims or []),
+                rejected_warrant_count,
+                warrant_failures,
             )
-
-        logger.info(
-            "idea_map run=%s paper=%s validated_claims=%s validated_warrants=%s rejected_warrants=%s warrant_failures=%s",
-            idea_map.id,
-            paper.id,
-            len(idea_map.claims or []),
-            sum(len(claim.get("warrants", [])) for claim in idea_map.claims or []),
-            rejected_warrant_count,
-            warrant_failures,
-        )
-        _set_claims(idea_map, list(idea_map.claims or []))
-        idea_map.llm_model = llm_model
-        idea_map.llm_response_id = ",".join(response_ids)
-        idea_map.status = "completed"
-        idea_map.updated_at = datetime.now(timezone.utc)
-        set_job_status(job, status="completed")
-        db.commit()
-
-    except Exception as e:
-        db.rollback()
-        idea_map = db.query(IdeaMap).filter(IdeaMap.id == idea_map_id).first()
-        if idea_map:
-            idea_map.status = "failed"
-            idea_map.error = str(e)
+            _set_claims(idea_map, list(idea_map.claims or []))
+            idea_map.llm_model = llm_model
+            idea_map.llm_response_id = ",".join(response_ids)
+            idea_map.status = "completed"
             idea_map.updated_at = datetime.now(timezone.utc)
-            job = _resolve_idea_map_job(db, idea_map_id, job_id)
-            set_job_status(job, status="failed", error=idea_map.error)
+            set_job_status(job, status="completed")
             db.commit()
-        raise
-    finally:
-        db.close()
+
+        except Exception as e:
+            db.rollback()
+            idea_map = db.query(IdeaMap).filter(IdeaMap.id == idea_map_id).first()
+            if idea_map:
+                idea_map.status = "failed"
+                idea_map.error = str(e)
+                idea_map.updated_at = datetime.now(timezone.utc)
+                job = _resolve_idea_map_job(db, idea_map_id, job_id)
+                set_job_status(job, status="failed", error=idea_map.error)
+                db.commit()
+            raise
 
 
 def _preview(value: object, limit: int = 500) -> str:

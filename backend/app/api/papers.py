@@ -210,7 +210,7 @@ def update_paper_notes(paper_id: str, body: PaperNoteUpdate, db: Session = Depen
             updated_at=now,
         )
         db.add(note)
-    db.commit()
+    db.flush()
     db.refresh(note)
     return PaperNoteResponse(
         id=note.id, paper_id=note.paper_id, text=note.text,

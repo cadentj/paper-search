@@ -51,7 +51,7 @@ def get_daily_candidate_count(run_date: date, db: Session = Depends(get_db)):
             status_code=400,
             detail=f"{run_date} is outside the configured daily search window",
         )
-    counts_by_source = counts_by_source_for_date(enabled_source_types(db), run_date)
+    counts_by_source = counts_by_source_for_date(db, enabled_source_types(db), run_date)
     return {
         "date": run_date,
         "count": sum(counts_by_source.values()),

@@ -24,7 +24,6 @@ DEFAULT_SOURCES = {
 
 
 def ensure_default_data_sources(db: Session) -> list[DataSource]:
-    changed = False
     for source_type, defaults in DEFAULT_SOURCES.items():
         existing = db.query(DataSource).filter(DataSource.source_type == source_type).first()
         if existing:
@@ -40,9 +39,7 @@ def ensure_default_data_sources(db: Session) -> list[DataSource]:
                 updated_at=now,
             )
         )
-        changed = True
-    if changed:
-        db.commit()
+    db.flush()
     return list_data_sources(db)
 
 

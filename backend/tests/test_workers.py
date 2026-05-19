@@ -23,9 +23,9 @@ from app.llm.schemas import (
 
 
 class TestExtractOnboardingFilters:
-    def test_persists_proposed_filters(self, db_session, db_engine, monkeypatch):
-        from sqlalchemy.orm import sessionmaker
-
+    def test_persists_proposed_filters(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
         # Create extraction record
         ext_id = str(uuid.uuid4())
         extraction = OnboardingExtraction(
@@ -37,9 +37,6 @@ class TestExtractOnboardingFilters:
         )
         db_session.add(extraction)
         db_session.commit()
-
-        # Patch SessionLocal in the jobs module to use test DB
-        TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
 
         def fake_stream_structured_response(**kwargs):
             assert kwargs["profile"] == FILTER_GENERATION_PROFILE
@@ -63,7 +60,6 @@ class TestExtractOnboardingFilters:
                 "response_id": "onboarding-response",
             }
 
-        monkeypatch.setattr("app.jobs.onboarding.SessionLocal", TestSession)
         monkeypatch.setattr(
             "app.jobs.onboarding.stream_structured_response",
             fake_stream_structured_response,
@@ -91,6 +87,13 @@ def _paper_fixture(source_id: str, title: str) -> dict:
         "html_url": f"https://arxiv.org/html/{source_id}",
         "source_url": f"https://arxiv.org/abs/{source_id}",
     }
+
+
+def _mock_papers_for_sources(monkeypatch, papers: list) -> None:
+    monkeypatch.setattr(
+        "app.jobs.daily_search.papers_for_sources",
+        lambda db, sources, rd, seeded=papers: seeded,
+    )
 
 
 def _papers_from_dicts(db_session, papers: list[dict]) -> list:
@@ -136,14 +139,9 @@ def _daily_summary_job(db_session, run_id: str):
     )
 
 
-def _run_summary_for_run(db_session, run_id: str, monkeypatch, db_engine) -> None:
-    from sqlalchemy.orm import sessionmaker
-
+def _run_summary_for_run(db_session, run_id: str) -> None:
     from app.services.jobs import create_job
     from app.jobs.daily_search_summary import summarize_daily_search
-
-    test_session = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-    monkeypatch.setattr("app.jobs.daily_search_summary.SessionLocal", test_session)
 
     summary_job = create_job(
         db_session,
@@ -154,6 +152,26 @@ def _run_summary_for_run(db_session, run_id: str, monkeypatch, db_engine) -> Non
     )
     db_session.commit()
     summarize_daily_search(run_id, summary_job.id)
+
+
+def _create_daily_search_job(db_session, run_id: str):
+    from app.services.jobs import create_job
+
+    job = create_job(
+        db_session,
+        kind="daily_search",
+        subject_type="search_run",
+        subject_id=run_id,
+        status="queued",
+    )
+    db_session.commit()
+    return job
+
+
+def _run_daily_search(db_session, run_id: str, job_id: str) -> None:
+    from app.jobs.daily_search import run_daily_search
+
+    run_daily_search(run_id, job_id)
 
 
 def _extract_prompt_arxiv_id(user_prompt: str) -> str:
@@ -228,8 +246,7 @@ def _fake_summary_llm(*, matched_arxiv_id: str):
 
 
 class TestRunDailySearch:
-    def test_persists_matches_without_inline_summary(self, db_session, db_engine, monkeypatch):
-        from sqlalchemy.orm import sessionmaker
+    def test_persists_matches_without_inline_summary(self, db_session, patch_worker_database, monkeypatch):
 
         # Create active filter
         filt = Filter(
@@ -262,14 +279,8 @@ class TestRunDailySearch:
         ]
         db_session.commit()
 
-        # Patch SessionLocal
-        TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-        monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
-        monkeypatch.setattr(
-            "app.jobs.daily_search.papers_for_sources",
-            lambda sources, rd, p=daily_papers, db=db_session: _papers_from_dicts(
-                db, p
-            ),
+        _mock_papers_for_sources(
+            monkeypatch, _papers_from_dicts(db_session, daily_papers)
         )
         monkeypatch.setattr(
             "app.jobs.daily_search.async_call_llm",
@@ -280,8 +291,8 @@ class TestRunDailySearch:
             _fake_summary_llm(matched_arxiv_id="2605.00001"),
         )
 
-        from app.jobs.daily_search import run_daily_search
-        run_daily_search(run_id)
+        job = _create_daily_search_job(db_session, run_id)
+        _run_daily_search(db_session, run_id, job.id)
 
         db_session.expire_all()
         updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
@@ -300,7 +311,7 @@ class TestRunDailySearch:
         )
         assert match_count == updated_run.match_count
 
-        _run_summary_for_run(db_session, run_id, monkeypatch, db_engine)
+        _run_summary_for_run(db_session, run_id)
         db_session.expire_all()
         updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
         summary_job = _daily_summary_job(db_session, run_id)
@@ -309,8 +320,7 @@ class TestRunDailySearch:
         assert updated_run.status == "completed"
         assert updated_run.summary is not None
 
-    def test_ignores_archived_filters(self, db_session, db_engine, monkeypatch):
-        from sqlalchemy.orm import sessionmaker
+    def test_ignores_archived_filters(self, db_session, patch_worker_database, monkeypatch):
 
         # Create archived filter only
         filt = Filter(
@@ -338,17 +348,13 @@ class TestRunDailySearch:
         db_session.add(run)
         db_session.commit()
 
-        TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-        monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
-        monkeypatch.setattr(
-            "app.jobs.daily_search.papers_for_sources",
-            lambda sources, rd, db=db_session: _papers_from_dicts(
-                db, [_paper_fixture("2605.00004", "Fetched Paper")]
-            ),
+        _mock_papers_for_sources(
+            monkeypatch,
+            _papers_from_dicts(db_session, [_paper_fixture("2605.00004", "Fetched Paper")]),
         )
 
-        from app.jobs.daily_search import run_daily_search
-        run_daily_search(run_id)
+        job = _create_daily_search_job(db_session, run_id)
+        _run_daily_search(db_session, run_id, job.id)
 
         db_session.expire_all()
         updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
@@ -359,14 +365,13 @@ class TestRunDailySearch:
         assert updated_run.summary is None
         assert updated_run.match_count == 0
 
-        _run_summary_for_run(db_session, run_id, monkeypatch, db_engine)
+        _run_summary_for_run(db_session, run_id)
         db_session.expire_all()
         updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
         assert updated_run.status == "completed"
         assert updated_run.summary == "No active filters to search."
 
-    def test_searches_only_papers_for_run_date(self, db_session, db_engine, monkeypatch):
-        from sqlalchemy.orm import sessionmaker
+    def test_searches_only_papers_for_run_date(self, db_session, patch_worker_database, monkeypatch):
 
         filt = Filter(
             id=str(uuid.uuid4()),
@@ -403,13 +408,9 @@ class TestRunDailySearch:
         db_session.add(excluded)
         db_session.commit()
 
-        TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-        monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
-        monkeypatch.setattr(
-            "app.jobs.daily_search.papers_for_sources",
-            lambda sources, rd, db=db_session: _papers_from_dicts(
-                db, [_paper_fixture("2401.00001", "Included Paper")]
-            ),
+        _mock_papers_for_sources(
+            monkeypatch,
+            _papers_from_dicts(db_session, [_paper_fixture("2401.00001", "Included Paper")]),
         )
 
         def assert_prompt(user_prompt: str):
@@ -423,8 +424,8 @@ class TestRunDailySearch:
                 assert_prompt=assert_prompt,
             ),
         )
-        from app.jobs.daily_search import run_daily_search
-        run_daily_search(run_id)
+        job = _create_daily_search_job(db_session, run_id)
+        _run_daily_search(db_session, run_id, job.id)
 
         db_session.expire_all()
         updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
@@ -439,9 +440,8 @@ class TestRunDailySearch:
         assert {m.paper_id for m in matches} == {included.id}
 
     def test_missing_openrouter_key_fails_without_demo_data(
-        self, db_session, db_engine, monkeypatch
+        self, db_session, patch_worker_database, monkeypatch
     ):
-        from sqlalchemy.orm import sessionmaker
 
         filt = Filter(
             id=str(uuid.uuid4()),
@@ -478,18 +478,13 @@ class TestRunDailySearch:
         db_session.add(paper)
         db_session.commit()
 
-        TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-        monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
-        monkeypatch.setattr(
-            "app.jobs.daily_search.papers_for_sources",
-            lambda sources, rd, p=paper: [p],
-        )
+        _mock_papers_for_sources(monkeypatch, [paper])
         monkeypatch.setattr("app.core.config.settings.OPENROUTER_API_KEY", "")
 
-        from app.jobs.daily_search import run_daily_search
+        job = _create_daily_search_job(db_session, run_id)
 
         try:
-            run_daily_search(run_id)
+            _run_daily_search(db_session, run_id, job.id)
         except RuntimeError as exc:
             assert "OPENROUTER_API_KEY" in str(exc)
         else:
@@ -503,9 +498,8 @@ class TestRunDailySearch:
         assert matches == []
 
     def test_pair_failures_increment_progress_when_some_pairs_succeed(
-        self, db_session, db_engine, monkeypatch
+        self, db_session, patch_worker_database, monkeypatch
     ):
-        from sqlalchemy.orm import sessionmaker
 
         filt = Filter(
             id=str(uuid.uuid4()),
@@ -536,13 +530,8 @@ class TestRunDailySearch:
         ]
         db_session.commit()
 
-        TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-        monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
-        monkeypatch.setattr(
-            "app.jobs.daily_search.papers_for_sources",
-            lambda sources, rd, p=daily_papers, db=db_session: _papers_from_dicts(
-                db, p
-            ),
+        _mock_papers_for_sources(
+            monkeypatch, _papers_from_dicts(db_session, daily_papers)
         )
         monkeypatch.setattr(
             "app.jobs.daily_search.async_call_llm",
@@ -556,8 +545,8 @@ class TestRunDailySearch:
             _fake_summary_llm(matched_arxiv_id="2605.00010"),
         )
 
-        from app.jobs.daily_search import run_daily_search
-        run_daily_search(run_id)
+        job = _create_daily_search_job(db_session, run_id)
+        _run_daily_search(db_session, run_id, job.id)
 
         db_session.expire_all()
         updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
@@ -575,14 +564,13 @@ class TestRunDailySearch:
         )
         assert match_count == 1
 
-        _run_summary_for_run(db_session, run_id, monkeypatch, db_engine)
+        _run_summary_for_run(db_session, run_id)
         db_session.expire_all()
         updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
         assert updated_run.status == "completed"
         assert updated_run.summary is not None
 
-    def test_all_pair_failures_mark_run_failed(self, db_session, db_engine, monkeypatch):
-        from sqlalchemy.orm import sessionmaker
+    def test_all_pair_failures_mark_run_failed(self, db_session, patch_worker_database, monkeypatch):
 
         filt = Filter(
             id=str(uuid.uuid4()),
@@ -610,13 +598,8 @@ class TestRunDailySearch:
         daily_papers = [_paper_fixture("2605.00012", "Failing Paper")]
         db_session.commit()
 
-        TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-        monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
-        monkeypatch.setattr(
-            "app.jobs.daily_search.papers_for_sources",
-            lambda sources, rd, p=daily_papers, db=db_session: _papers_from_dicts(
-                db, p
-            ),
+        _mock_papers_for_sources(
+            monkeypatch, _papers_from_dicts(db_session, daily_papers)
         )
         monkeypatch.setattr(
             "app.jobs.daily_search.async_call_llm",
@@ -624,12 +607,12 @@ class TestRunDailySearch:
                 matched_arxiv_ids=set(),
                 fail_arxiv_ids={"2605.00012"},
             ),
-        )
+        ),
 
-        from app.jobs.daily_search import run_daily_search
+        job = _create_daily_search_job(db_session, run_id)
 
         try:
-            run_daily_search(run_id)
+            _run_daily_search(db_session, run_id, job.id)
         except RuntimeError as exc:
             assert "All 1 filter-item evaluations failed" in str(exc)
         else:
@@ -644,8 +627,7 @@ class TestRunDailySearch:
 
 
 class TestSummarizeDailySearch:
-    def test_summarize_reads_matches_from_database(self, db_session, db_engine, monkeypatch):
-        from sqlalchemy.orm import sessionmaker
+    def test_summarize_reads_matches_from_database(self, db_session, patch_worker_database, monkeypatch):
 
         filt_id = str(uuid.uuid4())
         filt = Filter(
@@ -697,8 +679,6 @@ class TestSummarizeDailySearch:
         )
         db_session.commit()
 
-        TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-        monkeypatch.setattr("app.jobs.daily_search_summary.SessionLocal", TestSession)
         monkeypatch.setattr(
             "app.jobs.daily_search_summary.call_llm",
             _fake_summary_llm(matched_arxiv_id="2605.00001"),

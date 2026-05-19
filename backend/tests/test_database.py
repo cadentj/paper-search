@@ -1,0 +1,73 @@
+"""Unit tests for Database.session() transaction behavior."""
+
+import uuid
+from datetime import datetime, timezone
+
+import pytest
+
+from app.db.session import Database
+from app.models.filter import Filter
+
+
+@pytest.fixture
+def isolated_database(db_engine):
+    return Database(db_engine)
+
+
+def test_session_commits_on_success(isolated_database):
+    filt_id = str(uuid.uuid4())
+    with isolated_database.session() as db:
+        db.add(
+            Filter(
+                id=filt_id,
+                name="Committed Filter",
+                definition={"name": "Committed Filter", "description": "", "mode": "topic"},
+                status="active",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+
+    with isolated_database.session() as db:
+        filt = db.query(Filter).filter(Filter.id == filt_id).first()
+        assert filt is not None
+        assert filt.name == "Committed Filter"
+
+
+def test_session_rolls_back_on_exception(isolated_database):
+    filt_id = str(uuid.uuid4())
+    with pytest.raises(ValueError):
+        with isolated_database.session() as db:
+            db.add(
+                Filter(
+                    id=filt_id,
+                    name="Rolled Back",
+                    definition={"name": "Rolled Back", "description": "", "mode": "topic"},
+                    status="active",
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
+                )
+            )
+            raise ValueError("abort")
+
+    with isolated_database.session() as db:
+        assert db.query(Filter).filter(Filter.id == filt_id).first() is None
+
+
+def test_explicit_commit_inside_session_is_harmless(isolated_database):
+    filt_id = str(uuid.uuid4())
+    with isolated_database.session() as db:
+        db.add(
+            Filter(
+                id=filt_id,
+                name="Double Commit",
+                definition={"name": "Double Commit", "description": "", "mode": "topic"},
+                status="active",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+        db.commit()
+
+    with isolated_database.session() as db:
+        assert db.query(Filter).filter(Filter.id == filt_id).first() is not None

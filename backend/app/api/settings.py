@@ -45,6 +45,6 @@ def update_daily_schedule(body: DailyScheduleUpdate, db: Session = Depends(get_d
         setting = AppSetting(key=DAILY_SCHEDULE_KEY, value=data, updated_at=now)
         db.add(setting)
 
-    db.commit()
+    db.flush()
     db.refresh(setting)
     return DailyScheduleResponse(**setting.value)

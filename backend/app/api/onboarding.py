@@ -102,7 +102,7 @@ def promote_draft_filters(
         filt.status = "active"
         filt.updated_at = now
 
-    db.commit()
+    db.flush()
     for filt in ordered_filters:
         db.refresh(filt)
     return [filt.to_pydantic() for filt in ordered_filters]
@@ -188,7 +188,7 @@ def complete_onboarding(body: OnboardingCompleteRequest, db: Session = Depends(g
         db.add(filt)
         created_filters.append(filt)
 
-    db.commit()
+    db.flush()
     for f in created_filters:
         db.refresh(f)
 

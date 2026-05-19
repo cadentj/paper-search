@@ -14,6 +14,7 @@ for _key, _default in (
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
+from app.db.session import Database
 from app.models.base import Base
 
 
@@ -29,6 +30,7 @@ def db_engine(tmp_path):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA busy_timeout=5000")
         cursor.close()
 
     # Import all models so they register with Base
@@ -46,26 +48,45 @@ def db_engine(tmp_path):
 
 
 @pytest.fixture
+def test_database(db_engine):
+    """Test Database wrapper around the temporary engine."""
+    return Database(db_engine)
+
+
+@pytest.fixture
 def db_session(db_engine):
-    """Create a database session for testing."""
+    """Long-lived session for test setup assertions (avoids SQLite lock vs workers)."""
     Session = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
     session = Session()
     yield session
     session.close()
 
 
-@pytest.fixture
-def client(db_engine, monkeypatch):
-    """Create a FastAPI test client with a test database."""
-    from sqlalchemy.orm import sessionmaker
-    Session = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+_WORKER_DATABASE_MODULES = (
+    "app.jobs.daily_search",
+    "app.jobs.daily_search_summary",
+    "app.jobs.documents",
+    "app.jobs.feedback_reflection",
+    "app.jobs.idea_map",
+    "app.jobs.onboarding",
+    "app.jobs.scholar_import",
+)
 
+
+@pytest.fixture
+def patch_worker_database(monkeypatch, test_database):
+    """Point app workers at the test database (patch use-sites, not only session)."""
+    monkeypatch.setattr("app.db.session.database", test_database)
+    for module in _WORKER_DATABASE_MODULES:
+        monkeypatch.setattr(f"{module}.database", test_database, raising=False)
+
+
+@pytest.fixture
+def client(test_database):
+    """Create a FastAPI test client with a test database."""
     def override_get_db():
-        db = Session()
-        try:
+        with test_database.session() as db:
             yield db
-        finally:
-            db.close()
 
     # Must import after engine setup
     from app.main import app
@@ -73,6 +94,6 @@ def client(db_engine, monkeypatch):
     from fastapi.testclient import TestClient
 
     app.dependency_overrides[get_db] = override_get_db
-    client = TestClient(app)
-    yield client
+    test_client = TestClient(app)
+    yield test_client
     app.dependency_overrides.clear()

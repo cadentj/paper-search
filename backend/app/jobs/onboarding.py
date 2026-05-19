@@ -4,7 +4,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 
-from app.db.session import SessionLocal
+from app.db.session import database
 from app.models.document import Document
 from app.models.filter import Filter
 from app.models.job import Job
@@ -134,151 +134,147 @@ def generate_onboarding_draft_filters(
     job_id: str,
 ) -> None:
     """Worker job: generate draft filters from text and ready document summaries."""
-    db = SessionLocal()
-    try:
-        job = db.query(Job).filter(Job.id == job_id).first()
-        if not job:
-            return
-
-        set_job_status(job, status="running")
-        db.commit()
-
-        summaries = _document_summaries(db, document_ids)
-        user_prompt = ONBOARDING_WITH_DOCUMENTS_USER_PROMPT.format(
-            input_text=input_text or "(No additional text provided.)",
-            document_summaries="\n\n".join(summaries)
-            if summaries
-            else "(No ready document summaries selected.)",
-        )
-        text_buffer = ""
-        last_count = 0
-        created_llm_ids: set[str] = set()
-
-        def create_new_filters(parsed_filters: list[dict]) -> None:
-            nonlocal last_count
-            new_items = []
-            for raw in parsed_filters:
-                llm_id = raw.get("id") or str(uuid.uuid4())
-                raw["id"] = llm_id
-                if llm_id in created_llm_ids:
-                    continue
-                created_llm_ids.add(llm_id)
-                new_items.append(raw)
-            if not new_items:
+    with database.session() as db:
+        try:
+            job = db.query(Job).filter(Job.id == job_id).first()
+            if not job:
                 return
 
-            for raw in new_items:
-                _create_draft_filter(db, raw, job_id)
+            set_job_status(job, status="running")
             db.commit()
-            last_count = len(parsed_filters)
 
-        def handle_delta(delta: str) -> None:
-            nonlocal text_buffer
-            text_buffer += delta
-            parsed_filters = _extract_complete_filter_objects(text_buffer)
-            if len(parsed_filters) <= last_count:
-                return
-            create_new_filters(parsed_filters)
+            summaries = _document_summaries(db, document_ids)
+            user_prompt = ONBOARDING_WITH_DOCUMENTS_USER_PROMPT.format(
+                input_text=input_text or "(No additional text provided.)",
+                document_summaries="\n\n".join(summaries)
+                if summaries
+                else "(No ready document summaries selected.)",
+            )
+            text_buffer = ""
+            last_count = 0
+            created_llm_ids: set[str] = set()
 
-        result = stream_structured_response(
-            system_prompt=ONBOARDING_SYSTEM_PROMPT,
-            user_prompt=user_prompt,
-            response_model=OnboardingFiltersResponse,
-            on_text_delta=handle_delta,
-            profile=FILTER_GENERATION_PROFILE,
-        )
+            def create_new_filters(parsed_filters: list[dict]) -> None:
+                nonlocal last_count
+                new_items = []
+                for raw in parsed_filters:
+                    llm_id = raw.get("id") or str(uuid.uuid4())
+                    raw["id"] = llm_id
+                    if llm_id in created_llm_ids:
+                        continue
+                    created_llm_ids.add(llm_id)
+                    new_items.append(raw)
+                if not new_items:
+                    return
 
-        proposed = result["content"].get("proposedFilters", [])
-        create_new_filters([_normalize_filter(f) or f for f in proposed])
+                for raw in new_items:
+                    _create_draft_filter(db, raw, job_id)
+                db.commit()
+                last_count = len(parsed_filters)
 
-        set_job_status(job, status="completed")
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        job = db.query(Job).filter(Job.id == job_id).first()
-        if job:
-            set_job_status(job, status="failed", error=str(e))
+            def handle_delta(delta: str) -> None:
+                nonlocal text_buffer
+                text_buffer += delta
+                parsed_filters = _extract_complete_filter_objects(text_buffer)
+                if len(parsed_filters) <= last_count:
+                    return
+                create_new_filters(parsed_filters)
+
+            result = stream_structured_response(
+                system_prompt=ONBOARDING_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                response_model=OnboardingFiltersResponse,
+                on_text_delta=handle_delta,
+                profile=FILTER_GENERATION_PROFILE,
+            )
+
+            proposed = result["content"].get("proposedFilters", [])
+            create_new_filters([_normalize_filter(f) or f for f in proposed])
+
+            set_job_status(job, status="completed")
             db.commit()
-        raise
-    finally:
-        db.close()
+        except Exception as e:
+            db.rollback()
+            job = db.query(Job).filter(Job.id == job_id).first()
+            if job:
+                set_job_status(job, status="failed", error=str(e))
+                db.commit()
+            raise
 
 
 def extract_onboarding_filters(extraction_id: str, job_id: str | None = None) -> None:
     """Worker job: extract proposed filters from onboarding text."""
-    db = SessionLocal()
-    try:
-        extraction = db.query(OnboardingExtraction).filter(
-            OnboardingExtraction.id == extraction_id
-        ).first()
-        if not extraction:
-            return
-
-        job = _resolve_onboarding_job(db, extraction_id, job_id)
-        now = datetime.now(timezone.utc)
-        extraction.status = "running"
-        extraction.updated_at = now
-        set_job_status(job, status="running")
-        db.commit()
-
-        user_prompt = ONBOARDING_USER_PROMPT.format(input_text=extraction.input_text)
-        text_buffer = ""
-        last_count = 0
-
-        def handle_delta(delta: str) -> None:
-            nonlocal text_buffer, last_count
-            text_buffer += delta
-            parsed_filters = _extract_complete_filter_objects(text_buffer)
-            if len(parsed_filters) <= last_count:
+    with database.session() as db:
+        try:
+            extraction = db.query(OnboardingExtraction).filter(
+                OnboardingExtraction.id == extraction_id
+            ).first()
+            if not extraction:
                 return
 
-            current = list(extraction.proposed_filters or [])
-            extraction.proposed_filters = _merge_filters(current, parsed_filters)
-            extraction.updated_at = datetime.now(timezone.utc)
-            last_count = len(parsed_filters)
-            db.commit()
-
-        result = stream_structured_response(
-            system_prompt=ONBOARDING_SYSTEM_PROMPT,
-            user_prompt=user_prompt,
-            response_model=OnboardingFiltersResponse,
-            on_text_delta=handle_delta,
-            profile=FILTER_GENERATION_PROFILE,
-        )
-
-        content = result["content"]
-        proposed = content.get("proposedFilters", [])
-
-        for f in proposed:
-            if "id" not in f:
-                f["id"] = str(uuid.uuid4())
-
-        extraction.proposed_filters = _merge_filters(
-            list(extraction.proposed_filters or []),
-            [_normalize_filter(f) or f for f in proposed],
-        )
-        extraction.llm_model = result["model"]
-        extraction.llm_response_id = result["response_id"]
-        extraction.status = "completed"
-        extraction.completed_at = datetime.now(timezone.utc)
-        extraction.updated_at = datetime.now(timezone.utc)
-        job.completed_at = extraction.completed_at
-        set_job_status(job, status="completed")
-        db.commit()
-
-    except Exception as e:
-        db.rollback()
-        extraction = db.query(OnboardingExtraction).filter(
-            OnboardingExtraction.id == extraction_id
-        ).first()
-        if extraction:
-            now = datetime.now(timezone.utc)
-            extraction.status = "failed"
-            extraction.error = str(e)
-            extraction.updated_at = now
             job = _resolve_onboarding_job(db, extraction_id, job_id)
-            set_job_status(job, status="failed", error=extraction.error)
+            now = datetime.now(timezone.utc)
+            extraction.status = "running"
+            extraction.updated_at = now
+            set_job_status(job, status="running")
             db.commit()
-        raise
-    finally:
-        db.close()
+
+            user_prompt = ONBOARDING_USER_PROMPT.format(input_text=extraction.input_text)
+            text_buffer = ""
+            last_count = 0
+
+            def handle_delta(delta: str) -> None:
+                nonlocal text_buffer, last_count
+                text_buffer += delta
+                parsed_filters = _extract_complete_filter_objects(text_buffer)
+                if len(parsed_filters) <= last_count:
+                    return
+
+                current = list(extraction.proposed_filters or [])
+                extraction.proposed_filters = _merge_filters(current, parsed_filters)
+                extraction.updated_at = datetime.now(timezone.utc)
+                last_count = len(parsed_filters)
+                db.commit()
+
+            result = stream_structured_response(
+                system_prompt=ONBOARDING_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                response_model=OnboardingFiltersResponse,
+                on_text_delta=handle_delta,
+                profile=FILTER_GENERATION_PROFILE,
+            )
+
+            content = result["content"]
+            proposed = content.get("proposedFilters", [])
+
+            for f in proposed:
+                if "id" not in f:
+                    f["id"] = str(uuid.uuid4())
+
+            extraction.proposed_filters = _merge_filters(
+                list(extraction.proposed_filters or []),
+                [_normalize_filter(f) or f for f in proposed],
+            )
+            extraction.llm_model = result["model"]
+            extraction.llm_response_id = result["response_id"]
+            extraction.status = "completed"
+            extraction.completed_at = datetime.now(timezone.utc)
+            extraction.updated_at = datetime.now(timezone.utc)
+            job.completed_at = extraction.completed_at
+            set_job_status(job, status="completed")
+            db.commit()
+
+        except Exception as e:
+            db.rollback()
+            extraction = db.query(OnboardingExtraction).filter(
+                OnboardingExtraction.id == extraction_id
+            ).first()
+            if extraction:
+                now = datetime.now(timezone.utc)
+                extraction.status = "failed"
+                extraction.error = str(e)
+                extraction.updated_at = now
+                job = _resolve_onboarding_job(db, extraction_id, job_id)
+                set_job_status(job, status="failed", error=extraction.error)
+                db.commit()
+            raise

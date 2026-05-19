@@ -33,6 +33,6 @@ def update_data_source(
     if request.settings is not None:
         source.settings = {**(source.settings or {}), **request.settings}
     source.updated_at = datetime.now(timezone.utc)
-    db.commit()
+    db.flush()
     db.refresh(source)
     return source.to_pydantic()

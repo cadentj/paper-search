@@ -15,7 +15,7 @@ from app.api.feedback import router as feedback_router
 from app.api.settings import router as settings_router
 from app.api.scholar import router as scholar_router
 from app.models import Base
-from app.db.session import SessionLocal, engine
+from app.db.session import database, engine
 from app.models.paper import Paper
 from app.services.daily_dates import DEFAULT_DAILY_SEARCH_DATE
 
@@ -23,10 +23,9 @@ logger = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
 
-_db = SessionLocal()
-try:
+with database.session() as db:
     if (
-        _db.query(Paper)
+        db.query(Paper)
         .filter(func.date(Paper.published_at) == DEFAULT_DAILY_SEARCH_DATE)
         .count()
         == 0
@@ -35,8 +34,6 @@ try:
             "No synced daily index for %s — run: uv run --directory scripts python sync.py",
             DEFAULT_DAILY_SEARCH_DATE,
         )
-finally:
-    _db.close()
 
 app = FastAPI(title="Paper Search API", version="0.1.0")
 

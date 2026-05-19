@@ -74,7 +74,7 @@ def submit_match_feedback(match_id: str, body: MatchFeedbackRequest, db: Session
         )
         db.add(feedback)
 
-    db.commit()
+    db.flush()
     db.refresh(feedback)
 
     return FeedbackResponse(
@@ -115,7 +115,7 @@ def submit_paper_feedback(paper_id: str, body: PaperFeedbackRequest, db: Session
         )
         db.add(feedback)
 
-    db.commit()
+    db.flush()
     db.refresh(feedback)
 
     return FeedbackResponse(
