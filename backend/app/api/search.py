@@ -143,8 +143,8 @@ def get_daily_candidate_count(run_date: date, db: Session = Depends(get_db)):
 def get_search_run(search_run_id: str, db: Session = Depends(get_db)):
     try:
         run = search_runs.get_search_run(db, search_run_id)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return search_runs.search_run_payload(db, run)
 
 
@@ -152,8 +152,8 @@ def get_search_run(search_run_id: str, db: Session = Depends(get_db)):
 def get_search_run_summary(search_run_id: str, db: Session = Depends(get_db)):
     try:
         run = search_runs.get_search_run(db, search_run_id)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     search_runs.reconcile_summary_job_for_run(db, run)
     summary = search_runs.summary_payload(run)
     if not summary:
@@ -177,6 +177,8 @@ def create_daily_search_run(
     try:
         run_date = request.run_date if request and request.run_date else None
         job = search_runs.start_daily_search(db, run_date=run_date)
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JobStart(job_id=job.id)

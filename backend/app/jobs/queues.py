@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from app.models.job import SQLAJob
-
 INTERACTIVE = "interactive"
 REPORTS = "reports"
 IDEA_MAPS = "idea_maps"

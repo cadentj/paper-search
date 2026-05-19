@@ -209,15 +209,13 @@ export function DailyProvider({ children }: { children: ReactNode }) {
   ]);
 
   useEffect(() => {
-    if (!dailyJob) return;
-    if (dailyJob.done) {
-      queryClient.invalidateQueries({ queryKey: ["search-runs", dailyJob.subject.id] });
-      queryClient.invalidateQueries({
-        queryKey: ["search-runs", dailyJob.subject.id, "matches"],
-      });
-      queryClient.invalidateQueries({ queryKey: ["search-runs", "latest"] });
-    }
-  }, [dailyJob, queryClient]);
+    if (!dailyJob?.done) return;
+    queryClient.invalidateQueries({ queryKey: ["search-runs", dailyJob.subject.id] });
+    queryClient.invalidateQueries({
+      queryKey: ["search-runs", dailyJob.subject.id, "matches"],
+    });
+    queryClient.invalidateQueries({ queryKey: ["search-runs", "latest"] });
+  }, [dailyJob?.done, dailyJob?.subject?.id, queryClient]);
 
   useEffect(() => {
     if (!summaryJobData?.done || !runId) return;

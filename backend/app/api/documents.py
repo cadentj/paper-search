@@ -11,7 +11,7 @@ from app.db.session import get_db
 from app.models.document import Document
 from app.models.job import Job
 from app.services import documents as documents_service
-from app.services import documents, jobs
+from app.services import jobs
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -33,11 +33,11 @@ def get_document_processing_job(job_id: str, db: Session = Depends(get_db)):
     job = jobs.get_job_of_kind(db, job_id, "document_processing")
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    document = documents.get_document_for_job(db, job)
+    document = documents_service.get_document_for_job(db, job)
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     return DocumentProcessingJob(
-        job=documents.serialize_document_job(job, document),
+        job=documents_service.serialize_document_job(job, document),
         subject=document.to_pydantic(job_id=job.id),
         items=[],
         next_cursor=None,
@@ -96,6 +96,8 @@ async def upload_document(
             page_count=page_count,
             storage_path=str(storage_path),
         )
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

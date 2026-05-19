@@ -148,13 +148,13 @@ def run(db: Session, job: SQLAJob) -> None:
 
         votes = (
             db.query(SQLAPaperMatchFeedback)
-            .filter(SQLAPaperMatchFeedback.processed == False)
+            .filter(SQLAPaperMatchFeedback.processed.is_(False))
             .all()
         )
 
         notes = (
             db.query(SQLAPaperNote)
-            .filter(SQLAPaperNote.processed == False, SQLAPaperNote.text != "")
+            .filter(SQLAPaperNote.processed.is_(False), SQLAPaperNote.text != "")
             .all()
         )
 

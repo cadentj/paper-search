@@ -82,8 +82,8 @@ def get_daily_papers(
 def get_paper(paper_id: str, db: Session = Depends(get_db)):
     try:
         paper = papers_service.get_paper(db, paper_id)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return paper.to_pydantic()
 
 
@@ -91,8 +91,8 @@ def get_paper(paper_id: str, db: Session = Depends(get_db)):
 def get_paper_html(paper_id: str, db: Session = Depends(get_db)):
     try:
         paper = papers_service.get_paper(db, paper_id)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     if (paper.source_type or "arxiv") not in KNOWN_SOURCE_TYPES:
         return {"html": None, "source_url": paper.source_url}
     return paper_html(paper)
@@ -102,6 +102,10 @@ def get_paper_html(paper_id: str, db: Session = Depends(get_db)):
 def create_or_get_idea_map(paper_id: str, db: Session = Depends(get_db)):
     try:
         job_id = papers_service.start_idea_map(db, paper_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JobStart(job_id=job_id)
@@ -142,6 +146,6 @@ def update_paper_notes(
 def get_idea_map(paper_id: str, db: Session = Depends(get_db)):
     try:
         idea_map = papers_service.get_idea_map_for_paper(db, paper_id)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return papers_service.idea_map_payload(db, idea_map)

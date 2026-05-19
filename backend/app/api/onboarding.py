@@ -152,6 +152,8 @@ def get_onboarding_status(db: Session = Depends(get_db)):
 def create_generation(body: OnboardingGenerationCreate, db: Session = Depends(get_db)):
     try:
         job_id = onboarding_service.start_generation(db, body)
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JobStart(job_id=job_id)
@@ -177,6 +179,8 @@ def create_extraction(body: OnboardingExtractionCreate, db: Session = Depends(ge
         )
     try:
         job_id = onboarding_service.start_extraction(db, input_text=body.input_text)
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JobStart(job_id=job_id)
@@ -186,8 +190,8 @@ def create_extraction(body: OnboardingExtractionCreate, db: Session = Depends(ge
 def get_extraction(extraction_id: str, db: Session = Depends(get_db)):
     try:
         extraction = onboarding_service.get_extraction(db, extraction_id)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return onboarding_service.extraction_payload(db, extraction)
 
 
@@ -230,6 +234,8 @@ def start_import(body: ScholarImportRequest, db: Session = Depends(get_db)):
             author_id=body.author_id,
             display_name=body.display_name,
         )
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ScholarImport(id=import_id, job_id=job_id)
@@ -239,8 +245,8 @@ def start_import(body: ScholarImportRequest, db: Session = Depends(get_db)):
 def get_import_status(import_id: str, db: Session = Depends(get_db)):
     try:
         profile_import = onboarding_service.get_import(db, import_id)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return ScholarImportStatus(
         id=profile_import.id,
         status=profile_import.status,

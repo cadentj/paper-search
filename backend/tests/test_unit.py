@@ -149,7 +149,7 @@ class TestBlocksToPromptText:
         )
         blocks = parse_arxiv_html(html)
         text = blocks_to_prompt_text(blocks, max_blocks=5)
-        lines = [l for l in text.split("\n\n") if l.strip()]
+        lines = [line for line in text.split("\n\n") if line.strip()]
         assert "B000" in text
         assert "paragraph" in text
         assert len(lines) <= 5

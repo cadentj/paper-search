@@ -49,7 +49,11 @@ export function useJobsOverview() {
   return useQuery({
     queryKey: ["jobs", "overview"],
     queryFn: api.getJobsOverview,
-    refetchInterval: 2000,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (data && data.active?.length > 0) return 2000;
+      return 10_000;
+    },
   });
 }
 
