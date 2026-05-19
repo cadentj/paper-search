@@ -16,6 +16,5 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       ARXIV_HTML_PUBLIC_BASE_URL: ${ARXIV_HTML_PUBLIC_BASE_URL}
       APP_ENV: ${APP_ENV:-development}
-      ENABLE_DEV_RESET: ${ENABLE_DEV_RESET:-true}
     volumes:
       - ./backend/data:/app/data

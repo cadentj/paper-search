@@ -257,32 +257,3 @@ class TestPapers:
         assert idea_map["status"] == "failed"
         assert "Could not enqueue idea map" in idea_map["error"]
 
-
-class TestDevReset:
-    def test_health_and_reset(self, client):
-        resp = client.get("/health")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "ok"
-
-        client.post(
-            "/onboarding/complete",
-            json={
-                "filters": [
-                    {
-                        "name": "Test",
-                        "definition": {
-                            "name": "Test",
-                            "description": "Test",
-                            "mode": "claim",
-                        },
-                    }
-                ]
-            },
-        )
-        assert client.get("/onboarding/status").json()["completed"] is True
-
-        resp = client.post("/dev/reset-onboarding")
-        assert resp.status_code == 200
-
-        assert client.get("/onboarding/status").json()["completed"] is False
-        assert client.get("/filters").json() == []

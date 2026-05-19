@@ -29,11 +29,6 @@ class Settings(BaseSettings):
     DOCUMENT_SUMMARY_MAX_CHARS: int = 20_000
     ONBOARDING_INPUT_MAX_CHARS: int = 2_000
     APP_ENV: str = "development"
-    ENABLE_DEV_RESET: bool = True
-
-    @property
-    def is_development(self) -> bool:
-        return self.APP_ENV == "development" or self.ENABLE_DEV_RESET
 
     @field_validator("ARXIV_HTML_PUBLIC_BASE_URL", "LESSWRONG_HTML_PUBLIC_BASE_URL")
     @classmethod

@@ -1,12 +1,11 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 import {
   Newspaper,
   Search,
   Filter,
-  RotateCcw,
   Settings,
 } from "lucide-react";
 import {
@@ -20,10 +19,7 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarInset,
-  SidebarFooter,
 } from "@/components/ui/sidebar";
-import { Button } from "@/components/ui/button";
-import { useResetOnboarding } from "@/hooks/use-queries";
 import { type ReactNode } from "react";
 
 const NAV_ITEMS = [
@@ -35,14 +31,6 @@ const NAV_ITEMS = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { push } = useRouter();
-  const resetMutation = useResetOnboarding();
-
-  const handleReset = async () => {
-    if (!confirm("Reset all onboarding, filters, and search data?")) return;
-    await resetMutation.mutateAsync();
-    push("/dashboard/filters");
-  };
 
   return (
     <SidebarProvider>
@@ -67,18 +55,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
-        <SidebarFooter>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start text-muted-foreground"
-            onClick={handleReset}
-            disabled={resetMutation.isPending}
-          >
-            <RotateCcw className="mr-2 size-3" />
-            {resetMutation.isPending ? "Resetting…" : "Dev Reset"}
-          </Button>
-        </SidebarFooter>
       </Sidebar>
       <SidebarInset>{children}</SidebarInset>
     </SidebarProvider>

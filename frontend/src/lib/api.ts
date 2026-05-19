@@ -304,10 +304,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ filters }),
     }),
-  resetOnboardingDev: () =>
-    fetchApi<{ status: string; deleted: Record<string, number> }>("/dev/reset-onboarding", {
-      method: "POST",
-    }),
 
   // Documents
   uploadDocument: (file: File) => {

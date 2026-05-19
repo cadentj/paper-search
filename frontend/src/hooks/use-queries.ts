@@ -168,16 +168,6 @@ export function useCompleteOnboarding() {
   });
 }
 
-export function useResetOnboarding() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: api.resetOnboardingDev,
-    onSuccess: () => {
-      qc.invalidateQueries();
-    },
-  });
-}
-
 // Documents
 export function useDocument(id: string | null, poll = false) {
   return useQuery({

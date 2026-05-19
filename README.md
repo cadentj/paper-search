@@ -171,15 +171,9 @@ pnpm test
 | GET | /papers/{id}/html | Get cached paper HTML |
 | POST | /papers/{id}/idea-map | Generate idea map |
 | GET | /papers/{id}/idea-map | Get idea map |
-| POST | /dev/reset-onboarding | Reset all data (dev only) |
 
 ## LLM Behavior
 
 Daily search requires `OPENROUTER_API_KEY`. Without it, search runs fail with a clear configuration error rather than returning mock matches.
-
-## Dev Reset
-
-In development mode (`APP_ENV=development`), use the reset button in the sidebar footer to clear onboarding, filters, search runs, and matches.
-
 
 I’m interested in recent machine learning papers about improving factuality and reasoning in language models. I want to track work on retrieval-augmented generation, long-context evaluation, hallucination detection, verification, self-correction, and benchmark design. I’m especially interested in practical methods that improve answer quality or reliability, and less interested in papers focused only on scaling laws or hardware optimization.
