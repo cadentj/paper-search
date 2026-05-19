@@ -1,5 +1,6 @@
 """Document processing worker jobs."""
 
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -7,7 +8,7 @@ import pymupdf
 
 from app.config import settings
 from app.db.session import database
-from app.llm.client import call_llm
+from app.llm.client import async_call_llm
 from app.llm.config import SUMMARY_PROFILE
 from app.llm.prompts import DOCUMENT_SUMMARY_SYSTEM_PROMPT, DOCUMENT_SUMMARY_USER_PROMPT
 from app.llm.schemas import DocumentSummaryResponse
@@ -63,14 +64,16 @@ def process_document(document_id: str, job_id: str) -> None:
             documents_service.commit_document_progress(db)
 
             summary_input = text[: settings.DOCUMENT_SUMMARY_MAX_CHARS]
-            result = call_llm(
-                DOCUMENT_SUMMARY_SYSTEM_PROMPT,
-                DOCUMENT_SUMMARY_USER_PROMPT.format(
-                    filename=document.original_filename,
-                    document_text=summary_input,
-                ),
-                response_model=DocumentSummaryResponse,
-                profile=SUMMARY_PROFILE,
+            result = asyncio.run(
+                async_call_llm(
+                    DOCUMENT_SUMMARY_SYSTEM_PROMPT,
+                    DOCUMENT_SUMMARY_USER_PROMPT.format(
+                        filename=document.original_filename,
+                        document_text=summary_input,
+                    ),
+                    response_model=DocumentSummaryResponse,
+                    profile=SUMMARY_PROFILE,
+                )
             )
             summary = result["content"].get("summary", "").strip()
             if not summary:

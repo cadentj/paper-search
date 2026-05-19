@@ -227,13 +227,15 @@ class TestLLMClient:
             async def __aexit__(self, *args):
                 return None
 
+        import asyncio
+
         async def fake_sleep(delay):
             return None
 
         monkeypatch.setattr(llm_client.settings, "OPENROUTER_API_KEY", "test-key")
         monkeypatch.setattr(llm_client, "LLM_MAX_RETRIES", 1)
         monkeypatch.setattr(llm_client, "LLM_RETRY_BASE_SECONDS", 0)
-        monkeypatch.setattr(llm_client.asyncio, "sleep", fake_sleep)
+        monkeypatch.setattr(asyncio, "sleep", fake_sleep)
         monkeypatch.setattr(llm_client, "_async_client", lambda: FakeAsyncClient())
 
         result = await llm_client.async_call_llm(

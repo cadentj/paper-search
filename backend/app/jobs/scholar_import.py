@@ -1,5 +1,6 @@
 """Scholar profile import worker job."""
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -10,7 +11,7 @@ from app.models.job import SQLAJob
 from app.models.research_profile_import import SQLAResearchProfileImport
 from app.services.jobs import set_job_status
 from app.services.semantic_scholar import get_author_papers, build_publications_text
-from app.llm.client import call_llm
+from app.llm.client import async_call_llm
 from app.llm.config import FILTER_GENERATION_PROFILE
 from app.llm.prompts import SCHOLAR_PROFILE_SYSTEM_PROMPT, SCHOLAR_PROFILE_USER_PROMPT
 from app.llm.schemas import OnboardingFiltersResponse
@@ -78,11 +79,13 @@ def run_scholar_import(import_id: str, job_id: str) -> None:
                 publications_text=publications_text,
             )
 
-            result = call_llm(
-                system_prompt=SCHOLAR_PROFILE_SYSTEM_PROMPT,
-                user_prompt=user_prompt,
-                response_model=OnboardingFiltersResponse,
-                profile=FILTER_GENERATION_PROFILE,
+            result = asyncio.run(
+                async_call_llm(
+                    system_prompt=SCHOLAR_PROFILE_SYSTEM_PROMPT,
+                    user_prompt=user_prompt,
+                    response_model=OnboardingFiltersResponse,
+                    profile=FILTER_GENERATION_PROFILE,
+                )
             )
 
             proposed = result["content"].get("proposedFilters", [])

@@ -1,5 +1,6 @@
 """Paper notes filter generation worker job."""
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -10,7 +11,7 @@ from app.models.job import SQLAJob
 from paper_search_core.models.paper import SQLAPaper
 from app.models.paper_note import SQLAPaperNote
 from app.services.jobs import set_job_status
-from app.llm.client import call_llm
+from app.llm.client import async_call_llm
 from app.llm.config import FILTER_GENERATION_PROFILE
 from app.llm.prompts import PAPER_NOTES_SYSTEM_PROMPT, PAPER_NOTES_USER_PROMPT
 from app.llm.schemas import PaperNotesFilterGenResponse
@@ -46,11 +47,13 @@ def generate_filters_from_notes(note_id: str, job_id: str) -> None:
                 notes_text=note.text,
             )
 
-            result = call_llm(
-                system_prompt=PAPER_NOTES_SYSTEM_PROMPT,
-                user_prompt=user_prompt,
-                response_model=PaperNotesFilterGenResponse,
-                profile=FILTER_GENERATION_PROFILE,
+            result = asyncio.run(
+                async_call_llm(
+                    system_prompt=PAPER_NOTES_SYSTEM_PROMPT,
+                    user_prompt=user_prompt,
+                    response_model=PaperNotesFilterGenResponse,
+                    profile=FILTER_GENERATION_PROFILE,
+                )
             )
 
             proposed = result["content"].get("proposedFilters", [])

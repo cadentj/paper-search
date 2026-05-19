@@ -1,10 +1,8 @@
 """OpenRouter LLM client for structured outputs."""
 
-import asyncio
-import random
-import time
 from typing import TypeVar
 
+import backoff
 from openai import (
     APIConnectionError,
     APIStatusError,
@@ -13,14 +11,20 @@ from openai import (
     OpenAI,
 )
 from pydantic import BaseModel
+
 from app.config import LLM_MAX_RETRIES, LLM_RETRY_BASE_SECONDS, settings
 from app.llm.config import JUDGE_PROFILE, LLMModelConfig, get_llm_config
-
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 TRANSIENT_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 LLM_REQUEST_TIMEOUT_SECONDS = 120.0
 ResponseModelT = TypeVar("ResponseModelT", bound=BaseModel)
+
+
+def _is_transient_error(exc: Exception) -> bool:
+    if isinstance(exc, APIStatusError):
+        return exc.status_code in TRANSIENT_STATUS_CODES
+    return isinstance(exc, (APIConnectionError, APITimeoutError))
 
 
 def _require_api_key() -> str:
@@ -78,21 +82,6 @@ def _parse_structured_response(
     )
 
 
-def _parse_call(
-    client: OpenAI,
-    system_prompt: str,
-    user_prompt: str,
-    model_config: LLMModelConfig,
-    response_model: type[ResponseModelT],
-):
-    return client.responses.parse(
-        model=model_config.model,
-        input=_response_input(system_prompt, user_prompt),
-        extra_body=_provider_body(model_config),
-        text_format=response_model,
-    )
-
-
 async def _async_parse_call(
     client: AsyncOpenAI,
     system_prompt: str,
@@ -108,18 +97,29 @@ async def _async_parse_call(
     )
 
 
-def _is_transient_error(exc: Exception) -> bool:
-    if isinstance(exc, APIStatusError):
-        return exc.status_code in TRANSIENT_STATUS_CODES
-    return isinstance(exc, (APIConnectionError, APITimeoutError))
+@backoff.on_exception(
+    backoff.expo,
+    Exception,
+    max_tries=LLM_MAX_RETRIES + 1,
+    base=LLM_RETRY_BASE_SECONDS,
+    factor=2,
+    jitter=backoff.random_jitter,
+    giveup=lambda exc: not _is_transient_error(exc),
+)
+async def _async_call_llm_with_client(
+    client: AsyncOpenAI,
+    system_prompt: str,
+    user_prompt: str,
+    model_config: LLMModelConfig,
+    response_model: type[ResponseModelT],
+) -> dict:
+    response = await _async_parse_call(
+        client, system_prompt, user_prompt, model_config, response_model
+    )
+    return _parse_structured_response(response, response_model, model_config)
 
 
-def _retry_delay(attempt: int) -> float:
-    base = LLM_RETRY_BASE_SECONDS * (2 ** max(attempt - 1, 0))
-    return base + random.uniform(0, min(base, 1.0))
-
-
-def call_llm(
+async def async_call_llm(
     system_prompt: str,
     user_prompt: str,
     *,
@@ -131,61 +131,10 @@ def call_llm(
     Returns dict with keys: content, model, response_id
     """
     model_config = get_llm_config(profile)
-    last_exc: Exception | None = None
-
-    with _client() as client:
-        for attempt in range(LLM_MAX_RETRIES + 1):
-            try:
-                response = _parse_call(
-                    client,
-                    system_prompt,
-                    user_prompt,
-                    model_config,
-                    response_model,
-                )
-                return _parse_structured_response(
-                    response, response_model, model_config
-                )
-            except Exception as exc:
-                last_exc = exc
-                if attempt >= LLM_MAX_RETRIES or not _is_transient_error(exc):
-                    raise
-                time.sleep(_retry_delay(attempt + 1))
-
-    raise RuntimeError("LLM call failed") from last_exc
-
-
-async def async_call_llm(
-    system_prompt: str,
-    user_prompt: str,
-    *,
-    response_model: type[ResponseModelT],
-    profile: str = JUDGE_PROFILE,
-) -> dict:
-    """Async OpenRouter call with retry/backoff for concurrent worker jobs."""
-    model_config = get_llm_config(profile)
-    last_exc: Exception | None = None
-
     async with _async_client() as client:
-        for attempt in range(LLM_MAX_RETRIES + 1):
-            try:
-                response = await _async_parse_call(
-                    client,
-                    system_prompt,
-                    user_prompt,
-                    model_config,
-                    response_model,
-                )
-                return _parse_structured_response(
-                    response, response_model, model_config
-                )
-            except Exception as exc:
-                last_exc = exc
-                if attempt >= LLM_MAX_RETRIES or not _is_transient_error(exc):
-                    raise
-                await asyncio.sleep(_retry_delay(attempt + 1))
-
-    raise RuntimeError("LLM call failed") from last_exc
+        return await _async_call_llm_with_client(
+            client, system_prompt, user_prompt, model_config, response_model
+        )
 
 
 def stream_structured_response(

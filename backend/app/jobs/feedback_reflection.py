@@ -1,5 +1,6 @@
 """Feedback reflection worker — process all pending feedback and propose filter changes."""
 
+import asyncio
 import json
 import logging
 import uuid
@@ -14,7 +15,7 @@ from app.models.paper_match import SQLAPaperMatch
 from app.models.paper_match_feedback import SQLAPaperMatchFeedback
 from app.models.paper_note import SQLAPaperNote
 from app.services.jobs import set_job_status
-from app.llm.client import call_llm
+from app.llm.client import async_call_llm
 from app.llm.config import FILTER_GENERATION_PROFILE
 from app.llm.prompts import (
     FEEDBACK_REFLECTION_SYSTEM_PROMPT,
@@ -118,11 +119,13 @@ def process_all_feedback(job_id: str) -> None:
                 else "(none)",
             )
 
-            result = call_llm(
-                system_prompt=FEEDBACK_REFLECTION_SYSTEM_PROMPT,
-                user_prompt=user_prompt,
-                response_model=FeedbackReflectionResponse,
-                profile=FILTER_GENERATION_PROFILE,
+            result = asyncio.run(
+                async_call_llm(
+                    system_prompt=FEEDBACK_REFLECTION_SYSTEM_PROMPT,
+                    user_prompt=user_prompt,
+                    response_model=FeedbackReflectionResponse,
+                    profile=FILTER_GENERATION_PROFILE,
+                )
             )
 
             actions = result["content"].get("actions", [])

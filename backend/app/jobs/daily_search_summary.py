@@ -1,5 +1,6 @@
 """Daily search summary worker job."""
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -7,7 +8,7 @@ from app.db.session import database
 from app.models.search_run import SQLASearchRun
 from app.services import filters as filter_service
 from app.models.job import SQLAJob
-from app.llm.client import call_llm
+from app.llm.client import async_call_llm
 from app.llm.config import SUMMARY_PROFILE
 from app.llm.prompts import SUMMARY_SYSTEM_PROMPT, SUMMARY_USER_PROMPT
 from app.llm.schemas import SearchSummaryResponse
@@ -52,11 +53,13 @@ def summarize_daily_search(search_run_id: str, job_id: str | None = None) -> Non
                     p.model_dump_json() for p in match_payloads
                 )
                 user_prompt = SUMMARY_USER_PROMPT.format(matches_text=matches_text)
-                result = call_llm(
-                    system_prompt=SUMMARY_SYSTEM_PROMPT,
-                    user_prompt=user_prompt,
-                    response_model=SearchSummaryResponse,
-                    profile=SUMMARY_PROFILE,
+                result = asyncio.run(
+                    async_call_llm(
+                        system_prompt=SUMMARY_SYSTEM_PROMPT,
+                        user_prompt=user_prompt,
+                        response_model=SearchSummaryResponse,
+                        profile=SUMMARY_PROFILE,
+                    )
                 )
                 summary_data = result["content"]
             else:

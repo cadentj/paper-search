@@ -232,7 +232,7 @@ def _fake_summary_llm(*, matched_arxiv_id: str):
     calls = {"count": 0}
     item_id = f"arxiv:{matched_arxiv_id}"
 
-    def fake_call_llm(**kwargs):
+    async def fake_async_call_llm(**kwargs):
         assert kwargs["profile"] == SUMMARY_PROFILE
         assert kwargs["response_model"] is SearchSummaryResponse
         assert '<cite itemId="' in kwargs["system_prompt"]
@@ -257,7 +257,7 @@ def _fake_summary_llm(*, matched_arxiv_id: str):
             "response_id": "summary-response",
         }
 
-    return fake_call_llm
+    return fake_async_call_llm
 
 
 class TestDailySearchTimeouts:
@@ -358,7 +358,7 @@ class TestRunDailySearch:
             _fake_daily_async_llm(matched_arxiv_ids={"2605.00001"}),
         )
         monkeypatch.setattr(
-            "app.jobs.daily_search_summary.call_llm",
+            "app.jobs.daily_search_summary.async_call_llm",
             _fake_summary_llm(matched_arxiv_id="2605.00001"),
         )
 
@@ -640,7 +640,7 @@ class TestRunDailySearch:
             ),
         )
         monkeypatch.setattr(
-            "app.jobs.daily_search_summary.call_llm",
+            "app.jobs.daily_search_summary.async_call_llm",
             _fake_summary_llm(matched_arxiv_id="2605.00010"),
         )
 
@@ -938,7 +938,7 @@ class TestSummarizeDailySearch:
         db_session.commit()
 
         monkeypatch.setattr(
-            "app.jobs.daily_search_summary.call_llm",
+            "app.jobs.daily_search_summary.async_call_llm",
             _fake_summary_llm(matched_arxiv_id="2605.00001"),
         )
 
