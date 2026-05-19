@@ -42,6 +42,7 @@ import {
   useJobsOverview,
   useOnboardingGenerationJob,
   usePendingFeedbackItems,
+  useScholarImportStatus,
   countProposalFilters,
   getAllFiltersFromCache,
   invalidateFeedbackCompletionQueries,
@@ -423,34 +424,27 @@ function ScholarImportSection({
   hasScholarFilters: boolean;
 }) {
   const queryClient = useQueryClient();
-  const importIdRef = useRef<string | null>(null);
+  const [importId, setImportId] = useState<string | null>(null);
   const [state, dispatch] = useReducer(scholarImportReducer, {
     url: "",
     step: "input",
     profile: null,
     error: null,
   });
+  const { data: importStatus } = useScholarImportStatus(
+    importId,
+    state.step === "polling"
+  );
 
   useEffect(() => {
-    if (state.step !== "polling" || !importIdRef.current) return;
-    const importId = importIdRef.current;
-    const interval = setInterval(async () => {
-      try {
-        const status = await api.getScholarImportStatus(importId);
-        if (status.status === "completed") {
-          dispatch({ type: "done" });
-          queryClient.invalidateQueries({ queryKey: ["filters"] });
-          clearInterval(interval);
-        } else if (status.status === "failed") {
-          dispatch({ type: "error", error: status.error || "Import failed" });
-          clearInterval(interval);
-        }
-      } catch {
-        // keep polling
-      }
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [state.step, queryClient]);
+    if (state.step !== "polling" || !importStatus) return;
+    if (importStatus.status === "completed") {
+      dispatch({ type: "done" });
+      queryClient.invalidateQueries({ queryKey: ["filters"] });
+    } else if (importStatus.status === "failed") {
+      dispatch({ type: "error", error: importStatus.error || "Import failed" });
+    }
+  }, [importStatus, state.step, queryClient]);
 
   if (hasScholarFilters || state.step === "done") return null;
 
@@ -477,7 +471,7 @@ function ScholarImportSection({
         author_id: state.profile.author_id,
         display_name: state.profile.name,
       });
-      importIdRef.current = result.id;
+      setImportId(result.id);
       dispatch({ type: "polling" });
     } catch (err) {
       dispatch({

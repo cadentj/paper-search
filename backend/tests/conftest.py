@@ -34,17 +34,7 @@ def db_engine(tmp_path):
         cursor.execute("PRAGMA busy_timeout=5000")
         cursor.close()
 
-    # Import all models so they register with Base
-    import app.models.app_setting  # noqa: F401
-    import app.models.filter  # noqa: F401
-    import app.models.job  # noqa: F401
-    import app.models.onboarding_extraction  # noqa: F401
-    import paper_search_core.models.paper  # noqa: F401
-    import app.models.search_run  # noqa: F401
-    import app.models.paper_match  # noqa: F401
-    import app.models.paper_match_feedback  # noqa: F401
-    import app.models.paper_note  # noqa: F401
-    import app.models.idea_map  # noqa: F401
+    import app.models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     from app.services.papers_fts import ensure_papers_fts

@@ -111,8 +111,10 @@ async def _evaluate_filter_paper_with_timeout(
                 _evaluate_filter_paper(filter=filter, paper=paper),
                 timeout=PAIR_TIMEOUT_SECONDS,
             )
-        except (asyncio.TimeoutError, Exception):
-            return None, PAIR_EVALUATION_FAILED, None, None
+        except asyncio.TimeoutError:
+            return None, f"{PAIR_EVALUATION_FAILED}: timed out", None, None
+        except Exception as exc:
+            return None, f"{PAIR_EVALUATION_FAILED}: {exc}", None, None
 
 
 async def _evaluate_pairs(

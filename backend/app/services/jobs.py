@@ -29,6 +29,7 @@ _SUBJECT_MODELS_BY_KIND = {
     "document_processing": SQLADocument,
     "idea_map": SQLAIdeaMap,
     "daily_search": SQLASearchRun,
+    "daily_search_summary": SQLASearchRun,
     "onboarding_extraction": SQLAOnboardingExtraction,
     "scholar_import": SQLAResearchProfileImport,
 }

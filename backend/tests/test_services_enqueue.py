@@ -1,8 +1,9 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pytest
 
 from app.models.research_profile_import import SQLAResearchProfileImport
+from app.models.search_run import SQLASearchRun
 from app.services.jobs import commit_refresh, create_job, enqueue
 from app.services import search_runs
 
@@ -125,6 +126,37 @@ def test_enqueue_failure_marks_scholar_import_failed(db_session, monkeypatch):
     assert "backoff" in (job.error or "")
     assert profile_import.status == "failed"
     assert "backoff" in (profile_import.error or "")
+
+
+def test_enqueue_failure_marks_summary_search_run_failed(db_session, monkeypatch):
+    run = SQLASearchRun(
+        id="run-summary",
+        status="running",
+        run_date=date(2026, 5, 19),
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(run)
+    job = create_job(
+        db_session,
+        kind="daily_search_summary",
+        subject_type="search_run",
+        subject_id=run.id,
+    )
+    db_session.add(job)
+    commit_refresh(db_session, run, job)
+
+    def broken_dispatcher():
+        raise RuntimeError("queue unavailable")
+
+    monkeypatch.setattr("app.services.jobs._dispatcher_run_job", broken_dispatcher)
+
+    with pytest.raises(ConnectionError):
+        enqueue(db_session, job)
+
+    db_session.refresh(run)
+    assert job.status == "failed"
+    assert run.status == "failed"
+    assert run.error == "queue unavailable"
 
 
 def test_start_daily_search_validation(db_session, monkeypatch):

@@ -1,13 +1,12 @@
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.schemas.job import JobStart
+from app.api.schemas.job import JobPoll, JobStart
 from app.db.session import get_db
 from app.models.idea_map import IdeaMap
-from app.models.job import Job
 from paper_search_core.models.paper import Paper
 from app.services import jobs
 from app.services.sources import KNOWN_SOURCE_TYPES, paper_html
@@ -35,15 +34,7 @@ class PaperNoteUpdate(BaseModel):
     text: str
 
 
-class IdeaMapJob(BaseModel):
-    job: Job
-    subject: IdeaMap
-    items: list[dict] = Field(default_factory=list)
-    next_cursor: str | None = None
-    done: bool = False
-
-
-@router.get("/idea-map/jobs/{job_id}", response_model=IdeaMapJob)
+@router.get("/idea-map/jobs/{job_id}", response_model=JobPoll[IdeaMap, dict])
 def get_idea_map_job(job_id: str, db: Session = Depends(get_db)):
     job = jobs.get_job_of_kind(db, job_id, "idea_map")
     if not job:
@@ -51,7 +42,7 @@ def get_idea_map_job(job_id: str, db: Session = Depends(get_db)):
     idea_map = papers_service.get_idea_map_for_job(db, job)
     if not idea_map:
         raise HTTPException(status_code=404, detail="Idea map not found")
-    return IdeaMapJob(
+    return JobPoll(
         job=papers_service.serialize_idea_map_job(db, job, idea_map),
         subject=idea_map.to_pydantic(job_id=job.id),
         items=[],

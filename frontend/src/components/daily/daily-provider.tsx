@@ -194,6 +194,8 @@ export function DailyProvider({ children }: { children: ReactNode }) {
         dispatch({ type: "summary-started", jobId: data.job_id }),
       onError: () => {
         dispatch({ type: "summary-failed", runId });
+        queryClient.invalidateQueries({ queryKey: ["search-runs", runId] });
+        queryClient.invalidateQueries({ queryKey: ["search-runs", "latest"] });
       },
     });
   }, [
@@ -206,6 +208,7 @@ export function DailyProvider({ children }: { children: ReactNode }) {
     state.summaryStartedForRunId,
     isStartingSummary,
     startSummary,
+    queryClient,
   ]);
 
   useEffect(() => {

@@ -1,6 +1,3 @@
-"""Onboarding extraction worker job."""
-
-import json
 import uuid
 from datetime import datetime, timezone
 
@@ -19,6 +16,7 @@ from app.llm.prompts import (
     ONBOARDING_WITH_DOCUMENTS_USER_PROMPT,
 )
 from app.llm.schemas import OnboardingFiltersResponse, StreamedFilter
+from app.llm.partial_json import complete_array_items
 
 
 def _normalize_filter(raw: dict) -> dict | None:
@@ -30,34 +28,7 @@ def _normalize_filter(raw: dict) -> dict | None:
 
 
 def _extract_complete_filter_objects(buffer: str) -> list[dict]:
-    decoder = json.JSONDecoder()
-    marker = '"proposedFilters"'
-    marker_idx = buffer.find(marker)
-    if marker_idx == -1:
-        return []
-
-    array_start = buffer.find("[", marker_idx)
-    if array_start == -1:
-        return []
-
-    idx = array_start + 1
-    results: list[dict] = []
-    while idx < len(buffer):
-        while idx < len(buffer) and buffer[idx] in " \n\r\t,":
-            idx += 1
-        if idx >= len(buffer) or buffer[idx] == "]":
-            break
-        try:
-            obj, next_idx = decoder.raw_decode(buffer, idx)
-        except json.JSONDecodeError:
-            break
-        if isinstance(obj, dict):
-            normalized = _normalize_filter(obj)
-            if normalized:
-                results.append(normalized)
-        idx = next_idx
-
-    return results
+    return complete_array_items(buffer, "proposedFilters", _normalize_filter)
 
 
 def _merge_filters(existing: list[dict], incoming: list[dict]) -> list[dict]:

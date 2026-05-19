@@ -3,13 +3,12 @@ from pathlib import Path
 
 import pymupdf
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.api.schemas.job import JobPoll
 from app.config import BACKEND_DIR, settings
 from app.db.session import get_db
 from app.models.document import Document
-from app.models.job import Job
 from app.services import documents as documents_service
 from app.services import jobs
 
@@ -20,15 +19,7 @@ class DocumentUpload(Document):
     job_id: str
 
 
-class DocumentProcessingJob(BaseModel):
-    job: Job
-    subject: Document
-    items: list[dict] = Field(default_factory=list)
-    next_cursor: str | None = None
-    done: bool = False
-
-
-@router.get("/jobs/{job_id}", response_model=DocumentProcessingJob)
+@router.get("/jobs/{job_id}", response_model=JobPoll[Document, dict])
 def get_document_processing_job(job_id: str, db: Session = Depends(get_db)):
     job = jobs.get_job_of_kind(db, job_id, "document_processing")
     if not job:
@@ -36,7 +27,7 @@ def get_document_processing_job(job_id: str, db: Session = Depends(get_db)):
     document = documents_service.get_document_for_job(db, job)
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
-    return DocumentProcessingJob(
+    return JobPoll(
         job=documents_service.serialize_document_job(job, document),
         subject=document.to_pydantic(job_id=job.id),
         items=[],

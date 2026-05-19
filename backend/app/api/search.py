@@ -1,16 +1,14 @@
 import logging
 from datetime import date
-from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.schemas.job import JobStart
+from app.api.schemas.job import JobPoll, JobStart
 from app.db.session import get_db
 from app.models.job import Job
 from app.models.paper_match import PaperMatch
-from app.models.search_run import SearchRun
+from app.models.search_run import DailySearchSummary, SearchRun
 from app.utils.cursor import apply_cursor, decode_cursor, encode_cursor
 from paper_search_core.daily_dates import DAILY_SEARCH_DATE_SET
 from app.services.settings import enabled_source_types
@@ -19,21 +17,6 @@ from app.services import jobs, search_runs
 
 router = APIRouter(prefix="/search-runs", tags=["search"])
 logger = logging.getLogger(__name__)
-
-
-class SummaryCitation(BaseModel):
-    paperMatchId: Optional[str] = None
-    arxivId: Optional[str] = None
-    itemId: Optional[str] = None
-    sourceType: Optional[str] = None
-    sourceId: Optional[str] = None
-    citedFor: str = ""
-
-
-class DailySearchSummary(BaseModel):
-    search_run_id: str
-    summary: str
-    citations: list[SummaryCitation] = Field(default_factory=list)
 
 
 class CreateDailySearchRequest(BaseModel):
@@ -46,14 +29,6 @@ class DailyCandidateCount(BaseModel):
     counts_by_source: dict = Field(default_factory=dict)
 
 
-class DailySearchJob(BaseModel):
-    job: Job
-    subject: SearchRun
-    items: list[PaperMatch] = Field(default_factory=list)
-    next_cursor: str | None = None
-    done: bool = False
-
-
 class DailySearchSummaryJob(BaseModel):
     job: Job
     run: SearchRun
@@ -61,7 +36,7 @@ class DailySearchSummaryJob(BaseModel):
     done: bool = False
 
 
-@router.get("/jobs/{job_id}", response_model=DailySearchJob)
+@router.get("/jobs/{job_id}", response_model=JobPoll[SearchRun, PaperMatch])
 def get_daily_search_job(
     job_id: str,
     cursor: str | None = None,
@@ -84,7 +59,7 @@ def get_daily_search_job(
     if matches:
         latest = matches[-1]
         next_cursor = encode_cursor(latest.created_at, latest.id)
-    return DailySearchJob(
+    return JobPoll(
         job=search_runs.serialize_daily_search_job(db, job, run),
         subject=search_runs.search_run_payload(db, run),
         items=[search_runs.match_to_pydantic(db, match) for match in matches],
@@ -118,7 +93,7 @@ def list_search_runs(db: Session = Depends(get_db)):
     ]
 
 
-@router.get("/latest", response_model=Optional[SearchRun])
+@router.get("/latest", response_model=SearchRun | None)
 def get_latest_search_run(db: Session = Depends(get_db)):
     run = search_runs.latest_search_run(db)
     return search_runs.search_run_payload(db, run) if run else None
@@ -188,6 +163,8 @@ def create_daily_search_run(
 def create_daily_search_summary(search_run_id: str, db: Session = Depends(get_db)):
     try:
         job = search_runs.start_daily_summary(db, search_run_id)
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JobStart(job_id=job.id)

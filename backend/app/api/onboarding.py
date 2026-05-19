@@ -1,10 +1,10 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.schemas.job import JobStart
+from app.api.schemas.job import JobPoll, JobStart
 from app.config import settings
 from app.db.session import get_db
 from app.models.filter import Filter, SQLAFilter
@@ -69,23 +69,7 @@ class ScholarImportStatus(BaseModel):
     error: Optional[str] = None
 
 
-class OnboardingGenerationJob(BaseModel):
-    job: Job
-    subject: Job
-    items: list[Filter] = Field(default_factory=list)
-    next_cursor: str | None = None
-    done: bool = False
-
-
-class OnboardingExtractionJob(BaseModel):
-    job: Job
-    subject: OnboardingExtraction
-    items: list[dict] = Field(default_factory=list)
-    next_cursor: str | None = None
-    done: bool = False
-
-
-@router.get("/generations/jobs/{job_id}", response_model=OnboardingGenerationJob)
+@router.get("/generations/jobs/{job_id}", response_model=JobPoll[Job, Filter])
 def get_onboarding_generation_job(
     job_id: str,
     cursor: str | None = None,
@@ -105,7 +89,7 @@ def get_onboarding_generation_job(
     if filters:
         latest = filters[-1]
         next_cursor = encode_cursor(latest.created_at, latest.id)
-    return OnboardingGenerationJob(
+    return JobPoll(
         job=jobs.with_progress(
             job,
             current=len(all_filters),
@@ -118,7 +102,9 @@ def get_onboarding_generation_job(
     )
 
 
-@router.get("/extractions/jobs/{job_id}", response_model=OnboardingExtractionJob)
+@router.get(
+    "/extractions/jobs/{job_id}", response_model=JobPoll[OnboardingExtraction, dict]
+)
 def get_onboarding_extraction_job(job_id: str, db: Session = Depends(get_db)):
     job = jobs.get_job_of_kind(db, job_id, "onboarding_extraction")
     if not job:
@@ -126,7 +112,7 @@ def get_onboarding_extraction_job(job_id: str, db: Session = Depends(get_db)):
     extraction = onboarding_service.get_extraction_for_job(db, job)
     if not extraction:
         raise HTTPException(status_code=404, detail="Extraction not found")
-    return OnboardingExtractionJob(
+    return JobPoll(
         job=jobs.with_progress(
             job,
             current=len(extraction.proposed_filters or []),

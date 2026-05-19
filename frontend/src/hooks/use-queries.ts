@@ -79,27 +79,47 @@ export function useDailySearchSummaryJob(id: string | null) {
   });
 }
 
-export function useDailySearchJob(id: string | null) {
+type CursorJobResult<TItem> = {
+  items: TItem[];
+  next_cursor?: string | null;
+  done: boolean;
+};
+
+function useCursorJob<TItem, TResult extends CursorJobResult<TItem>>(
+  queryKey: readonly unknown[],
+  id: string | null,
+  fetchPage: (id: string, cursor: string | null) => Promise<TResult>,
+  itemId: (item: TItem) => string
+) {
   const cursorRef = useRef<string | null>(null);
   const jobIdRef = useRef<string | null>(null);
-  const itemsRef = useRef<Map<string, PaperMatch>>(new Map());
+  const itemsRef = useRef<Map<string, TItem>>(new Map());
 
   return useQuery({
-    queryKey: ["jobs", "daily-search", id],
+    queryKey,
     queryFn: async () => {
       if (jobIdRef.current !== id) {
         jobIdRef.current = id;
         cursorRef.current = null;
         itemsRef.current = new Map();
       }
-      const result = await api.getDailySearchJob(id!, cursorRef.current);
-      result.items.forEach((item) => itemsRef.current.set(item.id, item));
+      const result = await fetchPage(id!, cursorRef.current);
+      result.items.forEach((item) => itemsRef.current.set(itemId(item), item));
       cursorRef.current = result.next_cursor ?? cursorRef.current;
       return { ...result, items: Array.from(itemsRef.current.values()) };
     },
     enabled: !!id,
     refetchInterval: (query) => (query.state.data?.done ? false : 1000),
   });
+}
+
+export function useDailySearchJob(id: string | null) {
+  return useCursorJob(
+    ["jobs", "daily-search", id],
+    id,
+    api.getDailySearchJob,
+    (item: PaperMatch) => item.id
+  );
 }
 
 export function useIdeaMapJob(id: string | null) {
@@ -114,29 +134,12 @@ export function useIdeaMapJob(id: string | null) {
 export function useOnboardingGenerationJob(
   id: string | null
 ) {
-  const cursorRef = useRef<string | null>(null);
-  const jobIdRef = useRef<string | null>(null);
-  const itemsRef = useRef<Map<string, FilterResponse>>(new Map());
-
-  return useQuery({
-    queryKey: ["jobs", "onboarding-generation", id],
-    queryFn: async () => {
-      if (jobIdRef.current !== id) {
-        jobIdRef.current = id;
-        cursorRef.current = null;
-        itemsRef.current = new Map();
-      }
-      const result = await api.getOnboardingGenerationJob(
-        id!,
-        cursorRef.current
-      );
-      result.items.forEach((item) => itemsRef.current.set(item.id, item));
-      cursorRef.current = result.next_cursor ?? cursorRef.current;
-      return { ...result, items: Array.from(itemsRef.current.values()) };
-    },
-    enabled: !!id,
-    refetchInterval: (query) => (query.state.data?.done ? false : 1000),
-  });
+  return useCursorJob(
+    ["jobs", "onboarding-generation", id],
+    id,
+    api.getOnboardingGenerationJob,
+    (item: FilterResponse) => item.id
+  );
 }
 
 export function useOnboardingExtractionJob(id: string | null) {
@@ -193,6 +196,19 @@ export function useCreateOnboardingGeneration() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       qc.invalidateQueries({ queryKey: ["filters", "draft"] });
+    },
+  });
+}
+
+export function useScholarImportStatus(importId: string | null, poll = false) {
+  return useQuery({
+    queryKey: ["onboarding", "scholar-imports", importId],
+    queryFn: () => api.getScholarImportStatus(importId!),
+    enabled: !!importId,
+    refetchInterval: (query) => {
+      if (!poll) return false;
+      const status = query.state.data?.status;
+      return status === "completed" || status === "failed" ? false : 3000;
     },
   });
 }

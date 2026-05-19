@@ -38,6 +38,7 @@ from app.llm.schemas import (
     IdeaMapWarrant,
     IdeaMapWarrantsResponse,
 )
+from app.llm.partial_json import complete_array_items
 from tqdm import tqdm
 
 
@@ -160,7 +161,7 @@ def run(db: Session, job: SQLAJob) -> None:
 
         idea_map.status = "warrants_running"
         idea_map.updated_at = datetime.now(timezone.utc)
-        job.progress = job_progress(total=len(claims))
+        job.progress = job_progress(current=0, total=len(claims))
         db.commit()
 
         warrant_queue: Queue[tuple[str, list[dict]]] = Queue()
@@ -282,6 +283,10 @@ def run(db: Session, job: SQLAJob) -> None:
                             claim.get("id", ""),
                         )
                     warrants_progress.update(1)
+                    job.progress = job_progress(
+                        current=int(warrants_progress.n),
+                        total=len(claims),
+                    )
                     db.commit()
                     _set_warrant_progress(
                         warrants_progress,
@@ -448,42 +453,11 @@ def _stream_warrants_for_claim(
 
 
 def _extract_complete_claim_objects(buffer: str) -> list[dict]:
-    return _extract_complete_objects(buffer, "claims", _normalize_claim)
+    return complete_array_items(buffer, "claims", _normalize_claim)
 
 
 def _extract_complete_warrant_objects(buffer: str) -> list[dict]:
-    return _extract_complete_objects(buffer, "warrants", _normalize_warrant)
-
-
-def _extract_complete_objects(buffer: str, property_name: str, normalize) -> list[dict]:
-    decoder = json.JSONDecoder()
-    marker = f'"{property_name}"'
-    marker_idx = buffer.find(marker)
-    if marker_idx == -1:
-        return []
-
-    array_start = buffer.find("[", marker_idx)
-    if array_start == -1:
-        return []
-
-    idx = array_start + 1
-    results: list[dict] = []
-    while idx < len(buffer):
-        while idx < len(buffer) and buffer[idx] in " \n\r\t,":
-            idx += 1
-        if idx >= len(buffer) or buffer[idx] == "]":
-            break
-        try:
-            obj, next_idx = decoder.raw_decode(buffer, idx)
-        except json.JSONDecodeError:
-            break
-        if isinstance(obj, dict):
-            normalized = normalize(obj)
-            if normalized:
-                results.append(normalized)
-        idx = next_idx
-
-    return results
+    return complete_array_items(buffer, "warrants", _normalize_warrant)
 
 
 def _normalize_claim(raw: dict) -> dict | None:

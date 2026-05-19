@@ -40,8 +40,6 @@ def get_engine(url: str | None = None):
 
 
 class Database:
-    """Owns the engine and session factory; provides transactional session scopes."""
-
     def __init__(self, engine):
         self.engine = engine
         self.sessionmaker = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -61,9 +59,6 @@ class Database:
 
 engine = get_engine()
 database = Database(engine)
-
-# Compatibility export during migration; app code should use database.session().
-SessionLocal = database.sessionmaker
 
 
 def get_db():
