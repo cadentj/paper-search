@@ -48,6 +48,8 @@ def create_filter(body: FilterCreate, db: Session = Depends(get_db)):
 def update_filter(filter_id: str, body: FilterUpdate, db: Session = Depends(get_db)):
     try:
         filter = filter_service.update_filter(db, filter_id, body)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return filter.to_pydantic()
@@ -57,6 +59,8 @@ def update_filter(filter_id: str, body: FilterUpdate, db: Session = Depends(get_
 def archive_filter(filter_id: str, db: Session = Depends(get_db)):
     try:
         filter = filter_service.archive_filter(db, filter_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return filter.to_pydantic()
@@ -66,6 +70,8 @@ def archive_filter(filter_id: str, db: Session = Depends(get_db)):
 def restore_filter(filter_id: str, db: Session = Depends(get_db)):
     try:
         filter = filter_service.restore_filter(db, filter_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return filter.to_pydantic()
@@ -75,6 +81,8 @@ def restore_filter(filter_id: str, db: Session = Depends(get_db)):
 def accept_proposal(filter_id: str, db: Session = Depends(get_db)):
     try:
         filter = filter_service.accept_proposal(db, filter_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return filter.to_pydantic()
@@ -84,6 +92,8 @@ def accept_proposal(filter_id: str, db: Session = Depends(get_db)):
 def reject_proposal(filter_id: str, db: Session = Depends(get_db)):
     try:
         filter = filter_service.reject_proposal(db, filter_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return filter.to_pydantic()

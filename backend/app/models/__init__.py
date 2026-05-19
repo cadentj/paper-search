@@ -1,6 +1,5 @@
 from app.models.base import Base
 from app.models.filter import FilterPayload, Filter, SQLAFilter
-from app.models.document import Document, SQLADocument
 from app.models.job import Job, SQLAJob
 from app.models.onboarding_extraction import (
     OnboardingExtraction,
@@ -18,7 +17,6 @@ from app.models.research_profile_import import SQLAResearchProfileImport
 
 __all__ = [
     "Base",
-    "Document",
     "FilterPayload",
     "Filter",
     "IdeaMap",
@@ -27,7 +25,6 @@ __all__ = [
     "Paper",
     "ProposedFilter",
     "SQLAAppSetting",
-    "SQLADocument",
     "SQLAFilter",
     "SQLAIdeaMap",
     "SQLAJob",

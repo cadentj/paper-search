@@ -9,7 +9,12 @@ from app.models.filter import SQLAFilter
 from app.models.job import Job, SQLAJob
 from paper_search_core.models.paper import SQLAPaper
 from app.models.paper_match import PaperMatch, SQLAPaperMatch
-from app.models.search_run import SQLASearchRun, SearchRun
+from app.models.search_run import (
+    DailySearchSummary,
+    SQLASearchRun,
+    SearchRun,
+    SummaryCitation,
+)
 from paper_search_core.daily_dates import DEFAULT_DAILY_SEARCH_DATE
 from app.services.jobs import (
     ACTIVE_JOB_STATUSES,
@@ -92,8 +97,6 @@ def search_run_payload(db: Session, run: SQLASearchRun) -> SearchRun:
 
 
 def summary_payload(run: SQLASearchRun):
-    from app.api.search import DailySearchSummary, SummaryCitation
-
     if not run.summary:
         return None
     citations = [

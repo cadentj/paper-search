@@ -194,6 +194,8 @@ export function DailyProvider({ children }: { children: ReactNode }) {
         dispatch({ type: "summary-started", jobId: data.job_id }),
       onError: () => {
         dispatch({ type: "summary-failed", runId });
+        queryClient.invalidateQueries({ queryKey: ["search-runs", runId] });
+        queryClient.invalidateQueries({ queryKey: ["search-runs", "latest"] });
       },
     });
   }, [
@@ -206,18 +208,17 @@ export function DailyProvider({ children }: { children: ReactNode }) {
     state.summaryStartedForRunId,
     isStartingSummary,
     startSummary,
+    queryClient,
   ]);
 
   useEffect(() => {
-    if (!dailyJob) return;
-    if (dailyJob.done) {
-      queryClient.invalidateQueries({ queryKey: ["search-runs", dailyJob.subject.id] });
-      queryClient.invalidateQueries({
-        queryKey: ["search-runs", dailyJob.subject.id, "matches"],
-      });
-      queryClient.invalidateQueries({ queryKey: ["search-runs", "latest"] });
-    }
-  }, [dailyJob, queryClient]);
+    if (!dailyJob?.done) return;
+    queryClient.invalidateQueries({ queryKey: ["search-runs", dailyJob.subject.id] });
+    queryClient.invalidateQueries({
+      queryKey: ["search-runs", dailyJob.subject.id, "matches"],
+    });
+    queryClient.invalidateQueries({ queryKey: ["search-runs", "latest"] });
+  }, [dailyJob?.done, dailyJob?.subject?.id, queryClient]);
 
   useEffect(() => {
     if (!summaryJobData?.done || !runId) return;

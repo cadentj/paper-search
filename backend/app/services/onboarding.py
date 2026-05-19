@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 from sqlalchemy.orm import Session
 
@@ -18,18 +19,23 @@ from app.services.jobs import (
     latest_job_for_subject,
 )
 
-if TYPE_CHECKING:
-    from app.api.onboarding import OnboardingCompleteRequest, OnboardingGenerationCreate
+
+class _GenerationInput(Protocol):
+    input_text: str
 
 
-def start_generation(db: Session, body: OnboardingGenerationCreate) -> str:
+class _CompleteInput(Protocol):
+    filters: Sequence[Mapping[str, object]]
+
+
+def start_generation(db: Session, body: _GenerationInput) -> str:
     input_text = body.input_text.strip()
     if len(input_text) > settings.ONBOARDING_INPUT_MAX_CHARS:
         raise ValueError(
             f"Input text must be {settings.ONBOARDING_INPUT_MAX_CHARS} characters or fewer"
         )
-    if not input_text and not body.document_ids:
-        raise ValueError("Add text or at least one document")
+    if not input_text:
+        raise ValueError("Input text is required")
 
     job_record = create_job(
         db,
@@ -38,7 +44,6 @@ def start_generation(db: Session, body: OnboardingGenerationCreate) -> str:
         status="queued",
         payload={
             "input_text": input_text,
-            "document_ids": list(body.document_ids),
         },
     )
     db.flush()
@@ -138,19 +143,24 @@ def promote_draft_filters(db: Session, filter_ids: list[str]) -> list[SQLAFilter
     return ordered
 
 
-def complete_onboarding(
-    db: Session, body: OnboardingCompleteRequest
-) -> list[SQLAFilter]:
+def complete_onboarding(db: Session, body: _CompleteInput) -> list[SQLAFilter]:
     created_filters = []
     now = datetime.now(timezone.utc)
 
     for f_data in body.filters:
-        definition = f_data.get("definition", f_data)
-        name = definition.get("name", f_data.get("name", "Unnamed Filter"))
+        raw_definition = f_data.get("definition", f_data)
+        definition_data = raw_definition if isinstance(raw_definition, Mapping) else {}
+        name = str(
+            definition_data.get("name", f_data.get("name", "Unnamed Filter"))
+            or "Unnamed Filter"
+        )
+        mode = definition_data.get("mode", "topic")
+        if mode not in {"claim", "topic"}:
+            mode = "topic"
         definition = {
             "name": name,
-            "description": definition.get("description", ""),
-            "mode": definition.get("mode", "topic"),
+            "description": str(definition_data.get("description", "") or ""),
+            "mode": mode,
         }
         filter = SQLAFilter(
             id=str(uuid.uuid4()),

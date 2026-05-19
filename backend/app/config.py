@@ -22,11 +22,6 @@ class Settings(BaseSettings):
     LESSWRONG_EXCERPT_WORDS: int = 250
     LESSWRONG_HTML_PUBLIC_BASE_URL: str
     LESSWRONG_HTML_INDEX_PATH: str = "data/index/posts-by-date.json"
-    DOCUMENT_STORAGE_DIR: str = "data/documents"
-    DOCUMENT_MAX_SIZE_BYTES: int = 1_000_000
-    DOCUMENT_MAX_PAGES: int = 10
-    DOCUMENT_MIN_TEXT_CHARS: int = 200
-    DOCUMENT_SUMMARY_MAX_CHARS: int = 20_000
     ONBOARDING_INPUT_MAX_CHARS: int = 2_000
     APP_ENV: str = "development"
 

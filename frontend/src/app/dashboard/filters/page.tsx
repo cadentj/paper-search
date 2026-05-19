@@ -2,14 +2,13 @@
 
 import {
   useEffect,
-  useMemo,
   useReducer,
   useRef,
   useState,
   type RefObject,
 } from "react";
 import Link from "next/link";
-import { useQueries, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,7 +19,6 @@ import {
 } from "@/components/ui/card";
 import {
   Field,
-  FieldDescription,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
@@ -42,6 +40,7 @@ import {
   useJobsOverview,
   useOnboardingGenerationJob,
   usePendingFeedbackItems,
+  useScholarImportStatus,
   countProposalFilters,
   getAllFiltersFromCache,
   invalidateFeedbackCompletionQueries,
@@ -49,12 +48,9 @@ import {
   usePromoteDraftFilters,
   useRestoreFilter,
   useUpdateFilter,
-  useUploadDocument,
 } from "@/hooks/use-queries";
 import {
   api,
-  DocumentProcessingJobResponse,
-  DocumentUploadResponse,
   FeedbackItem,
   FeedbackStatus,
   FilterResponse,
@@ -64,21 +60,17 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  FileText,
   GraduationCap,
   Loader2,
   Pencil,
-  Plus,
   RotateCcw,
   Send,
   StickyNote,
   ThumbsDown,
   ThumbsUp,
-  X,
 } from "lucide-react";
 
 const MAX_INPUT_CHARS = 2000;
-const BLOCKING_DOCUMENT_STATUSES = new Set(["queued", "processing"]);
 const FEEDBACK_TIMESTAMP_FORMATTER = new Intl.DateTimeFormat(undefined, {
   month: "short",
   day: "numeric",
@@ -86,7 +78,6 @@ const FEEDBACK_TIMESTAMP_FORMATTER = new Intl.DateTimeFormat(undefined, {
   minute: "2-digit",
 });
 
-type UploadedDocument = DocumentUploadResponse;
 type ScholarImportStep =
   | "input"
   | "verifying"
@@ -117,8 +108,6 @@ type ScholarImportAction =
   | { type: "error"; error: string };
 type FilterPageState = {
   inputText: string;
-  documents: UploadedDocument[];
-  uploadError: string | null;
   generationJobId: string | null;
   feedbackJobId: string | null;
   feedbackFinalizing: boolean;
@@ -127,9 +116,6 @@ type FilterPageState = {
 };
 type FilterPageAction =
   | { type: "set-input-text"; value: string }
-  | { type: "add-documents"; documents: UploadedDocument[] }
-  | { type: "remove-document"; id: string }
-  | { type: "set-upload-error"; error: string | null }
   | { type: "generation-started"; jobId: string }
   | { type: "feedback-started"; jobId: string }
   | { type: "feedback-finalizing" }
@@ -139,35 +125,12 @@ type FilterPageAction =
   | { type: "feedback-completion-dismiss" }
   | { type: "toggle-archived" };
 
-function documentStatusLabel(status: string) {
-  switch (status) {
-    case "queued":
-      return "Queued";
-    case "processing":
-      return "Processing";
-    case "ready":
-      return "Ready";
-    case "needs_ocr":
-      return "Needs OCR";
-    case "failed":
-      return "Failed";
-    default:
-      return status;
-  }
-}
-
 function formatFeedbackTimestamp(value: string) {
   return FEEDBACK_TIMESTAMP_FORMATTER.format(new Date(value));
 }
 
 function feedbackItemTimestamp(item: FeedbackItem) {
   return formatFeedbackTimestamp(item.updated_at || item.created_at);
-}
-
-function documentJobRefetchInterval(query: {
-  state: { data?: DocumentProcessingJobResponse };
-}) {
-  return query.state.data?.done ? false : 1000;
 }
 
 function FilterModeBadge({
@@ -212,17 +175,6 @@ function filterPageReducer(
   switch (action.type) {
     case "set-input-text":
       return { ...state, inputText: action.value };
-    case "add-documents":
-      return { ...state, documents: [...state.documents, ...action.documents] };
-    case "remove-document":
-      return {
-        ...state,
-        documents: state.documents.filter(
-          (uploadedDocument) => uploadedDocument.id !== action.id
-        ),
-      };
-    case "set-upload-error":
-      return { ...state, uploadError: action.error };
     case "generation-started":
       return { ...state, generationJobId: action.jobId, inputText: "" };
     case "feedback-started":
@@ -258,49 +210,6 @@ function filterPageReducer(
     case "toggle-archived":
       return { ...state, archivedOpen: !state.archivedOpen };
   }
-}
-
-function DocumentChip({
-  uploadedDocument,
-  onRemove,
-}: {
-  uploadedDocument: UploadedDocument;
-  onRemove: (id: string) => void;
-}) {
-  const isRunning = BLOCKING_DOCUMENT_STATUSES.has(uploadedDocument.status);
-
-  return (
-    <div className="flex min-w-0 items-center gap-2 rounded-md border bg-background px-2 py-1 text-sm">
-      {isRunning ? (
-        <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-      ) : (
-        <FileText className="size-3.5 shrink-0 text-muted-foreground" />
-      )}
-      <span className="min-w-0 flex-1 truncate">
-        {uploadedDocument.original_filename}
-      </span>
-      <Badge
-        variant={
-          uploadedDocument.status === "failed"
-            ? "destructive"
-            : uploadedDocument.status === "ready"
-              ? "secondary"
-              : "outline"
-        }
-      >
-        {documentStatusLabel(uploadedDocument.status)}
-      </Badge>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-6 shrink-0"
-        aria-label={`Remove ${uploadedDocument.original_filename}`}
-        onClick={() => onRemove(uploadedDocument.id)}
-      >
-        <X className="size-3" />
-      </Button>
-    </div>
-  );
 }
 
 function DraftFilterCard({ filter }: { filter: FilterResponse }) {
@@ -423,34 +332,27 @@ function ScholarImportSection({
   hasScholarFilters: boolean;
 }) {
   const queryClient = useQueryClient();
-  const importIdRef = useRef<string | null>(null);
+  const [importId, setImportId] = useState<string | null>(null);
   const [state, dispatch] = useReducer(scholarImportReducer, {
     url: "",
     step: "input",
     profile: null,
     error: null,
   });
+  const { data: importStatus } = useScholarImportStatus(
+    importId,
+    state.step === "polling"
+  );
 
   useEffect(() => {
-    if (state.step !== "polling" || !importIdRef.current) return;
-    const importId = importIdRef.current;
-    const interval = setInterval(async () => {
-      try {
-        const status = await api.getScholarImportStatus(importId);
-        if (status.status === "completed") {
-          dispatch({ type: "done" });
-          queryClient.invalidateQueries({ queryKey: ["filters"] });
-          clearInterval(interval);
-        } else if (status.status === "failed") {
-          dispatch({ type: "error", error: status.error || "Import failed" });
-          clearInterval(interval);
-        }
-      } catch {
-        // keep polling
-      }
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [state.step, queryClient]);
+    if (state.step !== "polling" || !importStatus) return;
+    if (importStatus.status === "completed") {
+      dispatch({ type: "done" });
+      queryClient.invalidateQueries({ queryKey: ["filters"] });
+    } else if (importStatus.status === "failed") {
+      dispatch({ type: "error", error: importStatus.error || "Import failed" });
+    }
+  }, [importStatus, state.step, queryClient]);
 
   if (hasScholarFilters || state.step === "done") return null;
 
@@ -477,7 +379,7 @@ function ScholarImportSection({
         author_id: state.profile.author_id,
         display_name: state.profile.name,
       });
-      importIdRef.current = result.id;
+      setImportId(result.id);
       dispatch({ type: "polling" });
     } catch (err) {
       dispatch({
@@ -625,21 +527,16 @@ function ProposalCard({
 
 function ResearchContextForm({
   inputText,
-  progressText,
   status,
-  fileInputRef,
   onInputTextChange,
   onSend,
 }: {
   inputText: string;
-  progressText: string | null;
   status: {
     isGenerating: boolean;
-    isUploading: boolean;
     isCreating: boolean;
     canSend: boolean;
   };
-  fileInputRef: RefObject<HTMLInputElement | null>;
   onInputTextChange: (value: string) => void;
   onSend: () => void;
 }) {
@@ -658,23 +555,9 @@ function ResearchContextForm({
             disabled={status.isGenerating}
           />
           <InputGroupAddon align="block-end" className="gap-2">
-            <InputGroupButton
-              size="icon-sm"
-              variant="ghost"
-              aria-label="Upload PDF"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={status.isUploading}
-            >
-              {status.isUploading ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Plus className="size-4" />
-              )}
-            </InputGroupButton>
             <InputGroupText>
               {inputText.length}/{MAX_INPUT_CHARS}
             </InputGroupText>
-            {progressText ? <InputGroupText>{progressText}</InputGroupText> : null}
             <InputGroupButton
               variant="default"
               size="sm"
@@ -691,10 +574,6 @@ function ResearchContextForm({
             </InputGroupButton>
           </InputGroupAddon>
         </InputGroup>
-        <FieldDescription>
-          PDFs must be 1 MB or smaller and 10 pages or fewer. OCR-only work is
-          skipped until it is ready.
-        </FieldDescription>
       </Field>
     </FieldGroup>
   );
@@ -1115,48 +994,6 @@ function ArchivedFiltersSection({
   );
 }
 
-function useUploadedDocumentState(documents: UploadedDocument[]) {
-  const documentJobs = useQueries({
-    queries: documents.map((uploadedDocument) => ({
-      queryKey: ["jobs", "document-processing", uploadedDocument.job_id],
-      queryFn: () => api.getDocumentProcessingJob(uploadedDocument.job_id),
-      enabled: BLOCKING_DOCUMENT_STATUSES.has(uploadedDocument.status),
-      refetchInterval: documentJobRefetchInterval,
-    })),
-  });
-
-  const displayDocuments = useMemo(
-    () =>
-      documents.map((uploadedDocument, index) => {
-        const latestDocument = documentJobs[index]?.data?.subject;
-        return latestDocument
-          ? {
-              ...uploadedDocument,
-              ...latestDocument,
-              job_id: uploadedDocument.job_id,
-            }
-          : uploadedDocument;
-      }),
-    [documents, documentJobs]
-  );
-  const readyDocuments = displayDocuments.filter(
-    (uploadedDocument) => uploadedDocument.status === "ready"
-  );
-  const blockingDocuments = displayDocuments.filter((uploadedDocument) =>
-    BLOCKING_DOCUMENT_STATUSES.has(uploadedDocument.status)
-  );
-  const processedCount = displayDocuments.filter(
-    (uploadedDocument) =>
-      !BLOCKING_DOCUMENT_STATUSES.has(uploadedDocument.status)
-  ).length;
-  const progressText =
-    displayDocuments.length === 0
-      ? null
-      : `${processedCount}/${displayDocuments.length} PDFs processed`;
-
-  return { displayDocuments, readyDocuments, blockingDocuments, progressText };
-}
-
 function useFeedbackProcessingState({
   feedbackJobId,
   feedbackFinalizing,
@@ -1289,12 +1126,9 @@ function EmptyFiltersState({ isVisible }: { isVisible: boolean }) {
 
 export default function FiltersPage() {
   const queryClient = useQueryClient();
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const proposalsSectionRef = useRef<HTMLDivElement | null>(null);
   const [state, dispatch] = useReducer(filterPageReducer, {
     inputText: "",
-    documents: [],
-    uploadError: null,
     generationJobId: null,
     feedbackJobId: null,
     feedbackFinalizing: false,
@@ -1302,7 +1136,6 @@ export default function FiltersPage() {
     archivedOpen: false,
   });
 
-  const uploadDocument = useUploadDocument();
   const createGeneration = useCreateOnboardingGeneration();
   const promoteDraftFilters = usePromoteDraftFilters();
   const archiveFilter = useArchiveFilter();
@@ -1326,12 +1159,6 @@ export default function FiltersPage() {
   const generationJob = generationState?.job;
   const { data: draftFilters = [] } = useFilters("draft");
   const { data: allFilters = [] } = useFilters();
-  const {
-    displayDocuments,
-    readyDocuments,
-    blockingDocuments,
-    progressText,
-  } = useUploadedDocumentState(state.documents);
 
   const activeFilters = allFilters.filter((filter) => filter.status === "active");
   const archivedFilters = allFilters.filter(
@@ -1351,11 +1178,9 @@ export default function FiltersPage() {
     generationJob?.status === "queued" || generationJob?.status === "running";
   const canSend =
     !isGenerating &&
-    !uploadDocument.isPending &&
     !createGeneration.isPending &&
-    blockingDocuments.length === 0 &&
     state.inputText.length <= MAX_INPUT_CHARS &&
-    (state.inputText.trim().length > 0 || readyDocuments.length > 0);
+    state.inputText.trim().length > 0;
 
   useEffect(() => {
     if (!generationState?.items.length) return;
@@ -1393,31 +1218,10 @@ export default function FiltersPage() {
     return () => window.clearTimeout(timeout);
   }, [state.feedbackCompletion]);
 
-  const handleFiles = async (files: FileList | null) => {
-    if (!files?.length) return;
-    dispatch({ type: "set-upload-error", error: null });
-    try {
-      const uploads = await Promise.all(
-        Array.from(files).map((file) => uploadDocument.mutateAsync(file))
-      );
-      dispatch({ type: "add-documents", documents: uploads });
-    } catch (error) {
-      dispatch({
-        type: "set-upload-error",
-        error: error instanceof Error ? error.message : "Upload failed",
-      });
-    } finally {
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-    }
-  };
-
   const handleSend = async () => {
     if (!canSend) return;
     const result = await createGeneration.mutateAsync({
       input_text: state.inputText,
-      document_ids: readyDocuments.map((uploadedDocument) => uploadedDocument.id),
     });
     dispatch({ type: "generation-started", jobId: result.job_id });
   };
@@ -1459,46 +1263,16 @@ export default function FiltersPage() {
 
       <ResearchContextForm
         inputText={state.inputText}
-        progressText={progressText}
         status={{
           isGenerating,
-          isUploading: uploadDocument.isPending,
           isCreating: createGeneration.isPending,
           canSend,
         }}
-        fileInputRef={fileInputRef}
         onInputTextChange={(value) =>
           dispatch({ type: "set-input-text", value })
         }
         onSend={handleSend}
       />
-
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="application/pdf"
-        multiple
-        className="hidden"
-        onChange={(event) => handleFiles(event.target.files)}
-      />
-
-      {state.uploadError ? (
-        <p className="text-sm text-destructive">{state.uploadError}</p>
-      ) : null}
-
-      {displayDocuments.length > 0 ? (
-        <div className="flex flex-col gap-2">
-          {displayDocuments.map((uploadedDocument) => (
-            <DocumentChip
-              key={uploadedDocument.id}
-              uploadedDocument={uploadedDocument}
-              onRemove={(id) =>
-                dispatch({ type: "remove-document", id })
-              }
-            />
-          ))}
-        </div>
-      ) : null}
 
       {generationJob ? (
         <Card>

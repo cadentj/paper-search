@@ -7,7 +7,6 @@ import pytest
 
 from app.jobs.dispatcher import run_job
 from app.jobs.queues import (
-    IDEA_MAPS,
     INTERACTIVE,
     KIND_TO_QUEUE,
     REPORTS,
@@ -96,14 +95,14 @@ def test_jobs_overview_active_and_recent(client, db_session):
         created_at=now,
     )
     db_session.add(run)
-    active_search = create_job(
+    create_job(
         db_session,
         kind="daily_search",
         subject_type="search_run",
         subject_id=run.id,
         status="running",
     )
-    active_feedback = create_job(
+    create_job(
         db_session,
         kind="feedback_reflection",
         subject_type="feedback_batch",

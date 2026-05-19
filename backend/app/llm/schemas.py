@@ -20,10 +20,6 @@ class OnboardingFiltersResponse(StrictModel):
     proposedFilters: list[StreamedFilter]
 
 
-class DocumentSummaryResponse(StrictModel):
-    summary: str
-
-
 class ClaimFilterResult(StrictModel):
     verdict: Literal["positive", "negative"]
     reason: str

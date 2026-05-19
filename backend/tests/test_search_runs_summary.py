@@ -3,7 +3,6 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.models.filter import SQLAFilter
 from app.models.job import SQLAJob
 from app.models.search_run import SQLASearchRun
 from app.services import search_runs

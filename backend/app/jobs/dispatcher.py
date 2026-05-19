@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 from app.jobs import (
     daily_search,
     daily_search_summary,
-    documents,
     feedback_reflection,
     idea_map,
     onboarding,
@@ -21,7 +20,6 @@ from app.services.jobs import set_job_status
 Handler = Callable[[Session, SQLAJob], None]
 
 HANDLERS: dict[str, Handler] = {
-    "document_processing": documents.run,
     "idea_map": idea_map.run,
     "daily_search": daily_search.run,
     "daily_search_summary": daily_search_summary.run,

@@ -17,10 +17,15 @@ class NoopQueue:
         return None
 
 
+def _mock_enqueue(monkeypatch):
+    monkeypatch.setattr("app.services.jobs.Queue", lambda *a, **kw: NoopQueue())
+    monkeypatch.setattr("app.services.jobs.Redis.from_url", lambda url: object())
+
+
 class TestOnboarding:
     @pytest.fixture(autouse=True)
     def _mock_queue(self, monkeypatch):
-        monkeypatch.setattr("app.jobs.queues.get_queue", lambda _name: NoopQueue())
+        _mock_enqueue(monkeypatch)
 
     def test_onboarding_extraction_and_completion_flow(self, client):
         resp = client.get("/onboarding/status")
@@ -75,10 +80,12 @@ class TestOnboarding:
     def test_create_extraction_fails_fast_when_queue_unavailable(
         self, client, monkeypatch
     ):
-        def broken_queue():
-            raise RuntimeError("redis unavailable")
+        class BrokenQueue:
+            def enqueue(self, *args, **kwargs):
+                raise RuntimeError("redis unavailable")
 
-        monkeypatch.setattr("app.jobs.queues.get_queue", broken_queue)
+        monkeypatch.setattr("app.services.jobs.Queue", lambda *a, **kw: BrokenQueue())
+        monkeypatch.setattr("app.services.jobs.Redis.from_url", lambda url: object())
         resp = client.post(
             "/onboarding/extractions",
             json={"input_text": "I study mechanistic interpretability"},
@@ -282,7 +289,7 @@ class TestFeedback:
 class TestSearchRuns:
     @pytest.fixture(autouse=True)
     def _mock_queue(self, monkeypatch):
-        monkeypatch.setattr("app.jobs.queues.get_queue", lambda _name: NoopQueue())
+        _mock_enqueue(monkeypatch)
 
     def _setup_filters(self, client):
         client.post(
@@ -363,10 +370,12 @@ class TestSearchRuns:
     ):
         self._setup_filters(client)
 
-        def broken_queue():
-            raise RuntimeError("redis unavailable")
+        class BrokenQueue:
+            def enqueue(self, *args, **kwargs):
+                raise RuntimeError("redis unavailable")
 
-        monkeypatch.setattr("app.jobs.queues.get_queue", broken_queue)
+        monkeypatch.setattr("app.services.jobs.Queue", lambda *a, **kw: BrokenQueue())
+        monkeypatch.setattr("app.services.jobs.Redis.from_url", lambda url: object())
         resp = client.post("/search-runs/daily")
         assert resp.status_code == 503
 
@@ -400,10 +409,12 @@ class TestPapers:
         db_session.add(paper)
         db_session.commit()
 
-        def broken_queue():
-            raise RuntimeError("redis unavailable")
+        class BrokenQueue:
+            def enqueue(self, *args, **kwargs):
+                raise RuntimeError("redis unavailable")
 
-        monkeypatch.setattr("app.jobs.queues.get_queue", broken_queue)
+        monkeypatch.setattr("app.services.jobs.Queue", lambda *a, **kw: BrokenQueue())
+        monkeypatch.setattr("app.services.jobs.Redis.from_url", lambda url: object())
         resp = client.post("/papers/paper-1/idea-map")
         assert resp.status_code == 503
 

@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.jobs.queues import queue_for_kind
-from app.models.document import SQLADocument
 from app.models.idea_map import SQLAIdeaMap
 from app.models.job import Job, SQLAJob
 from app.models.onboarding_extraction import SQLAOnboardingExtraction
@@ -26,9 +25,9 @@ STALE_JOB_MAX_SECONDS_BY_KIND: dict[str, int] = {
 }
 
 _SUBJECT_MODELS_BY_KIND = {
-    "document_processing": SQLADocument,
     "idea_map": SQLAIdeaMap,
     "daily_search": SQLASearchRun,
+    "daily_search_summary": SQLASearchRun,
     "onboarding_extraction": SQLAOnboardingExtraction,
     "scholar_import": SQLAResearchProfileImport,
 }

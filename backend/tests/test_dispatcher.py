@@ -1,5 +1,3 @@
-import pytest
-
 from app.jobs.dispatcher import HANDLERS, run_job
 from app.models.job import SQLAJob
 from app.services.jobs import create_job, set_job_status

@@ -19,37 +19,6 @@ Generate proposed search filters based on these interests. For each filter provi
 - description: the claim, question, or topic to search for
 - mode: "claim" or "topic"."""
 
-ONBOARDING_WITH_DOCUMENTS_USER_PROMPT = """Here are the researcher's current notes:
-
-{input_text}
-
-Here are summaries of uploaded context documents:
-
-{document_summaries}
-
-Generate proposed search filters based on these notes and document summaries. For each filter provide:
-- id: a unique string identifier
-- name: short descriptive name
-- description: the claim, question, or topic to search for
-- mode: "claim" or "topic"."""
-
-DOCUMENT_SUMMARY_SYSTEM_PROMPT = """You summarize research documents for a researcher configuring search filters.
-
-Write a compact summary focused on:
-- research questions, hypotheses, claims, methods, and topics the user may want to follow
-- distinctive terminology that should influence future search filters
-- what kind of papers or research items would be relevant next
-
-Do not critique the document. Do not include markdown."""
-
-DOCUMENT_SUMMARY_USER_PROMPT = """SQLADocument title: {filename}
-
-Extracted text:
-
-{document_text}
-
-Write a concise summary for generating future research search filters."""
-
 CLAIM_FILTER_SEARCH_SYSTEM_PROMPT = """You are a research item evaluator. Given a claim filter and a research item, determine whether the item supports or refutes the claim.
 
 For each item, return:

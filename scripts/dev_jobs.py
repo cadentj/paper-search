@@ -16,7 +16,6 @@ for path in (REPO_ROOT / "backend", REPO_ROOT / "core" / "src"):
 
 from app.db.session import database  # noqa: E402
 from app.models import (  # noqa: E402
-    SQLADocument,
     SQLAIdeaMap,
     SQLAJob,
     SQLAOnboardingExtraction,
@@ -38,15 +37,6 @@ def _fail_subject(db, job: SQLAJob, message: str, now: datetime) -> None:
             run.status = "failed"
             run.error = message
             run.completed_at = now
-        return
-
-    if job.subject_type == "document":
-        document = (
-            db.query(SQLADocument).filter(SQLADocument.id == job.subject_id).first()
-        )
-        if document and document.status in ACTIVE_STATUSES:
-            document.status = "failed"
-            document.error = message
         return
 
     if job.subject_type == "onboarding_extraction":

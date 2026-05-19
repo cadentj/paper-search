@@ -2,14 +2,28 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 from sqlalchemy.orm import Session
 
 from app.models.filter import SQLAFilter
 
-if TYPE_CHECKING:
-    from app.api.filters import FilterCreate, FilterUpdate
+
+class _FilterDefinitionInput(Protocol):
+    name: str
+
+    def model_dump(self) -> dict:
+        pass
+
+
+class _FilterCreateInput(Protocol):
+    name: str
+    definition: _FilterDefinitionInput
+
+
+class _FilterUpdateInput(Protocol):
+    name: str | None
+    definition: _FilterDefinitionInput | None
 
 
 def list_filters(db: Session, status: str | None = None) -> list[SQLAFilter]:
@@ -26,7 +40,7 @@ def get_filter(db: Session, filter_id: str) -> SQLAFilter:
     return filter
 
 
-def create_filter(db: Session, body: FilterCreate) -> SQLAFilter:
+def create_filter(db: Session, body: _FilterCreateInput) -> SQLAFilter:
     now = datetime.now(timezone.utc)
     filter = SQLAFilter(
         id=str(uuid.uuid4()),
@@ -42,7 +56,7 @@ def create_filter(db: Session, body: FilterCreate) -> SQLAFilter:
     return filter
 
 
-def update_filter(db: Session, filter_id: str, body: FilterUpdate) -> SQLAFilter:
+def update_filter(db: Session, filter_id: str, body: _FilterUpdateInput) -> SQLAFilter:
     filter = get_filter(db, filter_id)
     if body.name is not None:
         filter.name = body.name

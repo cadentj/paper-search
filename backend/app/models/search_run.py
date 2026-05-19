@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import Column, Date, DateTime, Integer, JSON, Text
 
 from app.models.base import Base
@@ -23,6 +23,21 @@ class SearchRun(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class SummaryCitation(BaseModel):
+    paperMatchId: str | None = None
+    arxivId: str | None = None
+    itemId: str | None = None
+    sourceType: str | None = None
+    sourceId: str | None = None
+    citedFor: str = ""
+
+
+class DailySearchSummary(BaseModel):
+    search_run_id: str
+    summary: str
+    citations: list[SummaryCitation] = Field(default_factory=list)
 
 
 class SQLASearchRun(Base):

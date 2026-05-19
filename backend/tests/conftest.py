@@ -12,11 +12,11 @@ for _key, _default in (
 ):
     if not os.environ.get(_key, "").strip():
         os.environ[_key] = _default
-from sqlalchemy import create_engine, event, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, event, text  # noqa: E402
+from sqlalchemy.orm import sessionmaker  # noqa: E402
 
-from app.db.session import Database
-from app.models.base import Base
+from app.db.session import Database  # noqa: E402
+from app.models.base import Base  # noqa: E402
 
 
 @pytest.fixture
@@ -34,17 +34,7 @@ def db_engine(tmp_path):
         cursor.execute("PRAGMA busy_timeout=5000")
         cursor.close()
 
-    # Import all models so they register with Base
-    import app.models.app_setting  # noqa: F401
-    import app.models.filter
-    import app.models.job
-    import app.models.onboarding_extraction  # noqa: F401
-    import paper_search_core.models.paper  # noqa: F401
-    import app.models.search_run
-    import app.models.paper_match
-    import app.models.paper_match_feedback
-    import app.models.paper_note
-    import app.models.idea_map
+    import app.models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     from app.services.papers_fts import ensure_papers_fts
@@ -86,7 +76,6 @@ _WORKER_DATABASE_MODULES = (
     "app.jobs.dispatcher",
     "app.jobs.daily_search",
     "app.jobs.daily_search_summary",
-    "app.jobs.documents",
     "app.jobs.feedback_reflection",
     "app.jobs.idea_map",
     "app.jobs.onboarding",

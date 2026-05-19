@@ -1,24 +1,17 @@
-"""Onboarding extraction worker job."""
-
-import json
 import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models.document import SQLADocument
 from app.models.filter import SQLAFilter
 from app.models.job import SQLAJob
 from app.models.onboarding_extraction import SQLAOnboardingExtraction
 from app.services.jobs import set_job_status
 from app.llm.client import stream_structured_response
 from app.llm.config import FILTER_GENERATION_PROFILE
-from app.llm.prompts import (
-    ONBOARDING_SYSTEM_PROMPT,
-    ONBOARDING_USER_PROMPT,
-    ONBOARDING_WITH_DOCUMENTS_USER_PROMPT,
-)
+from app.llm.prompts import ONBOARDING_SYSTEM_PROMPT, ONBOARDING_USER_PROMPT
 from app.llm.schemas import OnboardingFiltersResponse, StreamedFilter
+from app.llm.partial_json import complete_array_items
 
 
 def _normalize_filter(raw: dict) -> dict | None:
@@ -30,34 +23,7 @@ def _normalize_filter(raw: dict) -> dict | None:
 
 
 def _extract_complete_filter_objects(buffer: str) -> list[dict]:
-    decoder = json.JSONDecoder()
-    marker = '"proposedFilters"'
-    marker_idx = buffer.find(marker)
-    if marker_idx == -1:
-        return []
-
-    array_start = buffer.find("[", marker_idx)
-    if array_start == -1:
-        return []
-
-    idx = array_start + 1
-    results: list[dict] = []
-    while idx < len(buffer):
-        while idx < len(buffer) and buffer[idx] in " \n\r\t,":
-            idx += 1
-        if idx >= len(buffer) or buffer[idx] == "]":
-            break
-        try:
-            obj, next_idx = decoder.raw_decode(buffer, idx)
-        except json.JSONDecodeError:
-            break
-        if isinstance(obj, dict):
-            normalized = _normalize_filter(obj)
-            if normalized:
-                results.append(normalized)
-        idx = next_idx
-
-    return results
+    return complete_array_items(buffer, "proposedFilters", _normalize_filter)
 
 
 def _merge_filters(existing: list[dict], incoming: list[dict]) -> list[dict]:
@@ -100,39 +66,16 @@ def _create_draft_filter(db, raw: dict, job_id: str) -> SQLAFilter:
     return filter
 
 
-def _document_summaries(db, document_ids: list[str]) -> list[str]:
-    if not document_ids:
-        return []
-    documents = db.query(SQLADocument).filter(SQLADocument.id.in_(document_ids)).all()
-    by_id = {document.id: document for document in documents}
-    summaries: list[str] = []
-    for document_id in document_ids:
-        document = by_id.get(document_id)
-        if not document or document.status != "ready" or not document.summary:
-            continue
-        summaries.append(
-            f"SQLADocument: {document.original_filename}\nSummary: {document.summary}"
-        )
-    return summaries
-
-
 def run_generation(db: Session, job: SQLAJob) -> None:
-    """Generate draft filters from text and ready document summaries."""
+    """Generate draft filters from research context text."""
     payload = job.payload or {}
     input_text = payload.get("input_text", "")
-    document_ids = payload.get("document_ids") or []
 
     try:
         set_job_status(job, status="running")
         db.commit()
 
-        summaries = _document_summaries(db, document_ids)
-        user_prompt = ONBOARDING_WITH_DOCUMENTS_USER_PROMPT.format(
-            input_text=input_text or "(No additional text provided.)",
-            document_summaries="\n\n".join(summaries)
-            if summaries
-            else "(No ready document summaries selected.)",
-        )
+        user_prompt = ONBOARDING_USER_PROMPT.format(input_text=input_text)
         text_buffer = ""
         last_count = 0
         created_llm_ids: set[str] = set()

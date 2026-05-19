@@ -77,9 +77,14 @@ def get_idea_map_for_job(db: Session, job: SQLAJob) -> SQLAIdeaMap | None:
 def serialize_idea_map_job(db: Session, job: SQLAJob, idea_map: SQLAIdeaMap) -> Job:
     claims = list(idea_map.claims or [])
     claim_count = len(claims)
-    stored_total = (job.progress or {}).get("total")
+    stored = job.progress or {}
+    stored_total = stored.get("total")
     if idea_map.status == "warrants_running" and stored_total:
-        return with_progress(job, current=claim_count, total=int(stored_total))
+        return with_progress(
+            job,
+            current=int(stored.get("current", 0)),
+            total=int(stored_total),
+        )
     return with_progress(job, current=claim_count, total=max(claim_count, 1))
 
 

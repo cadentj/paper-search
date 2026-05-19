@@ -1,10 +1,9 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
-  const isFormData = options?.body instanceof FormData;
   const res = await fetch(`${API_URL}${path}`, {
     headers: {
-      ...(isFormData ? {} : { "Content-Type": "application/json" }),
+      "Content-Type": "application/json",
       ...options?.headers,
     },
     ...options,
@@ -93,26 +92,6 @@ export interface JobOverviewEntry {
 export interface JobsOverview {
   active: JobOverviewEntry[];
   recent: JobOverviewEntry[];
-}
-
-export interface DocumentResponse {
-  id: string;
-  job_id?: string | null;
-  original_filename: string;
-  content_type: string;
-  size_bytes: number;
-  page_count: number;
-  storage_path: string;
-  extracted_text_path?: string | null;
-  summary?: string | null;
-  status: string;
-  error?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface DocumentUploadResponse extends DocumentResponse {
-  job_id: string;
 }
 
 export interface SearchRun {
@@ -336,14 +315,6 @@ export interface OnboardingExtractionJobResponse {
   done: boolean;
 }
 
-export interface DocumentProcessingJobResponse {
-  job: Job;
-  subject: DocumentResponse;
-  items: Record<string, unknown>[];
-  next_cursor?: string | null;
-  done: boolean;
-}
-
 // API functions
 export const api = {
   // Health
@@ -366,12 +337,10 @@ export const api = {
     ),
   getOnboardingExtractionJob: (id: string) =>
     fetchApi<OnboardingExtractionJobResponse>(`/onboarding/extractions/jobs/${id}`),
-  getDocumentProcessingJob: (id: string) =>
-    fetchApi<DocumentProcessingJobResponse>(`/documents/jobs/${id}`),
 
   // Onboarding
   getOnboardingStatus: () => fetchApi<OnboardingStatus>("/onboarding/status"),
-  createOnboardingGeneration: (input: { input_text: string; document_ids: string[] }) =>
+  createOnboardingGeneration: (input: { input_text: string }) =>
     fetchApi<JobStartResponse>("/onboarding/generations", {
       method: "POST",
       body: JSON.stringify(input),
@@ -393,17 +362,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ filters }),
     }),
-
-  // Documents
-  uploadDocument: (file: File) => {
-    const body = new FormData();
-    body.append("file", file);
-    return fetchApi<DocumentUploadResponse>("/documents", {
-      method: "POST",
-      body,
-    });
-  },
-  getDocument: (id: string) => fetchApi<DocumentResponse>(`/documents/${id}`),
 
   // Filters
   getFilters: (status?: string) =>

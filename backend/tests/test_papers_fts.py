@@ -3,8 +3,6 @@
 import uuid
 from datetime import date, datetime, time, timezone
 
-import pytest
-
 from app.models.filter import FilterPayload
 from app.services.papers_fts import (
     FTS_MAX_CANDIDATES_PER_FILTER,

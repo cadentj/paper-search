@@ -1,196 +1,95 @@
 # Paper Search
 
-A single-user research paper filtering system that helps researchers keep up with relevant papers through natural language filters, daily searches, and idea maps.
+Single-user research paper filtering app for daily arXiv/LessWrong discovery, natural-language filters, feedback-driven filter updates, paper notes, and idea maps.
 
 ## Stack
 
-- **Backend**: FastAPI, SQLAlchemy, SQLite, Redis, RQ workers
-- **Frontend**: Next.js (App Router), React Query, Tailwind CSS, shadcn/ui
-- **LLM**: OpenRouter, with model/provider routing in `backend/llm_config.toml`
-- **Runtime**: Docker Compose for Redis, FastAPI, and RQ worker; local Next.js dev server
+- Backend: FastAPI, SQLAlchemy, SQLite, Redis, RQ
+- Frontend: Next.js App Router, React Query, Tailwind, shadcn/ui
+- LLM: OpenRouter, configured in `backend/llm_config.toml`
+- Data: public R2 indexes synced into local SQLite
 
-## Quick Start
+## Setup
 
-### Prerequisites
-
-- Docker & Docker Compose
-- Node.js 18+ and pnpm
-- An OpenRouter API key
-
-### 1. Environment Setup
+Prerequisites: Docker, Node.js 18+, pnpm, uv, and an OpenRouter API key.
 
 ```bash
 cp .env.example .env
-# Edit .env and set OPENROUTER_API_KEY
 ```
 
-### 2. Start Redis, Backend, and Worker
+Set these in `.env`:
 
 ```bash
-docker compose up --build
+OPENROUTER_API_KEY=sk-or-...
+ARXIV_HTML_PUBLIC_BASE_URL=https://pub-0d8457b25cf9489492a59001ba195ea9.r2.dev
+LESSWRONG_HTML_PUBLIC_BASE_URL=https://pub-f4bbc499e7764b81bdee40dd67bda9da.r2.dev
+NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
-This starts:
-
-- Redis on port 6379
-- FastAPI on http://localhost:8000 with `uvicorn --reload`
-- three RQ workers (one per queue) that restart on Python file changes:
-  - `worker-interactive` — feedback, documents, onboarding, scholar import
-  - `worker-reports` — daily search and report summary
-  - `worker-idea-maps` — idea map generation
-
-Worker process counts are configured in `.env` via `INTERACTIVE_WORKERS`,
-`REPORT_WORKERS`, and `IDEA_MAP_WORKERS` (default `1` each).
-
-The Docker dev stack stores SQLite in the `backend_data` Docker volume at
-`/workspace/backend/data/paper_search.db`.
-
-### 3. Start the frontend
+Install dependencies:
 
 ```bash
-cd frontend
-pnpm install
-pnpm dev
+uv sync
+cd frontend && pnpm install && cd ..
 ```
 
-Frontend runs at http://localhost:3000 and connects to the API at
-http://localhost:8000.
-
-### 4. Sync daily index into SQLite
-
-Pull arXiv and LessWrong date manifests and shards from the public R2 buckets into the app database (required before counts and daily search work):
+Sync papers into a fresh database before running daily search:
 
 ```bash
 scripts/dev-reset
 ```
 
-`scripts/dev-reset` stops the backend and workers, deletes the SQLite database
-from the Docker volume, flushes Redis queue state, runs sync, then starts the app
-services again. Re-run this when the published R2 indexes change. HTML for paper
-viewing is still fetched from R2 on demand.
+`dev-reset` starts Redis, stops app services, clears the Docker SQLite volume and Redis queues, runs the R2 sync, then restarts the backend and workers.
 
-### Development commands
+Start or restart the backend stack without resetting data:
 
 ```bash
-scripts/dev-worker-logs
+docker compose up --build
 ```
 
-Follows all three worker service logs, hiding Redis, backend, and one-off sync
-container output.
-
-```bash
-scripts/dev-interrupt-worker
-```
-
-Restarts the worker containers to interrupt running worker code, then marks
-SQLite jobs that were still `running` as failed so the UI does not show stale
-progress.
-
-```bash
-scripts/dev-clear-jobs
-```
-
-Stops the workers, flushes Redis, marks SQLite jobs that were `queued` or
-`running` as failed, then starts the workers again.
-
-```bash
-scripts/dev-flush-redis
-```
-
-Flushes Redis queue state via the Redis container. No local `redis-cli` install
-is required.
-
-### Publish indexes (ingest)
-
-Scrape HTML for a date window, upload to R2, and publish the sharded index. Requires R2 write credentials in `.env`.
-
-```bash
-uv run --directory scripts python ingest_arxiv.py --end-date 2026-05-14 --days 7
-uv run --directory scripts python ingest_lesswrong.py --end-date 2026-05-14 --days 31 --cookie-file ~/.lesswrong-cookie.txt
-uv run --directory scripts python ingest_arxiv.py --step upload-html
-```
-
-Flat scripts under `scripts/`: `sync.py`, `r2.py` (shared utils), `ingest_arxiv.py`, `ingest_lesswrong.py`.
-
-### 5. Use the App
-
-1. Open http://localhost:3000
-2. Complete onboarding by entering your research interests
-3. Review and edit proposed filters, then complete setup
-4. Run a daily search from the Daily page
-5. Browse matches, open papers, generate idea maps
-
-## Running Tests
-
-### Backend Tests
-
-```bash
-cd backend
-pytest tests/ -v
-```
-
-### Frontend
+Run the frontend:
 
 ```bash
 cd frontend
-pnpm test
+pnpm dev
 ```
 
-## Project Structure
+Open http://localhost:3000. The API runs at http://localhost:8000.
 
-```
-.
-├── backend/
-│   ├── app/
-│   │   ├── api/          # FastAPI route handlers
-│   │   ├── db/           # Database session & init
-│   │   ├── jobs/         # RQ worker jobs
-│   │   ├── llm/          # OpenRouter client & prompts
-│   │   ├── models/       # SQLAlchemy models
-│   │   ├── schemas/      # Pydantic schemas
-│   │   └── services/     # arXiv fetch, HTML parser
-│   ├── tests/            # Backend tests
-│   ├── pyproject.toml
-│   └── Dockerfile
-├── frontend/
-│   ├── src/
-│   │   ├── app/          # Next.js pages
-│   │   ├── components/   # UI components
-│   │   ├── hooks/        # React Query hooks
-│   │   ├── lib/          # API client
-│   │   └── stores/       # Zustand UI state
-│   └── package.json
-├── docker-compose.yml
-├── .env.example
-└── impl-plan.md
+## Development
+
+Useful scripts:
+
+| Command | Purpose |
+| --- | --- |
+| `scripts/dev-worker-logs` | Follow worker logs |
+| `scripts/dev-interrupt-worker` | Restart workers and fail running jobs |
+| `scripts/dev-clear-jobs` | Stop workers, flush Redis, fail active jobs |
+| `scripts/dev-flush-redis` | Flush Redis queue state |
+
+Run checks:
+
+```bash
+uv run ruff check backend core scripts
+uv run pytest backend/tests -q
+
+cd frontend
+pnpm lint
+pnpm test -- --run
 ```
 
-## API Endpoints
+## Project Layout
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | /health | Health check |
-| GET | /onboarding/status | Check onboarding completion |
-| POST | /onboarding/extractions | Start filter extraction |
-| GET | /onboarding/extractions/{id} | Get extraction status |
-| POST | /onboarding/complete | Save filters and complete |
-| GET | /filters | List all filters |
-| POST | /filters | Create a filter |
-| PATCH | /filters/{id} | Update a filter |
-| POST | /filters/{id}/archive | Archive a filter |
-| POST | /filters/{id}/restore | Restore a filter |
-| GET | /search-runs | List search history |
-| GET | /search-runs/latest | Get latest search run |
-| POST | /search-runs/daily | Run daily search |
-| GET | /search-runs/{id} | Get search run details |
-| GET | /search-runs/{id}/matches | Get search matches |
-| GET | /papers/{id} | Get paper details |
-| GET | /papers/{id}/html | Get cached paper HTML |
-| POST | /papers/{id}/idea-map | Generate idea map |
-| GET | /papers/{id}/idea-map | Get idea map |
+```text
+backend/app/      FastAPI routes, services, models, jobs, LLM client
+core/             Shared paper models, date windows, R2 record helpers
+frontend/src/     Next.js app, components, hooks, API client
+scripts/          R2 sync/ingest and local development helpers
+docker-compose.yml
+```
 
-## LLM Behavior
+## Notes
 
-Daily search requires `OPENROUTER_API_KEY`. Without it, search runs fail with a clear configuration error rather than returning mock matches.
-
-I’m interested in recent machine learning papers about improving factuality and reasoning in language models. I want to track work on retrieval-augmented generation, long-context evaluation, hallucination detection, verification, self-correction, and benchmark design. I’m especially interested in practical methods that improve answer quality or reliability, and less interested in papers focused only on scaling laws or hardware optimization.
+- Daily search and summaries require `OPENROUTER_API_KEY`; missing keys fail explicitly.
+- `scripts/sync.py` refuses to import into a non-empty paper table. Use `scripts/dev-reset` for a clean Docker-backed sync.
+- Worker queues are split by job kind: interactive jobs, daily reports, and idea maps.

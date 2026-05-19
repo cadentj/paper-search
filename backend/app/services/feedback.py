@@ -93,12 +93,12 @@ def upsert_paper_feedback(
 def feedback_counts(db: Session) -> tuple[int, int, int]:
     pending_votes = (
         db.query(SQLAPaperMatchFeedback)
-        .filter(SQLAPaperMatchFeedback.processed == False)
+        .filter(SQLAPaperMatchFeedback.processed.is_(False))
         .count()
     )
     pending_notes = (
         db.query(SQLAPaperNote)
-        .filter(SQLAPaperNote.processed == False, SQLAPaperNote.text != "")
+        .filter(SQLAPaperNote.processed.is_(False), SQLAPaperNote.text != "")
         .count()
     )
     pending_proposals = (
@@ -116,13 +116,13 @@ def feedback_counts(db: Session) -> tuple[int, int, int]:
 def pending_feedback_items(db: Session) -> list[dict]:
     vote_rows = (
         db.query(SQLAPaperMatchFeedback)
-        .filter(SQLAPaperMatchFeedback.processed == False)
+        .filter(SQLAPaperMatchFeedback.processed.is_(False))
         .order_by(SQLAPaperMatchFeedback.updated_at.desc())
         .all()
     )
     note_rows = (
         db.query(SQLAPaperNote)
-        .filter(SQLAPaperNote.processed == False, SQLAPaperNote.text != "")
+        .filter(SQLAPaperNote.processed.is_(False), SQLAPaperNote.text != "")
         .order_by(SQLAPaperNote.updated_at.desc())
         .all()
     )
