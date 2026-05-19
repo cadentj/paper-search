@@ -7,8 +7,8 @@ model = "deepseek/deepseek-v4-flash"
 provider = "novita"
 
 [idea_map]
-model = "deepseek/deepseek-v4-flash"
-provider = "novita"
+model = "openai/gpt-oss-120b"
+provider = "cerebras"
 
 [summary]
 model = "deepseek/deepseek-v4-flash"

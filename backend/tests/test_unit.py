@@ -149,8 +149,8 @@ class TestLLMClient:
         assert filter_generation.provider == "cerebras"
         assert judge.model == "deepseek/deepseek-v4-flash"
         assert judge.provider == "novita"
-        assert idea_map.model == "deepseek/deepseek-v4-flash"
-        assert idea_map.provider == "novita"
+        assert idea_map.model == "openai/gpt-oss-120b"
+        assert idea_map.provider == "cerebras"
         assert summary.model == "deepseek/deepseek-v4-flash"
         assert summary.provider == "novita"
 

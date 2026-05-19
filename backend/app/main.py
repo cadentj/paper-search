@@ -16,6 +16,7 @@ from app.api.jobs import DailySearchSummaryJob
 from app.api.search import DailySearchSummary
 from app.models import Base
 from app.db.session import database, engine
+from app.services.papers_fts import ensure_papers_fts, rebuild_papers_fts
 from paper_search_core.models.paper import SQLAPaper
 from paper_search_core.daily_dates import DEFAULT_DAILY_SEARCH_DATE
 
@@ -42,8 +43,10 @@ DailySearchSummaryJob.model_rebuild(
 )
 
 Base.metadata.create_all(bind=engine)
+ensure_papers_fts(engine)
 
 with database.session() as db:
+    rebuild_papers_fts(db)
     if (
         db.query(SQLAPaper)
         .filter(func.date(SQLAPaper.published_at) == DEFAULT_DAILY_SEARCH_DATE)

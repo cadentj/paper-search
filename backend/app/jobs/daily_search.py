@@ -10,6 +10,7 @@ from app.models.paper_match import SQLAPaperMatch
 from app.models.search_run import SQLASearchRun
 from app.models.job import SQLAJob
 from app.services import filters as filter_service
+from app.services.papers_fts import select_daily_search_pairs
 from app.services.sources import enabled_source_types, papers_for_sources
 from app.llm.client import async_call_llm
 from app.llm.config import JUDGE_PROFILE
@@ -154,22 +155,20 @@ async def _evaluate_filter_paper_with_timeout(
 
 async def _evaluate_pairs(
     *,
-    filters: list[FilterPayload],
-    papers: list[PaperPayload],
+    pairs: list[tuple[FilterPayload, PaperPayload]],
     on_result,
 ) -> None:
     semaphore = asyncio.Semaphore(max(LLM_MAX_CONCURRENCY, 1))
     task_pairs = {}
-    for filter in filters:
-        for paper in papers:
-            task = asyncio.create_task(
-                _evaluate_filter_paper_with_timeout(
-                    semaphore=semaphore,
-                    filter=filter,
-                    paper=paper,
-                )
+    for filter, paper in pairs:
+        task = asyncio.create_task(
+            _evaluate_filter_paper_with_timeout(
+                semaphore=semaphore,
+                filter=filter,
+                paper=paper,
             )
-            task_pairs[task] = (filter, paper)
+        )
+        task_pairs[task] = (filter, paper)
 
     pending = set(task_pairs)
     loop = asyncio.get_running_loop()
@@ -229,9 +228,7 @@ def run_daily_search(search_run_id: str, job_id: str) -> None:
 
             active_filters = filter_service.list_active_filters(db)
             filter_payloads = [f.to_search_payload() for f in active_filters]
-            paper_payloads = [p.to_search_payload() for p in papers]
-            pair_total = len(filter_payloads) * len(paper_payloads)
-            search_runs.set_pair_progress(db, job, total=pair_total)
+            papers_by_id = {p.id: p.to_search_payload() for p in papers}
 
             search_runs.update_candidate_counts(
                 db,
@@ -240,10 +237,27 @@ def run_daily_search(search_run_id: str, job_id: str) -> None:
                 candidate_counts=_candidate_counts_by_source(papers),
             )
 
-            if not filter_payloads or not paper_payloads:
+            if not filter_payloads or not papers:
                 search_runs.set_match_count(db, run, 0)
                 search_runs.complete_daily_search_job(db, job)
                 return
+
+            candidate_pairs = select_daily_search_pairs(
+                db,
+                filters=filter_payloads,
+                papers_by_id=papers_by_id,
+                run_date=run.run_date,
+            )
+            pair_total = len(candidate_pairs)
+
+            if pair_total == 0:
+                job.progress = {"current": 0, "total": 0}
+                search_runs.commit_progress(db)
+                search_runs.set_match_count(db, run, 0)
+                search_runs.complete_daily_search_job(db, job)
+                return
+
+            search_runs.set_pair_progress(db, job, total=pair_total)
 
             completed_pairs = 0
             failed_pairs = 0
@@ -289,8 +303,7 @@ def run_daily_search(search_run_id: str, job_id: str) -> None:
             ) as pair_progress:
                 asyncio.run(
                     _evaluate_pairs(
-                        filters=filter_payloads,
-                        papers=paper_payloads,
+                        pairs=candidate_pairs,
                         on_result=handle_pair_result,
                     )
                 )

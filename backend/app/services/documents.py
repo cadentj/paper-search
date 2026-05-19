@@ -5,7 +5,6 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.jobs.documents import process_document
 from app.jobs.queues import enqueue_for_job
 from app.models.document import SQLADocument
 from app.models.job import SQLAJob
@@ -69,13 +68,16 @@ def start_document_processing(
         document.updated_at = datetime.now(timezone.utc)
         set_job_status(job_record, status="failed", error=document.error)
 
+    def _enqueue_document_processing() -> None:
+        from app.jobs.documents import process_document
+
+        enqueue_for_job(job_record, process_document, document.id, job_record.id)
+
     persist_then_enqueue(
         db,
         job=job_record,
         entities=(document,),
-        enqueue=lambda: enqueue_for_job(
-            job_record, process_document, document.id, job_record.id
-        ),
+        enqueue=_enqueue_document_processing,
         on_failure=on_failure,
         log_context=f"document={document.id}",
     )

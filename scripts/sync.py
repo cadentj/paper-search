@@ -140,6 +140,9 @@ def _insert_paper(db: Session, *, record: dict[str, Any], now: datetime) -> SQLA
         created_at=now,
     )
     db.add(paper)
+    from app.services.papers_fts import index_paper
+
+    index_paper(db, paper)
     return paper
 
 
@@ -156,6 +159,9 @@ def sync_public_indexes(
         connect_args={"check_same_thread": False},
     )
     Base.metadata.create_all(bind=engine)
+    from app.services.papers_fts import ensure_papers_fts
+
+    ensure_papers_fts(engine)
     session_factory = sessionmaker(bind=engine)
     index_settings = settings.index_settings()
 

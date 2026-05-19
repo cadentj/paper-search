@@ -80,11 +80,12 @@ class TestExtractOnboardingFilters:
         assert len(updated.proposed_filters) > 0
 
 
-def _paper_fixture(source_id: str, title: str) -> dict:
+def _paper_fixture(source_id: str, title: str, *, search_text: str | None = None) -> dict:
     return {
         "source_id": source_id,
         "title": title,
-        "search_text": f"Abstract for {title}.",
+        "search_text": search_text
+        or f"Neural network scaling laws. Abstract for {title}.",
         "authors": ["Test Author"],
         "published_at": datetime.now(timezone.utc),
         "html_url": f"https://arxiv.org/html/{source_id}",
@@ -100,6 +101,7 @@ def _mock_papers_for_sources(monkeypatch, papers: list) -> None:
 
 
 def _papers_from_dicts(db_session, papers: list[dict]) -> list:
+    from app.services.papers_fts import index_paper
     from paper_search_core.models.paper import SQLAPaper
 
     rows: list[SQLAPaper] = []
@@ -117,6 +119,8 @@ def _papers_from_dicts(db_session, papers: list[dict]) -> list:
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(paper)
+        db_session.flush()
+        index_paper(db_session, paper)
         rows.append(paper)
     db_session.commit()
     return rows
@@ -524,16 +528,21 @@ class TestRunDailySearch:
         )
         db_session.add(run)
 
+        from app.services.papers_fts import index_paper
+
         paper = SQLAPaper(
             id=str(uuid.uuid4()),
             source_type="arxiv",
             source_id="2605.00003",
             title="Current SQLAPaper",
-            search_text="A current paper that requires LLM matching.",
+            search_text="Neural network scaling laws in large language models.",
             authors=["Author"],
+            published_at=datetime.now(timezone.utc),
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(paper)
+        db_session.flush()
+        index_paper(db_session, paper)
         db_session.commit()
 
         _mock_papers_for_sources(monkeypatch, [paper])
@@ -684,6 +693,151 @@ class TestRunDailySearch:
         assert updated_run.status == "failed"
         assert job.progress["total"] == 1
         assert job.progress["current"] == 1
+
+    def test_progress_total_equals_selected_pairs(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
+        scaling_filter = SQLAFilter(
+            id=str(uuid.uuid4()),
+            name="Scaling Filter",
+            definition={
+                "description": "neural network scaling laws",
+                "mode": "claim",
+            },
+            status="active",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        quantum_filter = SQLAFilter(
+            id=str(uuid.uuid4()),
+            name="Quantum Filter",
+            definition={
+                "description": "quantum entanglement physics",
+                "mode": "claim",
+            },
+            status="active",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db_session.add(scaling_filter)
+        db_session.add(quantum_filter)
+
+        run_id = str(uuid.uuid4())
+        db_session.add(
+            SQLASearchRun(
+                id=run_id,
+                status="queued",
+                run_date=datetime.now(timezone.utc).date(),
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        daily_papers = [
+            _paper_fixture(
+                "2605.00100",
+                "Scaling paper",
+                search_text="neural network scaling laws in transformers",
+            ),
+            _paper_fixture(
+                "2605.00101",
+                "Quantum paper",
+                search_text="quantum entanglement and bell tests",
+            ),
+            _paper_fixture(
+                "2605.00102",
+                "Unrelated paper",
+                search_text="classical thermodynamics of gases",
+            ),
+        ]
+        db_session.commit()
+
+        _mock_papers_for_sources(
+            monkeypatch, _papers_from_dicts(db_session, daily_papers)
+        )
+        llm_calls = {"count": 0}
+
+        async def counting_llm(**kwargs):
+            llm_calls["count"] += 1
+            return {
+                "content": {"matches": []},
+                "model": "test-model",
+                "response_id": "test",
+            }
+
+        monkeypatch.setattr("app.jobs.daily_search.async_call_llm", counting_llm)
+
+        job = _create_daily_search_job(db_session, run_id)
+        _run_daily_search(db_session, run_id, job.id)
+
+        db_session.expire_all()
+        job = _daily_job(db_session, run_id)
+        assert job is not None
+        assert job.progress["total"] == llm_calls["count"]
+        assert job.progress["total"] == job.progress["current"]
+        assert llm_calls["count"] >= 2
+        assert llm_calls["count"] < len(daily_papers) * 2
+
+    def test_no_fts_candidates_completes_with_zero_matches(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
+        filt = SQLAFilter(
+            id=str(uuid.uuid4()),
+            name="Astrobiology Filter",
+            definition={
+                "description": "exoplanet biosignatures spectroscopy",
+                "mode": "claim",
+            },
+            status="active",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db_session.add(filt)
+
+        run_id = str(uuid.uuid4())
+        db_session.add(
+            SQLASearchRun(
+                id=run_id,
+                status="queued",
+                run_date=datetime.now(timezone.utc).date(),
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        daily_papers = [
+            _paper_fixture(
+                "2605.00200",
+                "Scaling paper",
+                search_text="neural network scaling laws only",
+            ),
+        ]
+        db_session.commit()
+
+        _mock_papers_for_sources(
+            monkeypatch, _papers_from_dicts(db_session, daily_papers)
+        )
+        llm_calls = {"count": 0}
+
+        async def counting_llm(**kwargs):
+            llm_calls["count"] += 1
+            return {
+                "content": {"matches": []},
+                "model": "test-model",
+                "response_id": "test",
+            }
+
+        monkeypatch.setattr("app.jobs.daily_search.async_call_llm", counting_llm)
+
+        job = _create_daily_search_job(db_session, run_id)
+        _run_daily_search(db_session, run_id, job.id)
+
+        db_session.expire_all()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
+        job = _daily_job(db_session, run_id)
+        assert job is not None
+        assert job.status == "completed"
+        assert updated_run.match_count == 0
+        assert job.progress == {"current": 0, "total": 0}
+        assert llm_calls["count"] == 0
 
 
 class TestSummarizeDailySearch:

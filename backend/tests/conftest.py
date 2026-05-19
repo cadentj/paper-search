@@ -1,5 +1,6 @@
 """Test fixtures for backend tests."""
 
+import importlib
 import os
 
 import pytest
@@ -43,6 +44,9 @@ def db_engine(tmp_path):
     import app.models.paper_match
     import app.models.idea_map
     Base.metadata.create_all(bind=engine)
+    from app.services.papers_fts import ensure_papers_fts
+
+    ensure_papers_fts(engine)
     with engine.begin() as conn:
         conn.execute(
             text(
@@ -90,8 +94,12 @@ _WORKER_DATABASE_MODULES = (
 def patch_worker_database(monkeypatch, test_database):
     """Point app workers at the test database (patch use-sites, not only session)."""
     monkeypatch.setattr("app.db.session.database", test_database)
-    for module in _WORKER_DATABASE_MODULES:
-        monkeypatch.setattr(f"{module}.database", test_database, raising=False)
+    for module_name in _WORKER_DATABASE_MODULES:
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            continue
+        monkeypatch.setattr(module, "database", test_database, raising=False)
 
 
 @pytest.fixture
