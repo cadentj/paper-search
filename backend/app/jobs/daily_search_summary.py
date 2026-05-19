@@ -7,7 +7,6 @@ from app.db.session import database
 from app.models.search_run import SQLASearchRun
 from app.services import filters as filter_service
 from app.models.job import SQLAJob
-from app.services import search_runs
 from app.llm.client import call_llm
 from app.llm.config import SUMMARY_PROFILE
 from app.llm.prompts import SUMMARY_SYSTEM_PROMPT, SUMMARY_USER_PROMPT
@@ -33,6 +32,8 @@ def _fallback_summary(db, run: SQLASearchRun) -> dict:
 
 def summarize_daily_search(search_run_id: str, job_id: str | None = None) -> None:
     """Worker job: summarize persisted matches for a daily search run."""
+    from app.services import search_runs
+
     with database.session() as db:
         try:
             run = db.query(SQLASearchRun).filter(SQLASearchRun.id == search_run_id).first()

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+docker compose up -d redis
+docker compose stop worker >/dev/null || true
+docker compose exec -T redis redis-cli FLUSHDB
+docker compose run --rm --no-deps backend \
+  python /workspace/scripts/dev_jobs.py fail-active "Cleared by scripts/dev-clear-jobs"
+docker compose up -d worker

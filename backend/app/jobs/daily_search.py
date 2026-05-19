@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-from datetime import datetime, timezone
 
 from app.core.config import LLM_MAX_CONCURRENCY
 from app.db.session import database
@@ -11,7 +10,6 @@ from app.models.paper_match import SQLAPaperMatch
 from app.models.search_run import SQLASearchRun
 from app.models.job import SQLAJob
 from app.services import filters as filter_service
-from app.services import search_runs
 from app.services.sources import enabled_source_types, papers_for_sources
 from app.llm.client import async_call_llm
 from app.llm.config import JUDGE_PROFILE
@@ -207,6 +205,8 @@ async def _evaluate_pairs(
 
 def run_daily_search(search_run_id: str, job_id: str) -> None:
     """Worker job: evaluate filters against daily papers and persist matches."""
+    from app.services import search_runs
+
     with database.session() as db:
         run = db.query(SQLASearchRun).filter(SQLASearchRun.id == search_run_id).first()
         if not run:

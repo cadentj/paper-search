@@ -19,6 +19,10 @@ const mockApi = vi.hoisted(() => ({
   getDocument: vi.fn(),
   createOnboardingGeneration: vi.fn(),
   promoteDraftFilters: vi.fn(),
+  getFeedbackStatus: vi.fn(),
+  verifyScholarProfile: vi.fn(),
+  startScholarImport: vi.fn(),
+  getScholarImportStatus: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -33,7 +37,14 @@ function renderWithProviders(ui: React.ReactElement) {
 }
 
 describe("FiltersPage", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockApi.getFeedbackStatus.mockResolvedValue({
+      pending_votes: 0,
+      pending_notes: 0,
+      pending_proposals: 0,
+    });
+  });
 
   it("shows active and archived filters", async () => {
     mockApi.getFilters.mockImplementation((status?: string) => {
@@ -105,5 +116,68 @@ describe("FiltersPage", () => {
         screen.getByText(/no filters yet/i)
       ).toBeInTheDocument();
     });
+  });
+
+  it("hides Semantic Scholar import card when scholar filters exist", async () => {
+    mockApi.getFilters.mockImplementation((status?: string) => {
+      if (status === "draft") return Promise.resolve([]);
+      return Promise.resolve([
+        {
+          id: "f1",
+          name: "Scholar Filter",
+          status: "active",
+          source: "scholar",
+          definition: {
+            name: "Scholar Filter",
+            description: "From profile",
+            mode: "topic",
+          },
+          created_at: "2024-01-01T00:00:00Z",
+          updated_at: "2024-01-01T00:00:00Z",
+        },
+      ]);
+    });
+    renderWithProviders(<FiltersPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Scholar Filter")).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText("Semantic Scholar Profile Import")
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides Semantic Scholar import card after successful import", async () => {
+    mockApi.getFilters.mockImplementation(() => Promise.resolve([]));
+    mockApi.verifyScholarProfile.mockResolvedValue({
+      author_id: "a1",
+      name: "Test Author",
+      affiliations: [],
+      paper_count: 10,
+    });
+    mockApi.startScholarImport.mockResolvedValue({ id: "imp1", job_id: "j1" });
+    mockApi.getScholarImportStatus.mockResolvedValue({ status: "completed" });
+
+    renderWithProviders(<FiltersPage />);
+    expect(
+      await screen.findByText("Semantic Scholar Profile Import")
+    ).toBeInTheDocument();
+
+    fireEvent.change(
+      screen.getByPlaceholderText(/paste semantic scholar profile url/i),
+      { target: { value: "https://www.semanticscholar.org/author/123" } }
+    );
+    fireEvent.click(screen.getByRole("button", { name: /verify/i }));
+    expect(await screen.findByText(/test author/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /import & generate filters/i }));
+
+    await waitFor(
+      () => {
+        expect(
+          screen.queryByText("Semantic Scholar Profile Import")
+        ).not.toBeInTheDocument();
+      },
+      { timeout: 5000 }
+    );
   });
 });

@@ -1,10 +1,10 @@
-hmm
-
-for devin: 
-- i'd like to migrate to postgresql. i wonder if there's anything we did because we're using sqlite that we could do differently and simpler with postgresql. that means the db will be in the docker compose
-
-i guess let me propose a broader change: 
-- onboarding is a tab on the sidebar.
-- as part of onboarding, i'd like to allow the user to upload pdfs 
-- there should be some documents table? 
-- the onboarding table is currently useful for keeping the proposed but not accepted filters. i think we should just make "draft" a column in the filters table
+- filters should be the first, default page that users open up onto
+- the search tab in the sidebar should be nested under daily as "history" rather than search
+- after importing a semantic scholar profile, the import card should be hidden on filters.
+- remove the area to add claim / topic direclty at the top of daily
+- the daily tab layout should be: 
+  - the "Daily" title, date picker, number of items
+  - a set of tabs with two options, "Report" and "All Papers" 
+  - the report has the search button
+  - the all papers tab has the paginated all papers. 
+    - update here. when the user clicks on a paper, it should open the paper on the right side of the page as a preview. should have the list of papers expanded by default, not in a dropdown. have it centered, but slide to the left when the paper preview opens. 

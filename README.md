@@ -7,15 +7,14 @@ A single-user research paper filtering system that helps researchers keep up wit
 - **Backend**: FastAPI, SQLAlchemy, SQLite, Redis, RQ workers
 - **Frontend**: Next.js (App Router), React Query, Tailwind CSS, shadcn/ui
 - **LLM**: OpenRouter, with model/provider routing in `backend/llm_config.toml`
-- **Runtime**: Docker Redis, local FastAPI backend, local RQ worker, local frontend
+- **Runtime**: Docker Compose for Redis, FastAPI, and RQ worker; local Next.js dev server
 
 ## Quick Start
 
 ### Prerequisites
 
-- Python 3.12+
+- Docker & Docker Compose
 - Node.js 18+ and pnpm
-- Docker & Docker Compose (for Redis)
 - An OpenRouter API key
 
 ### 1. Environment Setup
@@ -25,27 +24,68 @@ cp .env.example .env
 # Edit .env and set OPENROUTER_API_KEY
 ```
 
-### 2. Start Redis
+### 2. Start Redis, Backend, and Worker
 
 ```bash
-docker compose up -d redis
+docker compose up --build
 ```
 
-This starts Redis on port 6379. Daily searches, onboarding extraction, and
-idea-map generation do not run inside the FastAPI process.
+This starts:
 
-### 3. Sync daily index into SQLite
+- Redis on port 6379
+- FastAPI on http://localhost:8000 with `uvicorn --reload`
+- an RQ worker that restarts on Python file changes
+
+The Docker dev stack stores SQLite in the `backend_data` Docker volume at
+`/workspace/backend/data/paper_search.db`.
+
+### 3. Start the frontend
+
+```bash
+cd frontend
+pnpm install
+pnpm dev
+```
+
+Frontend runs at http://localhost:3000 and connects to the API at
+http://localhost:8000.
+
+### 4. Sync daily index into SQLite
 
 Pull arXiv and LessWrong date manifests and shards from the public R2 buckets into the app database (required before counts and daily search work):
 
 ```bash
-# From repo root (installs core, backend, and scripts deps via uv workspace)
-uv sync
-mkdir -p backend/data
-uv run --directory scripts python sync.py
+scripts/dev-reset
 ```
 
-Re-run this when the published R2 indexes change. HTML for paper viewing is still fetched from R2 on demand.
+`scripts/dev-reset` stops the backend and worker, deletes the SQLite database
+from the Docker volume, flushes Redis queue state, runs sync, then starts the app
+services again. Re-run this when the published R2 indexes change. HTML for paper
+viewing is still fetched from R2 on demand.
+
+### Development commands
+
+```bash
+scripts/dev-interrupt-worker
+```
+
+Restarts the worker container to interrupt running worker code, then marks
+SQLite jobs that were still `running` as failed so the UI does not show stale
+progress.
+
+```bash
+scripts/dev-clear-jobs
+```
+
+Stops the worker, flushes Redis, marks SQLite jobs that were `queued` or
+`running` as failed, then starts the worker again.
+
+```bash
+scripts/dev-flush-redis
+```
+
+Flushes Redis queue state via the Redis container. No local `redis-cli` install
+is required.
 
 ### Publish indexes (ingest)
 
@@ -59,41 +99,7 @@ uv run --directory scripts python ingest_arxiv.py --step upload-html
 
 Flat scripts under `scripts/`: `sync.py`, `r2.py` (shared utils), `ingest_arxiv.py`, `ingest_lesswrong.py`.
 
-### 4. Start Backend
-
-```bash
-cd backend
-REDIS_URL=redis://localhost:6379/0 uv run uvicorn app.main:app --reload --port 8000
-```
-
-The API runs at http://localhost:8000 with hot-reload enabled.
-
-### 5. Start Worker
-
-Start the worker in a separate terminal:
-
-```bash
-cd backend
-REDIS_URL=redis://localhost:6379/0 uv run python -m app.worker
-```
-
-The development worker uses RQ's non-forking `SimpleWorker`, which avoids
-macOS Objective-C fork crashes and keeps logs in the worker terminal.
-
-### 6. Start Frontend
-
-```bash
-cd frontend
-pnpm install
-pnpm dev
-```
-
-Frontend runs at http://localhost:3000 and connects to the API at http://localhost:8000.
-
-Make sure the backend process has `REDIS_URL=redis://localhost:6379/0` when
-running outside Docker. Inside Docker, use `redis://redis:6379/0`.
-
-### 7. Use the App
+### 5. Use the App
 
 1. Open http://localhost:3000
 2. Complete onboarding by entering your research interests

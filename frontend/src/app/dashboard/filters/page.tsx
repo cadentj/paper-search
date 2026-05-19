@@ -176,7 +176,7 @@ function DraftFilterCard({ filter }: { filter: FilterResponse }) {
 
   return (
     <Card>
-      <CardContent className="pt-4">
+      <CardContent>
         {isEditing ? (
           <div className="space-y-3">
             <Input
@@ -276,7 +276,7 @@ function ScholarImportSection({ hasScholarFilters }: { hasScholarFilters: boolea
     return () => clearInterval(interval);
   }, [step, importId, queryClient]);
 
-  if (hasScholarFilters && step === "input") return null;
+  if (hasScholarFilters || step === "done") return null;
 
   const handleVerify = async () => {
     if (!url.trim()) return;
@@ -318,13 +318,7 @@ function ScholarImportSection({ hasScholarFilters }: { hasScholarFilters: boolea
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        {step === "done" ? (
-          <p className="text-sm text-muted-foreground">
-            Import complete for {profile?.name}. Draft filters are ready for review above.
-          </p>
-        ) : (
-          <>
-            <div className="flex gap-2">
+        <div className="flex gap-2">
               <Input
                 placeholder="Paste Semantic Scholar profile URL..."
                 value={url}
@@ -366,8 +360,6 @@ function ScholarImportSection({ hasScholarFilters }: { hasScholarFilters: boolea
                 {step === "importing" ? "Starting import..." : "Generating filters from publications..."}
               </div>
             )}
-          </>
-        )}
       </CardContent>
     </Card>
   );

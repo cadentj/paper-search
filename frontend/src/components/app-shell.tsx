@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   Newspaper,
-  Search,
   Filter,
   Settings,
 } from "lucide-react";
@@ -20,17 +19,28 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarProvider,
   SidebarInset,
 } from "@/components/ui/sidebar";
 import { type ReactNode } from "react";
 
-const NAV_ITEMS = [
-  { label: "Daily", href: "/dashboard/daily", icon: Newspaper },
-  { label: "Filters", href: "/dashboard/filters", icon: Filter },
-  { label: "Search", href: "/dashboard/search", icon: Search },
-  { label: "Settings", href: "/dashboard/settings", icon: Settings },
-];
+const SETTINGS_HREF = "/dashboard/settings";
+
+const DAILY_SUB_ITEMS = [
+  { label: "Report", href: "/dashboard/daily/report" },
+  { label: "All Papers", href: "/dashboard/daily/all-papers" },
+] as const;
+
+function isDailyPath(pathname: string) {
+  return pathname === "/dashboard/daily" || pathname.startsWith("/dashboard/daily/");
+}
+
+function isDailyReportPath(pathname: string) {
+  return pathname === "/dashboard/daily" || pathname === "/dashboard/daily/report";
+}
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -57,23 +67,55 @@ export function AppShell({ children }: { children: ReactNode }) {
             <SidebarGroupLabel>Paper Search</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {NAV_ITEMS.map((item) => (
-                  <SidebarMenuItem key={item.href}>
-                    <SidebarMenuButton
-                      isActive={pathname === item.href}
-                      render={<Link href={item.href} />}
-                    >
-                      <item.icon className="size-4" />
-                      <span>{item.label}</span>
-                      {item.label === "Filters" && hasPendingProposals && (
-                        <span className="ml-auto inline-flex size-2 rounded-full bg-green-500" />
-                      )}
-                      {item.label === "Filters" && !hasPendingProposals && hasPendingFeedback && (
-                        <span className="ml-auto inline-flex size-2 rounded-full bg-blue-500" />
-                      )}
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={pathname === "/dashboard/filters"}
+                    render={<Link href="/dashboard/filters" />}
+                  >
+                    <Filter className="size-4" />
+                    <span>Filters</span>
+                    {hasPendingProposals && (
+                      <span className="ml-auto inline-flex size-2 rounded-full bg-green-500" />
+                    )}
+                    {!hasPendingProposals && hasPendingFeedback && (
+                      <span className="ml-auto inline-flex size-2 rounded-full bg-blue-500" />
+                    )}
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={isDailyPath(pathname)}
+                    render={<Link href="/dashboard/daily/report" />}
+                  >
+                    <Newspaper className="size-4" />
+                    <span>Daily</span>
+                  </SidebarMenuButton>
+                  <SidebarMenuSub>
+                    {DAILY_SUB_ITEMS.map((item) => (
+                      <SidebarMenuSubItem key={item.href}>
+                        <SidebarMenuSubButton
+                          isActive={
+                            item.href === "/dashboard/daily/report"
+                              ? isDailyReportPath(pathname)
+                              : pathname === item.href
+                          }
+                          render={<Link href={item.href} />}
+                        >
+                          {item.label}
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                    ))}
+                  </SidebarMenuSub>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={pathname === SETTINGS_HREF}
+                    render={<Link href={SETTINGS_HREF} />}
+                  >
+                    <Settings className="size-4" />
+                    <span>Settings</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_URL =
+  process.env.API_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://localhost:8000";
 
 export const metadata: Metadata = {
   title: "Paper Search",
@@ -23,7 +26,7 @@ async function getOnboardingCompleted() {
 
 export default async function Home() {
   if (await getOnboardingCompleted()) {
-    redirect("/dashboard/daily");
+    redirect("/dashboard/filters");
   }
   redirect("/dashboard/filters");
 }
