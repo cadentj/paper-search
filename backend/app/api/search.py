@@ -12,11 +12,7 @@ from app.db.session import get_db
 from app.models.paper_match import PaperMatch
 from app.models.search_run import SearchRun
 from paper_search_core.daily_dates import DAILY_SEARCH_DATE_SET
-from app.services.sources import (
-    counts_by_source_for_date,
-    enabled_source_types,
-    ensure_default_data_sources,
-)
+from app.services.sources import counts_by_source_for_date, enabled_source_types
 from app.services import search_runs
 
 router = APIRouter(prefix="/search-runs", tags=["search"])

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from app.models.filter import SQLAFilter
 from app.models.onboarding_extraction import SQLAOnboardingExtraction
-from app.models.paper import SQLAPaper
+from paper_search_core.models.paper import SQLAPaper
 from app.models.paper_match import SQLAPaperMatch
 from app.models.search_run import SQLASearchRun
 from app.llm.config import (
@@ -97,7 +97,7 @@ def _mock_papers_for_sources(monkeypatch, papers: list) -> None:
 
 
 def _papers_from_dicts(db_session, papers: list[dict]) -> list:
-    from app.models.paper import SQLAPaper
+    from paper_search_core.models.paper import SQLAPaper
 
     rows: list[SQLAPaper] = []
     for p in papers:

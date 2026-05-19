@@ -247,7 +247,7 @@ export function useRestoreFilter() {
 // Data sources
 export function useDataSources() {
   return useQuery({
-    queryKey: ["data-sources"],
+    queryKey: ["settings", "data-sources"],
     queryFn: api.getDataSources,
   });
 }
@@ -263,7 +263,7 @@ export function useUpdateDataSource() {
       input: { enabled?: boolean; settings?: Record<string, unknown> };
     }) => api.updateDataSource(sourceType, input),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["data-sources"] });
+      qc.invalidateQueries({ queryKey: ["settings", "data-sources"] });
       qc.invalidateQueries({ queryKey: ["search-runs", "daily-candidate-count"] });
     },
   });

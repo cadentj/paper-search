@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.models.idea_map import SQLAIdeaMap
-from app.models.paper import SQLAPaper
+from paper_search_core.models.paper import SQLAPaper
 from app.services.errors import NotFound
 from app.services import papers as papers_service
 

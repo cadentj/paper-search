@@ -10,7 +10,7 @@ from app.jobs.daily_search_summary import summarize_daily_search
 from app.jobs.queue import get_queue
 from app.models.filter import SQLAFilter
 from app.models.job import SQLAJob
-from app.models.paper import SQLAPaper
+from paper_search_core.models.paper import SQLAPaper
 from app.models.paper_match import PaperMatch, SQLAPaperMatch
 from app.models.search_run import SQLASearchRun, SearchRun
 from paper_search_core.daily_dates import DEFAULT_DAILY_SEARCH_DATE
@@ -18,7 +18,7 @@ from app.services.errors import Conflict, NotFound, ValidationFailed
 from app.services.job_enqueue import commit_entities, enqueue_job, persist_then_enqueue
 from app.services.jobs import get_or_create_job_for_subject
 from app.services.jobs import create_job, latest_job_for_subject, set_job_status
-from app.services.sources import enabled_source_types, ensure_default_data_sources
+from app.services.sources import enabled_source_types
 
 ACTIVE_SUMMARY_JOB_STATUSES = {"queued", "running"}
 
@@ -84,7 +84,6 @@ def start_daily_search(
     *,
     run_date: date | None = None,
 ) -> SQLAJob:
-    ensure_default_data_sources(db)
     requested_date = run_date or DEFAULT_DAILY_SEARCH_DATE
     if not requested_date:
         raise ValidationFailed("No daily search dates are configured")

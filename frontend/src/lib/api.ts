@@ -238,13 +238,10 @@ export interface Paper {
 }
 
 export interface DataSource {
-  id: string;
   source_type: string;
   name: string;
   enabled: boolean;
   settings: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface IdeaMapWarrant {
@@ -402,12 +399,12 @@ export const api = {
     fetchApi<FilterResponse>(`/filters/${id}/restore`, { method: "POST" }),
 
   // Data sources
-  getDataSources: () => fetchApi<DataSource[]>("/data-sources"),
+  getDataSources: () => fetchApi<DataSource[]>("/settings/data-sources"),
   updateDataSource: (
     sourceType: string,
     input: { enabled?: boolean; settings?: Record<string, unknown> }
   ) =>
-    fetchApi<DataSource>(`/data-sources/${sourceType}`, {
+    fetchApi<DataSource>(`/settings/data-sources/${sourceType}`, {
       method: "PATCH",
       body: JSON.stringify(input),
     }),

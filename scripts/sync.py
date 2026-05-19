@@ -24,7 +24,7 @@ from paper_search_core.index_records import (
     lesswrong_is_searchable,
     lesswrong_record_from_shard,
 )
-from paper_search_core.models import Base, Paper
+from paper_search_core.models import Base, SQLAPaper
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
@@ -108,7 +108,7 @@ def _ensure_published_on_run_date(record: dict[str, Any], *, run_date: date) -> 
 
 
 def _require_empty_paper_table(db: Session) -> None:
-    count = db.query(Paper).count()
+    count = db.query(SQLAPaper).count()
     if count:
         raise RuntimeError(
             f"Refusing to sync: database already has {count} paper(s). "
@@ -116,18 +116,18 @@ def _require_empty_paper_table(db: Session) -> None:
         )
 
 
-def _insert_paper(db: Session, *, record: dict[str, Any], now: datetime) -> Paper:
+def _insert_paper(db: Session, *, record: dict[str, Any], now: datetime) -> SQLAPaper:
     source_type = record["source_type"]
     source_id = record["source_id"]
     existing = (
-        db.query(Paper)
-        .filter(Paper.source_type == source_type, Paper.source_id == source_id)
+        db.query(SQLAPaper)
+        .filter(SQLAPaper.source_type == source_type, SQLAPaper.source_id == source_id)
         .first()
     )
     if existing:
         return existing
 
-    paper = Paper(
+    paper = SQLAPaper(
         id=str(uuid.uuid4()),
         source_type=source_type,
         source_id=source_id,

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.jobs.idea_map import generate_idea_map
 from app.jobs.queue import get_queue
 from app.models.idea_map import SQLAIdeaMap
-from app.models.paper import SQLAPaper
+from paper_search_core.models.paper import SQLAPaper
 from app.models.paper_note import SQLAPaperNote
 from app.models.job import SQLAJob
 from app.services.errors import NotFound

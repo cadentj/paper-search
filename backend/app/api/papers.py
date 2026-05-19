@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.api.http_errors import raise_http_from_service
 from app.db.session import get_db
 from app.models.idea_map import IdeaMap
-from app.models.paper import Paper
+from paper_search_core.models.paper import Paper
 from app.api.jobs import JobStart
 from app.services.sources import KNOWN_SOURCE_TYPES, paper_html
 from app.services import papers as papers_service

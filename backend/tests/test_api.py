@@ -231,7 +231,7 @@ class TestPapers:
         resp = client.post("/papers/nonexistent/idea-map")
         assert resp.status_code == 404
 
-        from app.models.paper import SQLAPaper
+        from paper_search_core.models.paper import SQLAPaper
 
         paper = SQLAPaper(
             id="paper-1",

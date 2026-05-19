@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.jobs.feedback_reflection import process_all_feedback
 from app.jobs.queue import get_queue
 from app.models.filter import SQLAFilter
-from app.models.paper import SQLAPaper
+from paper_search_core.models.paper import SQLAPaper
 from app.models.paper_match import SQLAPaperMatch
 from app.models.paper_match_feedback import SQLAPaperMatchFeedback
 from app.models.paper_note import SQLAPaperNote

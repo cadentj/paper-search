@@ -11,7 +11,7 @@ for _key, _default in (
 ):
     if not os.environ.get(_key, "").strip():
         os.environ[_key] = _default
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 
 from app.db.session import Database
@@ -34,15 +34,28 @@ def db_engine(tmp_path):
         cursor.close()
 
     # Import all models so they register with Base
+    import app.models.app_setting  # noqa: F401
     import app.models.filter
     import app.models.job
     import app.models.onboarding_extraction  # noqa: F401
-    import app.models.paper
+    import paper_search_core.models.paper  # noqa: F401
     import app.models.search_run
     import app.models.paper_match
     import app.models.idea_map
-
     Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT OR IGNORE INTO app_settings (key, value, updated_at)
+                VALUES (
+                    'data_sources',
+                    '{"arxiv": {"enabled": true, "settings": {}}, "lesswrong": {"enabled": false, "settings": {"view": "new"}}}',
+                    datetime('now')
+                )
+                """
+            )
+        )
     yield engine
     engine.dispose()
 

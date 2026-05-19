@@ -1,6 +1,5 @@
 from app.models.base import Base
 from app.models.filter import FilterPayload, Filter, SQLAFilter
-from app.models.data_source import DataSource, SQLADataSource
 from app.models.document import Document, SQLADocument
 from app.models.job import Job, SQLAJob
 from app.models.onboarding_extraction import (
@@ -8,7 +7,7 @@ from app.models.onboarding_extraction import (
     ProposedFilter,
     SQLAOnboardingExtraction,
 )
-from app.models.paper import Paper, SQLAPaper
+from paper_search_core.models.paper import Paper, SQLAPaper
 from app.models.search_run import SQLASearchRun, SearchRun
 from app.models.paper_match import SQLAPaperMatch
 from app.models.paper_match_feedback import SQLAPaperMatchFeedback
@@ -19,7 +18,6 @@ from app.models.research_profile_import import SQLAResearchProfileImport
 
 __all__ = [
     "Base",
-    "DataSource",
     "Document",
     "FilterPayload",
     "Filter",
@@ -29,7 +27,6 @@ __all__ = [
     "Paper",
     "ProposedFilter",
     "SQLAAppSetting",
-    "SQLADataSource",
     "SQLADocument",
     "SQLAFilter",
     "SQLAIdeaMap",

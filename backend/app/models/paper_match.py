@@ -12,7 +12,7 @@ from paper_search_core.schemas.daily_search import paper_item_label
 
 if TYPE_CHECKING:
     from app.models.filter import SQLAFilter
-    from app.models.paper import SQLAPaper
+    from paper_search_core.models.paper import SQLAPaper
 
 
 class PaperMatch(BaseModel):

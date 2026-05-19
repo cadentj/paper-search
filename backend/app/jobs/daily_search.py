@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from app.core.config import LLM_MAX_CONCURRENCY
 from app.db.session import database
-from app.models.paper import SQLAPaper
+from paper_search_core.models.paper import SQLAPaper
 from app.models.paper_match import SQLAPaperMatch
 from app.models.search_run import SQLASearchRun
 from app.models.job import SQLAJob

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from app.db.session import database
 from app.models.filter import SQLAFilter
 from app.models.job import SQLAJob
-from app.models.paper import SQLAPaper
+from paper_search_core.models.paper import SQLAPaper
 from app.models.paper_note import SQLAPaperNote
 from app.services.jobs import set_job_status
 from app.llm.client import call_llm

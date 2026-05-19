@@ -6,7 +6,6 @@ from sqlalchemy import func
 
 from app.api.onboarding import router as onboarding_router
 from app.api.filters import router as filters_router
-from app.api.data_sources import router as data_sources_router
 from app.api.documents import router as documents_router
 from app.api.jobs import router as jobs_router
 from app.api.search import router as search_router
@@ -17,7 +16,7 @@ from app.api.jobs import DailySearchSummaryJob
 from app.api.search import DailySearchSummary
 from app.models import Base
 from app.db.session import database, engine
-from app.models.paper import SQLAPaper
+from paper_search_core.models.paper import SQLAPaper
 from paper_search_core.daily_dates import DEFAULT_DAILY_SEARCH_DATE
 
 logger = logging.getLogger(__name__)
@@ -56,7 +55,6 @@ def health_check():
 
 app.include_router(onboarding_router)
 app.include_router(filters_router)
-app.include_router(data_sources_router)
 app.include_router(documents_router)
 app.include_router(jobs_router)
 app.include_router(search_router)

@@ -9,7 +9,7 @@ from app.db.session import database
 from app.models.filter import SQLAFilter
 from app.services import filters as filter_service
 from app.models.job import SQLAJob
-from app.models.paper import SQLAPaper
+from paper_search_core.models.paper import SQLAPaper
 from app.models.paper_match import SQLAPaperMatch
 from app.models.paper_match_feedback import SQLAPaperMatchFeedback
 from app.models.paper_note import SQLAPaperNote

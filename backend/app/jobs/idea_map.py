@@ -12,7 +12,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.db.session import database
 from app.models.job import SQLAJob
-from app.models.paper import SQLAPaper
+from paper_search_core.models.paper import SQLAPaper
 from app.models.idea_map import SQLAIdeaMap
 from app.services import papers as papers_service
 from app.services.jobs import job_progress, set_job_status
