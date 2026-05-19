@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 def _fallback_summary(db, run: SQLASearchRun) -> dict:
-    active_filters = len(filter_service.list_active_filters(db))
+    active_filters = len(filter_service.list_filters(db, status="active"))
     if active_filters == 0:
         return {"summary": "No active filters to search.", "citations": []}
     if not run.candidate_count:

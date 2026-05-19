@@ -19,10 +19,6 @@ def list_filters(db: Session, status: str | None = None) -> list[SQLAFilter]:
     return query.order_by(SQLAFilter.created_at.desc()).all()
 
 
-def list_active_filters(db: Session) -> list[SQLAFilter]:
-    return db.query(SQLAFilter).filter(SQLAFilter.status == "active").all()
-
-
 def get_filter(db: Session, filter_id: str) -> SQLAFilter:
     filter = db.query(SQLAFilter).filter(SQLAFilter.id == filter_id).first()
     if not filter:

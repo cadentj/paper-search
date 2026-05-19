@@ -94,7 +94,3 @@ def papers_for_sources(
         )
         papers.extend(papers_for_source)
     return papers
-
-
-def enabled_source_types(db: Session) -> set[str]:
-    return settings_service.enabled_source_types(db)

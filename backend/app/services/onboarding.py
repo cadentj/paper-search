@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.filter import SQLAFilter
-from app.models.job import Job, SQLAJob
+from app.models.job import SQLAJob
 from app.models.onboarding_extraction import SQLAOnboardingExtraction
 from app.models.research_profile_import import SQLAResearchProfileImport
 from app.services.jobs import (
@@ -16,16 +16,10 @@ from app.services.jobs import (
     create_job,
     enqueue,
     latest_job_for_subject,
-    with_progress,
 )
 
 if TYPE_CHECKING:
     from app.api.onboarding import OnboardingCompleteRequest, OnboardingGenerationCreate
-
-
-def onboarding_status(db: Session) -> tuple[bool, int]:
-    active_count = db.query(SQLAFilter).filter(SQLAFilter.status == "active").count()
-    return active_count > 0, active_count
 
 
 def start_generation(db: Session, body: OnboardingGenerationCreate) -> str:
@@ -72,10 +66,7 @@ def start_extraction(db: Session, input_text: str) -> str:
         status="queued",
     )
     commit_refresh(db, extraction, job_record)
-    try:
-        enqueue(db, job_record, log_context=f"onboarding extraction={extraction.id}")
-    except ConnectionError as exc:
-        raise ConnectionError(extraction.error or str(exc)) from exc
+    enqueue(db, job_record, log_context=f"onboarding extraction={extraction.id}")
     return job_record.id
 
 
@@ -90,11 +81,6 @@ def draft_filters_for_generation(db: Session, job_id: str) -> list[SQLAFilter]:
     ]
 
 
-def serialize_onboarding_generation_job(db: Session, job: SQLAJob) -> Job:
-    count = len(draft_filters_for_generation(db, job.id))
-    return with_progress(job, current=count, total=max(count, 1))
-
-
 def get_extraction_for_job(
     db: Session, job: SQLAJob
 ) -> SQLAOnboardingExtraction | None:
@@ -105,13 +91,6 @@ def get_extraction_for_job(
         .filter(SQLAOnboardingExtraction.id == job.subject_id)
         .first()
     )
-
-
-def serialize_onboarding_extraction_job(
-    db: Session, job: SQLAJob, extraction: SQLAOnboardingExtraction
-) -> Job:
-    count = len(extraction.proposed_filters or [])
-    return with_progress(job, current=count, total=max(count, 1))
 
 
 def get_extraction(db: Session, extraction_id: str) -> SQLAOnboardingExtraction:

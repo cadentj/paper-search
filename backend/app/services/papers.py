@@ -169,10 +169,6 @@ def start_idea_map(db: Session, paper_id: str) -> str:
     return job_record.id
 
 
-def get_idea_map(db: Session, idea_map_id: str) -> SQLAIdeaMap | None:
-    return db.query(SQLAIdeaMap).filter(SQLAIdeaMap.id == idea_map_id).first()
-
-
 def mark_idea_map_running(db: Session, idea_map: SQLAIdeaMap, job: SQLAJob) -> None:
     idea_map.status = "running"
     idea_map.updated_at = datetime.now(timezone.utc)
@@ -187,10 +183,6 @@ def mark_idea_map_skipped(
     idea_map.dropped_reason = reason
     idea_map.updated_at = datetime.now(timezone.utc)
     set_job_status(job, status="skipped")
-    db.commit()
-
-
-def commit_idea_map(db: Session) -> None:
     db.commit()
 
 

@@ -11,8 +11,10 @@ from app.models.paper_match import SQLAPaperMatch
 from app.models.search_run import SQLASearchRun
 from app.models.job import SQLAJob
 from app.services import filters as filter_service
+from app.services.settings import enabled_source_types
 from app.services.papers_fts import select_daily_search_pairs
-from app.services.sources import enabled_source_types, papers_for_sources
+from app.services.jobs import set_job_status
+from app.services.sources import papers_for_sources
 from app.llm.client import async_call_llm
 from app.llm.config import JUDGE_PROFILE
 from app.llm.prompts import (
@@ -178,7 +180,7 @@ def run(db: Session, job: SQLAJob) -> None:
 
         papers = papers_for_sources(db, enabled_source_types(db), run.run_date)
 
-        active_filters = filter_service.list_active_filters(db)
+        active_filters = filter_service.list_filters(db, status="active")
         filter_payloads = [f.to_search_payload() for f in active_filters]
         papers_by_id = {p.id: p.to_search_payload() for p in papers}
 
@@ -190,8 +192,9 @@ def run(db: Session, job: SQLAJob) -> None:
         )
 
         if not filter_payloads or not papers:
-            search_runs.set_match_count(db, run, 0)
-            search_runs.complete_daily_search_job(db, job)
+            run.match_count = 0
+            set_job_status(job, status="completed")
+            db.commit()
             return
 
         candidate_pairs = select_daily_search_pairs(
@@ -204,9 +207,10 @@ def run(db: Session, job: SQLAJob) -> None:
 
         if pair_total == 0:
             job.progress = {"current": 0, "total": 0}
-            search_runs.commit_progress(db)
-            search_runs.set_match_count(db, run, 0)
-            search_runs.complete_daily_search_job(db, job)
+            db.commit()
+            run.match_count = 0
+            set_job_status(job, status="completed")
+            db.commit()
             return
 
         search_runs.set_pair_progress(db, job, total=pair_total)
@@ -244,7 +248,7 @@ def run(db: Session, job: SQLAJob) -> None:
                     )
                 )
             job.progress = {"current": completed_pairs, "total": pair_total}
-            search_runs.commit_progress(db)
+            db.commit()
             pair_progress.update(1)
 
         with tqdm(
@@ -271,8 +275,9 @@ def run(db: Session, job: SQLAJob) -> None:
             .filter(SQLAPaperMatch.search_run_id == search_run_id)
             .count()
         )
-        search_runs.set_match_count(db, run, match_count)
-        search_runs.complete_daily_search_job(db, job)
+        run.match_count = match_count
+        set_job_status(job, status="completed")
+        db.commit()
 
     except Exception as e:
         db.rollback()

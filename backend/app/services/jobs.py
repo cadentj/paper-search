@@ -19,6 +19,14 @@ logger = logging.getLogger(__name__)
 
 DONE_STATUSES = frozenset({"completed", "failed", "skipped"})
 
+_SUBJECT_MODELS_BY_KIND = {
+    "document_processing": SQLADocument,
+    "idea_map": SQLAIdeaMap,
+    "daily_search": SQLASearchRun,
+    "onboarding_extraction": SQLAOnboardingExtraction,
+    "scholar_import": SQLAResearchProfileImport,
+}
+
 
 def get_job(db: Session, job_id: str) -> SQLAJob | None:
     return db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
@@ -116,43 +124,21 @@ def latest_job_for_subject(
     return query.order_by(SQLAJob.created_at.desc()).first()
 
 
-def fail_enqueue(db: Session, job: SQLAJob, error: str) -> None:
+def _sync_subject_failure(db: Session, job: SQLAJob, error: str) -> None:
+    model = _SUBJECT_MODELS_BY_KIND.get(job.kind)
+    if not model or not job.subject_id:
+        return
+    subject = db.get(model, job.subject_id)
+    if not subject:
+        return
+    subject.status = "failed"
+    if hasattr(subject, "error"):
+        subject.error = error
     now = datetime.now(timezone.utc)
-    set_job_status(job, status="failed", error=error)
-
-    if job.kind == "document_processing" and job.subject_id:
-        document = db.get(SQLADocument, job.subject_id)
-        if document:
-            document.status = "failed"
-            document.error = f"Could not enqueue document processing: {error}"
-            document.updated_at = now
-    elif job.kind == "idea_map" and job.subject_id:
-        idea_map = db.get(SQLAIdeaMap, job.subject_id)
-        if idea_map:
-            idea_map.status = "failed"
-            idea_map.error = f"Could not enqueue idea map generation: {error}"
-            idea_map.updated_at = now
-    elif job.kind == "daily_search" and job.subject_id:
-        run = db.get(SQLASearchRun, job.subject_id)
-        if run:
-            run.status = "failed"
-            run.error = f"Could not enqueue daily search: {error}"
-            run.completed_at = now
-    elif job.kind == "onboarding_extraction" and job.subject_id:
-        extraction = db.get(SQLAOnboardingExtraction, job.subject_id)
-        if extraction:
-            extraction.status = "failed"
-            extraction.error = f"Could not enqueue onboarding extraction: {error}"
-            extraction.updated_at = now
-    elif job.kind == "scholar_import" and job.subject_id:
-        profile_import = db.get(SQLAResearchProfileImport, job.subject_id)
-        if profile_import:
-            profile_import.status = "failed"
-            profile_import.error = error
-    elif job.kind == "onboarding_generation":
-        job.error = f"Could not enqueue onboarding generation: {error}"
-    elif job.kind == "daily_search_summary":
-        job.error = f"Could not enqueue summary: {error}"
+    if hasattr(subject, "updated_at"):
+        subject.updated_at = now
+    if hasattr(subject, "completed_at"):
+        subject.completed_at = now
 
 
 def enqueue(db: Session, job: SQLAJob, *, log_context: str = "") -> None:
@@ -171,6 +157,7 @@ def enqueue(db: Session, job: SQLAJob, *, log_context: str = "") -> None:
             )
     except Exception as exc:
         error = str(exc)
-        fail_enqueue(db, job, error)
+        set_job_status(job, status="failed", error=error)
+        _sync_subject_failure(db, job, error)
         db.commit()
         raise ConnectionError(error) from exc

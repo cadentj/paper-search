@@ -37,7 +37,7 @@ def _build_reflection_prompt(
     votes: list[SQLAPaperMatchFeedback],
     notes: list[SQLAPaperNote],
 ) -> str:
-    active_filters = filter_service.list_active_filters(db)
+    active_filters = filter_service.list_filters(db, status="active")
     filter_summaries = []
     for f in active_filters:
         d = f.definition or {}

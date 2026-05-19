@@ -19,7 +19,7 @@ from app.services.jobs import (
     set_job_status,
     with_progress,
 )
-from app.services.sources import enabled_source_types
+from app.services.settings import enabled_source_types
 
 ACTIVE_SUMMARY_JOB_STATUSES = {"queued", "running"}
 
@@ -199,20 +199,6 @@ def update_candidate_counts(
 ) -> None:
     run.candidate_count = candidate_count
     run.candidate_counts = candidate_counts
-    db.commit()
-
-
-def set_match_count(db: Session, run: SQLASearchRun, match_count: int) -> None:
-    run.match_count = match_count
-    db.commit()
-
-
-def commit_progress(db: Session) -> None:
-    db.commit()
-
-
-def complete_daily_search_job(db: Session, job: SQLAJob) -> None:
-    set_job_status(job, status="completed")
     db.commit()
 
 

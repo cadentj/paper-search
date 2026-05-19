@@ -98,10 +98,6 @@ def complete_document_needs_ocr(
     db.commit()
 
 
-def commit_document_progress(db: Session) -> None:
-    db.commit()
-
-
 def complete_document(
     db: Session, document: SQLADocument, job: SQLAJob, summary: str
 ) -> None:

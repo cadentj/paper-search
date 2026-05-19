@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.models.idea_map import SQLAIdeaMap
 from app.models.job import Job, SQLAJob
 from app.services import documents, onboarding, papers, search_runs
-from app.services.jobs import DONE_STATUSES
+from app.services.jobs import DONE_STATUSES, with_progress
 
 RECENT_JOBS_LIMIT = 15
 ACTIVE_STATUSES = ("queued", "running")
@@ -66,11 +66,13 @@ def serialize_job_for_overview(db: Session, job: SQLAJob) -> Job:
         if idea_map:
             return papers.serialize_idea_map_job(db, job, idea_map)
     elif job.kind == "onboarding_generation":
-        return onboarding.serialize_onboarding_generation_job(db, job)
+        count = len(onboarding.draft_filters_for_generation(db, job.id))
+        return with_progress(job, current=count, total=max(count, 1))
     elif job.kind == "onboarding_extraction":
         extraction = onboarding.get_extraction_for_job(db, job)
         if extraction:
-            return onboarding.serialize_onboarding_extraction_job(db, job, extraction)
+            count = len(extraction.proposed_filters or [])
+            return with_progress(job, current=count, total=max(count, 1))
     elif job.kind == "document_processing":
         document = documents.get_document_for_job(db, job)
         if document:

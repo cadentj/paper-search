@@ -58,7 +58,7 @@ def run(db: Session, job: SQLAJob) -> None:
             )
             return
 
-        documents_service.commit_document_progress(db)
+        db.commit()
 
         summary_input = text[: settings.DOCUMENT_SUMMARY_MAX_CHARS]
         result = asyncio.run(

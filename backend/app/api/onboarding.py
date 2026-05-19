@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.api.schemas.job import JobStart
 from app.config import settings
 from app.db.session import get_db
-from app.models.filter import Filter
+from app.models.filter import Filter, SQLAFilter
 from app.models.job import Job
 from app.models.onboarding_extraction import OnboardingExtraction
 from app.utils.cursor import apply_cursor, decode_cursor, encode_cursor
@@ -106,7 +106,11 @@ def get_onboarding_generation_job(
         latest = filters[-1]
         next_cursor = encode_cursor(latest.created_at, latest.id)
     return OnboardingGenerationJob(
-        job=onboarding_service.serialize_onboarding_generation_job(db, job),
+        job=jobs.with_progress(
+            job,
+            current=len(all_filters),
+            total=max(len(all_filters), 1),
+        ),
         subject=job.to_pydantic(),
         items=[item.to_pydantic() for item in filters],
         next_cursor=next_cursor,
@@ -123,7 +127,11 @@ def get_onboarding_extraction_job(job_id: str, db: Session = Depends(get_db)):
     if not extraction:
         raise HTTPException(status_code=404, detail="Extraction not found")
     return OnboardingExtractionJob(
-        job=onboarding_service.serialize_onboarding_extraction_job(db, job, extraction),
+        job=jobs.with_progress(
+            job,
+            current=len(extraction.proposed_filters or []),
+            total=max(len(extraction.proposed_filters or []), 1),
+        ),
         subject=extraction.to_pydantic(job_id=job.id),
         items=[],
         next_cursor=None,
@@ -133,9 +141,9 @@ def get_onboarding_extraction_job(job_id: str, db: Session = Depends(get_db)):
 
 @router.get("/status", response_model=OnboardingStatus)
 def get_onboarding_status(db: Session = Depends(get_db)):
-    completed, active_count = onboarding_service.onboarding_status(db)
+    active_count = db.query(SQLAFilter).filter(SQLAFilter.status == "active").count()
     return OnboardingStatus(
-        completed=completed,
+        completed=active_count > 0,
         active_filter_count=active_count,
     )
 

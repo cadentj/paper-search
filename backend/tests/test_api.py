@@ -77,7 +77,7 @@ class TestOnboarding:
             json={"input_text": "I study mechanistic interpretability"},
         )
         assert resp.status_code == 503
-        assert "Could not enqueue onboarding extraction" in resp.text
+        assert "redis unavailable" in resp.text
 
 
 class TestFilters:
@@ -221,7 +221,7 @@ class TestSearchRuns:
 
         latest = client.get("/search-runs/latest").json()
         assert latest["status"] == "failed"
-        assert "Could not enqueue daily search" in (latest.get("error") or "")
+        assert "redis unavailable" in (latest.get("error") or "")
 
 
 class TestPapers:
@@ -258,4 +258,4 @@ class TestPapers:
 
         idea_map = client.get("/papers/paper-1/idea-map").json()
         assert idea_map["status"] == "failed"
-        assert "Could not enqueue idea map" in idea_map["error"]
+        assert "redis unavailable" in idea_map["error"]
