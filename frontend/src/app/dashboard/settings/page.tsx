@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Clock, Database, GraduationCap, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { useDataSources, useUpdateDataSource } from "@/hooks/use-queries";
+import {
+  useDailySchedule,
+  useDataSources,
+  useUpdateDailySchedule,
+  useUpdateDataSource,
+} from "@/hooks/use-queries";
 import { api } from "@/lib/api";
 import type { DataSource } from "@/lib/api";
 
@@ -179,35 +184,26 @@ function ScholarReimportSection() {
 }
 
 function DailyScheduleSection() {
-  const [time, setTime] = useState("");
-  const [enabled, setEnabled] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    api.getDailySchedule()
-      .then((data) => {
-        setTime(data.time || "");
-        setEnabled(data.enabled);
-        setLoaded(true);
-      })
-      .catch(() => setLoaded(true));
-  }, []);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const result = await api.updateDailySchedule({ time: time || null, enabled });
-      setTime(result.time || "");
-      setEnabled(result.enabled);
-    } catch {
-      // ignore
-    } finally {
-      setSaving(false);
-    }
+  const { data: schedule, isLoading } = useDailySchedule();
+  const updateSchedule = useUpdateDailySchedule();
+  const [draft, setDraft] = useState<{
+    time: string;
+    enabled: boolean;
+  } | null>(null);
+  const currentSchedule = draft ?? {
+    time: schedule?.time || "",
+    enabled: schedule?.enabled ?? false,
   };
 
-  if (!loaded) return null;
+  const handleSave = async () => {
+    const result = await updateSchedule.mutateAsync({
+      time: currentSchedule.time || null,
+      enabled: currentSchedule.enabled,
+    });
+    setDraft({ time: result.time || "", enabled: result.enabled });
+  };
+
+  if (isLoading) return null;
 
   return (
     <Card>
@@ -221,19 +217,32 @@ function DailyScheduleSection() {
         <div className="flex items-center gap-3">
           <Input
             type="time"
-            value={time}
-            onChange={(e) => setTime(e.target.value)}
+            value={currentSchedule.time}
+            onChange={(e) =>
+              setDraft({ ...currentSchedule, time: e.target.value })
+            }
             className="w-36"
           />
           <Button
-            variant={enabled ? "outline" : "default"}
+            variant={currentSchedule.enabled ? "outline" : "default"}
             size="sm"
-            onClick={() => setEnabled(!enabled)}
+            onClick={() =>
+              setDraft({
+                ...currentSchedule,
+                enabled: !currentSchedule.enabled,
+              })
+            }
           >
-            {enabled ? "Enabled" : "Disabled"}
+            {currentSchedule.enabled ? "Enabled" : "Disabled"}
           </Button>
-          <Button size="sm" onClick={handleSave} disabled={saving}>
-            {saving && <Loader2 className="mr-1 size-3 animate-spin" />}
+          <Button
+            size="sm"
+            onClick={handleSave}
+            disabled={updateSchedule.isPending}
+          >
+            {updateSchedule.isPending && (
+              <Loader2 className="mr-1 size-3 animate-spin" />
+            )}
             Save
           </Button>
         </div>

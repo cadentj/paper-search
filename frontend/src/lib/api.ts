@@ -74,7 +74,6 @@ export interface Job {
   subject_type?: string | null;
   subject_id?: string | null;
   queue_name?: string | null;
-  queue_job_id?: string | null;
   progress: JobProgress;
   error?: string | null;
   started_at?: string | null;
@@ -84,6 +83,16 @@ export interface Job {
 
 export interface JobStartResponse {
   job_id: string;
+}
+
+export interface JobOverviewEntry {
+  job: Job;
+  href?: string | null;
+}
+
+export interface JobsOverview {
+  active: JobOverviewEntry[];
+  recent: JobOverviewEntry[];
 }
 
 export interface DocumentResponse {
@@ -109,6 +118,7 @@ export interface DocumentUploadResponse extends DocumentResponse {
 export interface SearchRun {
   id: string;
   job_id?: string | null;
+  summary_job_id?: string | null;
   status: string;
   run_date: string;
   candidate_count?: number;
@@ -217,6 +227,20 @@ export interface FeedbackStatus {
   pending_proposals: number;
 }
 
+export interface FeedbackItem {
+  id: string;
+  kind: "vote" | "note";
+  paper_id: string;
+  paper_title: string;
+  paper_match_id?: string | null;
+  filter_id?: string | null;
+  filter_name?: string | null;
+  value?: "up" | "down" | null;
+  text?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PaginatedPapers {
   papers: Paper[];
   total: number;
@@ -238,13 +262,10 @@ export interface Paper {
 }
 
 export interface DataSource {
-  id: string;
   source_type: string;
   name: string;
   enabled: boolean;
   settings: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface IdeaMapWarrant {
@@ -329,23 +350,24 @@ export const api = {
   health: () => fetchApi<{ status: string }>("/health"),
 
   // Jobs
+  getJobsOverview: () => fetchApi<JobsOverview>("/jobs/overview"),
   getJob: (id: string) => fetchApi<Job>(`/jobs/${id}`),
   getDailySearchJob: (id: string, cursor?: string | null) =>
     fetchApi<DailySearchJobResponse>(
-      `/jobs/daily-search/${id}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
+      `/search-runs/jobs/${id}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
     ),
   getDailySearchSummaryJob: (id: string) =>
-    fetchApi<DailySearchSummaryJobResponse>(`/jobs/daily-search-summary/${id}`),
+    fetchApi<DailySearchSummaryJobResponse>(`/search-runs/summary-jobs/${id}`),
   getIdeaMapJob: (id: string) =>
-    fetchApi<IdeaMapJobResponse>(`/jobs/idea-map/${id}`),
+    fetchApi<IdeaMapJobResponse>(`/papers/idea-map/jobs/${id}`),
   getOnboardingGenerationJob: (id: string, cursor?: string | null) =>
     fetchApi<OnboardingGenerationJobResponse>(
-      `/jobs/onboarding-generation/${id}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
+      `/onboarding/generations/jobs/${id}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
     ),
   getOnboardingExtractionJob: (id: string) =>
-    fetchApi<OnboardingExtractionJobResponse>(`/jobs/onboarding-extraction/${id}`),
+    fetchApi<OnboardingExtractionJobResponse>(`/onboarding/extractions/jobs/${id}`),
   getDocumentProcessingJob: (id: string) =>
-    fetchApi<DocumentProcessingJobResponse>(`/jobs/document-processing/${id}`),
+    fetchApi<DocumentProcessingJobResponse>(`/documents/jobs/${id}`),
 
   // Onboarding
   getOnboardingStatus: () => fetchApi<OnboardingStatus>("/onboarding/status"),
@@ -402,12 +424,12 @@ export const api = {
     fetchApi<FilterResponse>(`/filters/${id}/restore`, { method: "POST" }),
 
   // Data sources
-  getDataSources: () => fetchApi<DataSource[]>("/data-sources"),
+  getDataSources: () => fetchApi<DataSource[]>("/settings/data-sources"),
   updateDataSource: (
     sourceType: string,
     input: { enabled?: boolean; settings?: Record<string, unknown> }
   ) =>
-    fetchApi<DataSource>(`/data-sources/${sourceType}`, {
+    fetchApi<DataSource>(`/settings/data-sources/${sourceType}`, {
       method: "PATCH",
       body: JSON.stringify(input),
     }),
@@ -466,6 +488,8 @@ export const api = {
     }),
   getFeedbackStatus: () =>
     fetchApi<FeedbackStatus>("/feedback/status"),
+  getPendingFeedbackItems: () =>
+    fetchApi<FeedbackItem[]>("/feedback/items?status=pending"),
   processFeedback: () =>
     fetchApi<{ job_id: string }>("/feedback/process", { method: "POST" }),
 

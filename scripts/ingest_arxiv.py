@@ -99,7 +99,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step", action="append", choices=STEPS)
     parser.add_argument("--steady-rps", type=float, default=2.0)
     parser.add_argument("--timeout", type=float, default=30.0)
-    parser.add_argument("--user-agent", default="paper-search/0.1 contact: local-research")
+    parser.add_argument(
+        "--user-agent", default="paper-search/0.1 contact: local-research"
+    )
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--workers", type=int, default=16)
     parser.add_argument("--no-skip-existing", action="store_true")
@@ -156,9 +158,15 @@ def run_scrape(
     stats = {"attempted": 0, "success": 0, "missing": 0, "error": 0, "bytes": 0}
     skipped_done = 0
 
-    with tqdm(total=len(candidates), desc="scraping", unit="paper", dynamic_ncols=True) as progress, connect_state(
-        db_path
-    ) as conn, httpx.Client(timeout=args.timeout, follow_redirects=True, headers=headers) as client:
+    with (
+        tqdm(
+            total=len(candidates), desc="scraping", unit="paper", dynamic_ncols=True
+        ) as progress,
+        connect_state(db_path) as conn,
+        httpx.Client(
+            timeout=args.timeout, follow_redirects=True, headers=headers
+        ) as client,
+    ):
         create_state(conn)
         for candidate in candidates:
             if already_done(conn, candidate.arxiv_id):
@@ -184,7 +192,6 @@ def load_candidates(
     categories: set[str],
     start_date: date,
     end_date: date,
-    *,
     limit: int | None,
 ) -> list[Candidate]:
     query = (
@@ -241,7 +248,9 @@ def parse_arxiv_feed(xml_text: str) -> list[Candidate]:
             Candidate(
                 arxiv_id=normalize_arxiv_id(id_el.text),
                 version=_version_from_id(id_el.text),
-                title=" ".join((title_el.text or "").split()) if title_el is not None else "",
+                title=" ".join((title_el.text or "").split())
+                if title_el is not None
+                else "",
                 categories=categories,
                 latest_version_date=updated_el.text if updated_el is not None else "",
             )
@@ -249,7 +258,9 @@ def parse_arxiv_feed(xml_text: str) -> list[Candidate]:
     return candidates
 
 
-def fetch_one(client: httpx.Client, candidate: Candidate, output_dir: Path) -> dict[str, Any]:
+def fetch_one(
+    client: httpx.Client, candidate: Candidate, output_dir: Path
+) -> dict[str, Any]:
     try:
         response = client.get(candidate.html_url)
     except httpx.HTTPError as exc:
@@ -294,7 +305,6 @@ def publish_index(settings: Settings) -> None:
 
 
 def build_index(
-    *,
     state_db: Path,
     cache_dir: Path,
     prefix: str,
@@ -354,7 +364,6 @@ def build_index(
 
 def _build_sharded_index(
     daily_papers: dict[str, list[dict[str, Any]]],
-    *,
     html_prefix: str,
     date_index_prefix: str,
     skipped_missing_files: int,
@@ -365,7 +374,9 @@ def _build_sharded_index(
     date_shards: dict[str, dict[str, Any]] = {}
 
     for day in sorted(daily_papers.keys(), reverse=True):
-        papers = sorted(daily_papers[day], key=lambda item: str(item.get("arxiv_id") or ""))
+        papers = sorted(
+            daily_papers[day], key=lambda item: str(item.get("arxiv_id") or "")
+        )
         index_key = date_index_key(date=day, date_index_prefix=normalized_date_prefix)
         manifest_dates[day] = {"count": len(papers), "index_key": index_key}
         date_shards[day] = {
@@ -390,7 +401,9 @@ def _build_sharded_index(
     return manifest, date_shards
 
 
-def _paper_from_row(row: sqlite3.Row, *, cache_dir: Path, prefix: str) -> dict[str, Any] | None:
+def _paper_from_row(
+    row: sqlite3.Row, cache_dir: Path, prefix: str
+) -> dict[str, Any] | None:
     arxiv_id = str(row["arxiv_id"])
     html_path = _resolve_html_path(row, cache_dir)
     if not html_path:
@@ -421,7 +434,9 @@ def _resolve_html_path(row: sqlite3.Row, cache_dir: Path) -> Path | None:
         recorded = Path(row["html_path"]).expanduser()
         if not recorded.is_absolute():
             candidates.append(cache_dir / recorded)
-    candidates.append(cache_dir / arxiv_id[:4] / f"{SAFE_ID_RE.sub('_', arxiv_id)}.html")
+    candidates.append(
+        cache_dir / arxiv_id[:4] / f"{SAFE_ID_RE.sub('_', arxiv_id)}.html"
+    )
     for candidate in candidates:
         resolved = candidate.resolve()
         if resolved.is_file():
@@ -450,7 +465,9 @@ def _metadata_from_html(html_path: Path | None) -> dict[str, Any]:
     else:
         abstract = ""
     return {
-        "title": " ".join(title_el.get_text(" ", strip=True).split()) if title_el else "",
+        "title": " ".join(title_el.get_text(" ", strip=True).split())
+        if title_el
+        else "",
         "abstract": abstract,
         "authors": [a for a in authors if a],
     }
@@ -501,7 +518,9 @@ def create_state(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def upsert_candidates(conn: sqlite3.Connection, candidates: Iterable[Candidate]) -> None:
+def upsert_candidates(
+    conn: sqlite3.Connection, candidates: Iterable[Candidate]
+) -> None:
     now = datetime.now(timezone.utc).isoformat()
     for candidate in candidates:
         conn.execute(
@@ -536,7 +555,9 @@ def already_done(conn: sqlite3.Connection, arxiv_id: str) -> bool:
     return bool(row and row[0] == "success")
 
 
-def record_result(conn: sqlite3.Connection, candidate: Candidate, result: dict[str, Any]) -> None:
+def record_result(
+    conn: sqlite3.Connection, candidate: Candidate, result: dict[str, Any]
+) -> None:
     conn.execute(
         """
         UPDATE arxiv_html_scrape SET

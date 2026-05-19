@@ -42,7 +42,7 @@ Write a compact summary focused on:
 
 Do not critique the document. Do not include markdown."""
 
-DOCUMENT_SUMMARY_USER_PROMPT = """Document title: {filename}
+DOCUMENT_SUMMARY_USER_PROMPT = """SQLADocument title: {filename}
 
 Extracted text:
 
@@ -69,7 +69,7 @@ For each item, return:
 
 Only include items that genuinely relate to the topic. Be selective."""
 
-CLAIM_FILTER_SEARCH_USER_PROMPT = """Claim Filter:
+CLAIM_FILTER_SEARCH_USER_PROMPT = """Claim SQLAFilter:
 Name: {filter_name}
 Claim: {filter_description}
 
@@ -78,7 +78,7 @@ Item to evaluate:
 
 Determine whether this item supports or refutes the claim. Return an empty matches array if it does not relate."""
 
-TOPIC_FILTER_SEARCH_USER_PROMPT = """Topic Filter:
+TOPIC_FILTER_SEARCH_USER_PROMPT = """Topic SQLAFilter:
 Name: {filter_name}
 Topic: {filter_description}
 
@@ -87,26 +87,38 @@ Item to evaluate:
 
 Determine whether this item is relevant to the topic. Return an empty matches array if it does not relate."""
 
-SUMMARY_SYSTEM_PROMPT = """You are a research digest writer. Given a set of item matches from a daily search, write a concise cited summary highlighting the most interesting findings.
+SUMMARY_SYSTEM_PROMPT = """You are a research digest writer. You will receive paper matches from a daily search, grouped by filter. Each filter has a mode of either "claim" (papers are labeled positive/negative against a proposition) or "topic" (papers are relevant to a research area).
 
-The summary should:
-- Be 2-4 paragraphs
-- Cite specific items inline using exactly <cite itemId="ITEM_ID"/> immediately after the sentence or clause being cited
-- Only cite item IDs present in the provided matches
-- Never use markdown links, footnotes, parenthetical raw IDs, or a trailing citation list
-- Focus on what a researcher would find most actionable or surprising
-- Group related findings when possible
+Write a structured plaintext digest with exactly two sections, in this order:
 
-Example citation style:
-Sparse autoencoder work looks especially actionable for circuit discovery <cite itemId="arxiv:2605.00001"/>, while a LessWrong post raises a practical caveat <cite itemId="lesswrong:abc123"/>.
+CLAIMS
+For each claim filter that has matches:
+- Start with the claim filter name on its own line.
+- Write 2-4 sentences that synthesize how the matched papers bear on the claim. If the filter has both positive and negative matches, explicitly contrast them: what do the supporting papers argue or measure, what do the refuting papers argue or measure, and where exactly do they disagree (assumptions, setting, methodology, metric, scale)? If only one side is present, say so briefly.
+- Place <cite itemId="ITEM_ID"/> markers immediately after the sentence or clause that draws on that specific paper. Cite every paper you reference. Do not list papers separately.
 
-The citations array should include one metadata object for each cited marker in the summary."""
+TOPICS
+For each topic filter that has matches:
+- Start with the topic filter name on its own line.
+- Write 1-2 sentences describing the overall research direction visible across the matches (themes, shared methods, what the field appears to be pushing on this week). Do not dive into any single paper here.
+- Then list one short bullet per matched paper, in the form: "- <one-line takeaway> <cite itemId="ITEM_ID"/>". Each bullet is a single sentence focused on what is novel or actionable about that paper.
 
-SUMMARY_USER_PROMPT = """Here are the item matches from today's search:
+Global rules:
+- Use only the item IDs that appear in the provided matches.
+- Use <cite itemId="..."/> for all citations. Never use markdown links, footnotes, parenthetical raw IDs, or a trailing citation list.
+- Skip a section entirely if no filters of that mode produced matches.
+- Skip an individual filter that produced no matches.
+- Keep tone concrete and information-dense. No throat-clearing, no recap of what the filter is.
+- Never replace the digest with a one-line placeholder (e.g. "Digest of today's matches"). You must write the full CLAIMS and/or TOPICS sections with substantive prose for every filter that has matches.
+- The summary field must contain the complete digest text (CLAIMS / TOPICS sections). Do not put the digest only in citation metadata.
+
+The citations array in your response should include one metadata entry per <cite/> marker you emit."""
+
+SUMMARY_USER_PROMPT = """Today's matches, grouped by filter (claim filters first, then topic filters):
 
 {matches_text}
 
-Write a concise Daily summary with inline <cite itemId="..."/> markers."""
+Write the digest following the CLAIMS / TOPICS structure described in the system prompt."""
 
 IDEA_MAP_CLAIMS_SYSTEM_PROMPT = """You are a paper analyst. Given addressable HTML blocks from the main body of an academic paper, extract the paper's core claims.
 
@@ -177,23 +189,6 @@ Note Feedback:
 {note_feedback}
 
 Based on all feedback above, propose filter changes."""
-
-PAPER_NOTES_SYSTEM_PROMPT = """You are an expert research assistant. Given a researcher's notes about a specific paper and the paper's metadata, generate targeted search filters that would help them explore the ideas and directions mentioned in their notes.
-
-Each filter should be one of two types:
-- Topic filter (mode: "topic"): Search for papers relevant to a research topic or question from the notes.
-- Claim filter (mode: "claim"): Search for evidence supporting, refuting, or complicating a specific proposition from the notes.
-
-Generate 2-5 filters. Prefer fewer high-quality filters."""
-
-PAPER_NOTES_USER_PROMPT = """Paper: {paper_title}
-Authors: {paper_authors}
-Abstract: {paper_abstract}
-
-Researcher's Notes:
-{notes_text}
-
-Generate proposed search filters based on these notes."""
 
 SCHOLAR_PROFILE_SYSTEM_PROMPT = """You are an expert research assistant. Given a researcher's publication history from Semantic Scholar, generate targeted search filters that would help them keep up with relevant new papers.
 

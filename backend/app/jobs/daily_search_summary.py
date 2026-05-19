@@ -1,46 +1,31 @@
 """Daily search summary worker job."""
 
 import logging
+import time
 from datetime import datetime, timezone
 
-from app.db.session import SessionLocal
-from app.models.filter import Filter
-from app.models.paper import Paper
-from app.models.paper_match import PaperMatch
-from app.models.search_run import SearchRun
-from app.models.job import Job
-from app.services.jobs import get_or_create_job_for_subject, set_job_status
-from app.llm.client import call_llm
+from sqlalchemy.orm import Session
+
+from app.models.job import SQLAJob
+from app.models.search_run import SQLASearchRun
+from app.services import filters as filter_service
+from app.llm.client import stream_structured_response
 from app.llm.config import SUMMARY_PROFILE
 from app.llm.prompts import SUMMARY_SYSTEM_PROMPT, SUMMARY_USER_PROMPT
 from app.llm.schemas import SearchSummaryResponse
+from app.llm.summary_stream import extract_complete_summary, extract_partial_summary
 from paper_search_core.schemas.daily_search import PaperMatchPayload
 
 logger = logging.getLogger(__name__)
 
-
-def _match_payloads_for_run(db, search_run_id: str) -> list[PaperMatchPayload]:
-    rows = (
-        db.query(PaperMatch, Paper, Filter)
-        .join(Paper, PaperMatch.paper_id == Paper.id)
-        .join(Filter, PaperMatch.filter_id == Filter.id)
-        .filter(PaperMatch.search_run_id == search_run_id)
-        .order_by(PaperMatch.created_at.asc(), PaperMatch.id.asc())
-        .all()
-    )
-    return [
-        PaperMatchPayload(
-            match_id=match.id,
-            paper=paper.to_search_payload(),
-            filter_name=filter.name,
-            result=match.result or "",
-        )
-        for match, paper, filter in rows
-    ]
+SUMMARY_DRAFT_COMMIT_INTERVAL_SECONDS = 0.4
+SUMMARY_DRAFT_MIN_CHAR_DELTA = 40
+SUMMARY_DRAFT_MIN_CHARS = 120
+SUMMARY_MIN_BODY_CHARS = 200
 
 
-def _fallback_summary(db, run: SearchRun) -> dict:
-    active_filters = db.query(Filter).filter(Filter.status == "active").count()
+def _fallback_summary(db, run: SQLASearchRun) -> dict:
+    active_filters = len(filter_service.list_filters(db, status="active"))
     if active_filters == 0:
         return {"summary": "No active filters to search.", "citations": []}
     if not run.candidate_count:
@@ -54,74 +39,132 @@ def _fallback_summary(db, run: SearchRun) -> dict:
     }
 
 
-def _set_run_status(
-    db,
-    run: SearchRun,
-    job: Job,
+def _is_adequate_summary_body(summary_text: str, match_count: int) -> bool:
+    if match_count <= 0:
+        return True
+    body = summary_text.strip()
+    if len(body) < SUMMARY_MIN_BODY_CHARS:
+        return False
+    upper = body.upper()
+    return "CLAIMS" in upper or "TOPICS" in upper
+
+
+def _should_commit_summary_draft(
     *,
-    status: str,
-    error: str | None = None,
-) -> None:
-    run.status = status
-    if error is not None:
-        run.error = error
-    set_job_status(job, status=status, error=error)
-    db.commit()
-
-
-def _resolve_summary_job(db, search_run_id: str, job_id: str | None) -> Job:
-    if job_id:
-        job = db.query(Job).filter(Job.id == job_id).first()
-        if job:
-            return job
-    return get_or_create_job_for_subject(
-        db,
-        kind="daily_search_summary",
-        subject_type="search_run",
-        subject_id=search_run_id,
+    partial_summary: str,
+    last_committed_summary: str,
+    last_commit_at: float,
+    now: float,
+) -> bool:
+    if partial_summary == last_committed_summary:
+        return False
+    if not last_committed_summary:
+        return True
+    if now - last_commit_at >= SUMMARY_DRAFT_COMMIT_INTERVAL_SECONDS:
+        return True
+    return (
+        len(partial_summary) - len(last_committed_summary)
+        >= SUMMARY_DRAFT_MIN_CHAR_DELTA
     )
 
 
-def summarize_daily_search(search_run_id: str, job_id: str | None = None) -> None:
-    """Worker job: summarize persisted matches for a daily search run."""
-    db = SessionLocal()
+def run(db: Session, job: SQLAJob) -> None:
+    """Summarize persisted matches for a daily search run."""
+    from app.services import search_runs
+
+    search_run_id = job.subject_id
+    if not search_run_id:
+        return
+
     try:
-        run = db.query(SearchRun).filter(SearchRun.id == search_run_id).first()
+        run = db.query(SQLASearchRun).filter(SQLASearchRun.id == search_run_id).first()
         if not run:
             return
-        job = _resolve_summary_job(db, search_run_id, job_id)
-        set_job_status(job, status="running")
-        db.commit()
 
-        match_payloads = _match_payloads_for_run(db, search_run_id)
+        search_runs.set_summary_status(db, run, job, status="running")
+
+        match_payloads = search_runs.match_payloads_for_run(db, search_run_id)
         if match_payloads:
-            matches_text = "\n---\n".join(p.model_dump_json() for p in match_payloads)
+            matches_text = PaperMatchPayload.format_grouped_for_summary(match_payloads)
             user_prompt = SUMMARY_USER_PROMPT.format(matches_text=matches_text)
-            result = call_llm(
+            text_buffer = ""
+            last_committed_summary = ""
+            last_commit_at = 0.0
+
+            def handle_delta(delta: str) -> None:
+                nonlocal text_buffer, last_committed_summary, last_commit_at
+                text_buffer += delta
+                partial_summary = extract_partial_summary(text_buffer)
+                if (
+                    partial_summary is None
+                    or len(partial_summary.strip()) < SUMMARY_DRAFT_MIN_CHARS
+                ):
+                    return
+
+                now = time.monotonic()
+                if not _should_commit_summary_draft(
+                    partial_summary=partial_summary,
+                    last_committed_summary=last_committed_summary,
+                    last_commit_at=last_commit_at,
+                    now=now,
+                ):
+                    return
+
+                search_runs.update_summary_draft(db, run, partial_summary)
+                last_committed_summary = partial_summary
+                last_commit_at = now
+
+            result = stream_structured_response(
                 system_prompt=SUMMARY_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 response_model=SearchSummaryResponse,
+                on_text_delta=handle_delta,
                 profile=SUMMARY_PROFILE,
             )
-            summary_data = result["content"]
+            summary_data = dict(result["content"])
+            summary_text = (summary_data.get("summary") or "").strip()
+            if not summary_text and text_buffer.strip():
+                summary_text = (
+                    extract_complete_summary(text_buffer)
+                    or extract_partial_summary(text_buffer)
+                    or ""
+                ).strip()
+            if not summary_text and (run.summary or "").strip():
+                summary_text = run.summary.strip()
+            if not _is_adequate_summary_body(summary_text, len(match_payloads)):
+                logger.warning(
+                    "daily_search_summary run=%s inadequate summary "
+                    "(len=%d, buffer_len=%d, citations=%d, preview=%r)",
+                    search_run_id,
+                    len(summary_text),
+                    len(text_buffer),
+                    len(summary_data.get("citations") or []),
+                    summary_text[:120],
+                )
+                raise RuntimeError(
+                    "Daily summary generation returned an empty or placeholder digest. "
+                    "Try running daily search again."
+                )
         else:
             summary_data = _fallback_summary(db, run)
+            summary_text = (summary_data.get("summary") or "").strip()
 
-        run.summary = summary_data.get("summary", "")
-        run.summary_citations = summary_data.get("citations", [])
-        run.completed_at = datetime.now(timezone.utc)
-        _set_run_status(db, run, job, status="completed")
+        search_runs.complete_summary(
+            db,
+            run,
+            job,
+            summary=summary_text,
+            citations=summary_data.get("citations", []),
+        )
 
     except Exception as e:
         db.rollback()
-        run = db.query(SearchRun).filter(SearchRun.id == search_run_id).first()
+        run = db.query(SQLASearchRun).filter(SQLASearchRun.id == search_run_id).first()
         if run:
-            run.status = "failed"
             run.error = str(e)
             run.completed_at = datetime.now(timezone.utc)
-            job = _resolve_summary_job(db, search_run_id, job_id)
-            _set_run_status(db, run, job, status="failed", error=run.error)
+            search_runs.set_summary_status(
+                db, run, job, status="failed", error=run.error
+            )
         logger.exception("daily_search_summary run=%s failed", search_run_id)
         raise
-    finally:
-        db.close()

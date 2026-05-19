@@ -4,12 +4,13 @@ import json
 import uuid
 from datetime import datetime, timezone
 
-from app.db.session import SessionLocal
-from app.models.document import Document
-from app.models.filter import Filter
-from app.models.job import Job
-from app.models.onboarding_extraction import OnboardingExtraction
-from app.services.jobs import get_or_create_job_for_subject, set_job_status
+from sqlalchemy.orm import Session
+
+from app.models.document import SQLADocument
+from app.models.filter import SQLAFilter
+from app.models.job import SQLAJob
+from app.models.onboarding_extraction import SQLAOnboardingExtraction
+from app.services.jobs import set_job_status
 from app.llm.client import stream_structured_response
 from app.llm.config import FILTER_GENERATION_PROFILE
 from app.llm.prompts import (
@@ -74,19 +75,6 @@ def _merge_filters(existing: list[dict], incoming: list[dict]) -> list[dict]:
     return merged
 
 
-def _resolve_onboarding_job(db, extraction_id: str, job_id: str | None) -> Job:
-    if job_id:
-        job = db.query(Job).filter(Job.id == job_id).first()
-        if job:
-            return job
-    return get_or_create_job_for_subject(
-        db,
-        kind="onboarding_extraction",
-        subject_type="onboarding_extraction",
-        subject_id=extraction_id,
-    )
-
-
 def _draft_filter_definition(raw: dict, job_id: str) -> dict:
     return {
         "name": raw.get("name", "Unnamed Filter"),
@@ -96,10 +84,10 @@ def _draft_filter_definition(raw: dict, job_id: str) -> dict:
     }
 
 
-def _create_draft_filter(db, raw: dict, job_id: str) -> Filter:
+def _create_draft_filter(db, raw: dict, job_id: str) -> SQLAFilter:
     now = datetime.now(timezone.utc)
     definition = _draft_filter_definition(raw, job_id)
-    filt = Filter(
+    filter = SQLAFilter(
         id=str(uuid.uuid4()),
         name=definition["name"],
         definition=definition,
@@ -108,14 +96,14 @@ def _create_draft_filter(db, raw: dict, job_id: str) -> Filter:
         created_at=now,
         updated_at=now,
     )
-    db.add(filt)
-    return filt
+    db.add(filter)
+    return filter
 
 
 def _document_summaries(db, document_ids: list[str]) -> list[str]:
     if not document_ids:
         return []
-    documents = db.query(Document).filter(Document.id.in_(document_ids)).all()
+    documents = db.query(SQLADocument).filter(SQLADocument.id.in_(document_ids)).all()
     by_id = {document.id: document for document in documents}
     summaries: list[str] = []
     for document_id in document_ids:
@@ -123,23 +111,18 @@ def _document_summaries(db, document_ids: list[str]) -> list[str]:
         if not document or document.status != "ready" or not document.summary:
             continue
         summaries.append(
-            f"Document: {document.original_filename}\nSummary: {document.summary}"
+            f"SQLADocument: {document.original_filename}\nSummary: {document.summary}"
         )
     return summaries
 
 
-def generate_onboarding_draft_filters(
-    input_text: str,
-    document_ids: list[str],
-    job_id: str,
-) -> None:
-    """Worker job: generate draft filters from text and ready document summaries."""
-    db = SessionLocal()
-    try:
-        job = db.query(Job).filter(Job.id == job_id).first()
-        if not job:
-            return
+def run_generation(db: Session, job: SQLAJob) -> None:
+    """Generate draft filters from text and ready document summaries."""
+    payload = job.payload or {}
+    input_text = payload.get("input_text", "")
+    document_ids = payload.get("document_ids") or []
 
+    try:
         set_job_status(job, status="running")
         db.commit()
 
@@ -168,7 +151,7 @@ def generate_onboarding_draft_filters(
                 return
 
             for raw in new_items:
-                _create_draft_filter(db, raw, job_id)
+                _create_draft_filter(db, raw, job.id)
             db.commit()
             last_count = len(parsed_filters)
 
@@ -195,26 +178,26 @@ def generate_onboarding_draft_filters(
         db.commit()
     except Exception as e:
         db.rollback()
-        job = db.query(Job).filter(Job.id == job_id).first()
-        if job:
-            set_job_status(job, status="failed", error=str(e))
-            db.commit()
+        set_job_status(job, status="failed", error=str(e))
+        db.commit()
         raise
-    finally:
-        db.close()
 
 
-def extract_onboarding_filters(extraction_id: str, job_id: str | None = None) -> None:
-    """Worker job: extract proposed filters from onboarding text."""
-    db = SessionLocal()
+def run_extraction(db: Session, job: SQLAJob) -> None:
+    """Extract proposed filters from onboarding text."""
+    extraction_id = job.subject_id
+    if not extraction_id:
+        return
+
     try:
-        extraction = db.query(OnboardingExtraction).filter(
-            OnboardingExtraction.id == extraction_id
-        ).first()
+        extraction = (
+            db.query(SQLAOnboardingExtraction)
+            .filter(SQLAOnboardingExtraction.id == extraction_id)
+            .first()
+        )
         if not extraction:
             return
 
-        job = _resolve_onboarding_job(db, extraction_id, job_id)
         now = datetime.now(timezone.utc)
         extraction.status = "running"
         extraction.updated_at = now
@@ -268,17 +251,16 @@ def extract_onboarding_filters(extraction_id: str, job_id: str | None = None) ->
 
     except Exception as e:
         db.rollback()
-        extraction = db.query(OnboardingExtraction).filter(
-            OnboardingExtraction.id == extraction_id
-        ).first()
+        extraction = (
+            db.query(SQLAOnboardingExtraction)
+            .filter(SQLAOnboardingExtraction.id == extraction_id)
+            .first()
+        )
         if extraction:
             now = datetime.now(timezone.utc)
             extraction.status = "failed"
             extraction.error = str(e)
             extraction.updated_at = now
-            job = _resolve_onboarding_job(db, extraction_id, job_id)
             set_job_status(job, status="failed", error=extraction.error)
             db.commit()
         raise
-    finally:
-        db.close()

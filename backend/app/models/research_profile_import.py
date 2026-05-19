@@ -1,12 +1,12 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Text, DateTime, JSON
+from sqlalchemy import Column, DateTime, JSON, Text
 
 from app.models.base import Base
 
 
-class ResearchProfileImport(Base):
+class SQLAResearchProfileImport(Base):
     __tablename__ = "research_profile_imports"
 
     id = Column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -20,5 +20,12 @@ class ResearchProfileImport(Base):
     publications = Column(JSON, nullable=True)
     error = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )

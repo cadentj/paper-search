@@ -1,205 +1,249 @@
-import uuid
-import logging
-from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
+from app.api.schemas.job import JobStart
+from app.config import settings
 from app.db.session import get_db
-from app.models.filter import Filter
+from app.models.filter import Filter, SQLAFilter
+from app.models.job import Job
 from app.models.onboarding_extraction import OnboardingExtraction
-from app.schemas.onboarding import (
-    OnboardingStatusResponse,
-    OnboardingExtractionCreate,
-    OnboardingExtractionResponse,
-    OnboardingCompleteRequest,
-    OnboardingGenerationCreate,
-    DraftFilterPromoteRequest,
-)
-from app.schemas.filters import FilterResponse
-from app.schemas.jobs import JobStartResponse
-from app.jobs.queue import get_queue
-from app.jobs.onboarding import extract_onboarding_filters, generate_onboarding_draft_filters
-from app.services.jobs import create_job, latest_job_for_subject
+from app.utils.cursor import apply_cursor, decode_cursor, encode_cursor
+from app.services import jobs, onboarding as onboarding_service
+from app.services.semantic_scholar import extract_author_id, get_author
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
-logger = logging.getLogger(__name__)
 
 
-@router.get("/status", response_model=OnboardingStatusResponse)
+class OnboardingStatus(BaseModel):
+    completed: bool
+    active_filter_count: int
+
+
+class OnboardingExtractionCreate(BaseModel):
+    input_text: str
+
+
+class OnboardingCompleteRequest(BaseModel):
+    filters: list[dict]
+
+
+class OnboardingGenerationCreate(BaseModel):
+    input_text: str
+    document_ids: list[str] = []
+
+
+class DraftFilterPromoteRequest(BaseModel):
+    filter_ids: list[str]
+
+
+class ScholarVerifyRequest(BaseModel):
+    url: str
+
+
+class ScholarVerify(BaseModel):
+    author_id: str
+    name: str
+    affiliations: list[str]
+    paper_count: int | None = None
+    h_index: int | None = None
+
+
+class ScholarImportRequest(BaseModel):
+    url: str
+    author_id: str
+    display_name: str
+
+
+class ScholarImport(BaseModel):
+    id: str
+    job_id: str
+
+
+class ScholarImportStatus(BaseModel):
+    id: str
+    status: str
+    display_name: Optional[str] = None
+    error: Optional[str] = None
+
+
+class OnboardingGenerationJob(BaseModel):
+    job: Job
+    subject: Job
+    items: list[Filter] = Field(default_factory=list)
+    next_cursor: str | None = None
+    done: bool = False
+
+
+class OnboardingExtractionJob(BaseModel):
+    job: Job
+    subject: OnboardingExtraction
+    items: list[dict] = Field(default_factory=list)
+    next_cursor: str | None = None
+    done: bool = False
+
+
+@router.get("/generations/jobs/{job_id}", response_model=OnboardingGenerationJob)
+def get_onboarding_generation_job(
+    job_id: str,
+    cursor: str | None = None,
+    db: Session = Depends(get_db),
+):
+    job = jobs.get_job_of_kind(db, job_id, "onboarding_generation")
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if cursor is not None:
+        try:
+            decode_cursor(cursor)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid cursor") from exc
+    all_filters = onboarding_service.draft_filters_for_generation(db, job.id)
+    filters = apply_cursor(all_filters, cursor)
+    next_cursor = cursor
+    if filters:
+        latest = filters[-1]
+        next_cursor = encode_cursor(latest.created_at, latest.id)
+    return OnboardingGenerationJob(
+        job=jobs.with_progress(
+            job,
+            current=len(all_filters),
+            total=max(len(all_filters), 1),
+        ),
+        subject=job.to_pydantic(),
+        items=[item.to_pydantic() for item in filters],
+        next_cursor=next_cursor,
+        done=jobs.is_done(job),
+    )
+
+
+@router.get("/extractions/jobs/{job_id}", response_model=OnboardingExtractionJob)
+def get_onboarding_extraction_job(job_id: str, db: Session = Depends(get_db)):
+    job = jobs.get_job_of_kind(db, job_id, "onboarding_extraction")
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    extraction = onboarding_service.get_extraction_for_job(db, job)
+    if not extraction:
+        raise HTTPException(status_code=404, detail="Extraction not found")
+    return OnboardingExtractionJob(
+        job=jobs.with_progress(
+            job,
+            current=len(extraction.proposed_filters or []),
+            total=max(len(extraction.proposed_filters or []), 1),
+        ),
+        subject=extraction.to_pydantic(job_id=job.id),
+        items=[],
+        next_cursor=None,
+        done=jobs.is_done(job),
+    )
+
+
+@router.get("/status", response_model=OnboardingStatus)
 def get_onboarding_status(db: Session = Depends(get_db)):
-    active_count = db.query(Filter).filter(Filter.status == "active").count()
-    return OnboardingStatusResponse(
+    active_count = db.query(SQLAFilter).filter(SQLAFilter.status == "active").count()
+    return OnboardingStatus(
         completed=active_count > 0,
         active_filter_count=active_count,
     )
 
 
-@router.post("/generations", response_model=JobStartResponse)
+@router.post("/generations", response_model=JobStart)
 def create_generation(body: OnboardingGenerationCreate, db: Session = Depends(get_db)):
-    input_text = body.input_text.strip()
-    if len(input_text) > settings.ONBOARDING_INPUT_MAX_CHARS:
+    try:
+        job_id = onboarding_service.start_generation(db, body)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JobStart(job_id=job_id)
+
+
+@router.post("/draft-filters/promote", response_model=list[Filter])
+def promote_draft_filters(
+    body: DraftFilterPromoteRequest, db: Session = Depends(get_db)
+):
+    try:
+        filters = onboarding_service.promote_draft_filters(db, body.filter_ids)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return [filter.to_pydantic() for filter in filters]
+
+
+@router.post("/extractions", response_model=JobStart)
+def create_extraction(body: OnboardingExtractionCreate, db: Session = Depends(get_db)):
+    if len(body.input_text) > settings.ONBOARDING_INPUT_MAX_CHARS:
         raise HTTPException(
             status_code=400,
             detail=f"Input text must be {settings.ONBOARDING_INPUT_MAX_CHARS} characters or fewer",
         )
-    if not input_text and not body.document_ids:
-        raise HTTPException(status_code=400, detail="Add text or at least one document")
-
-    job_record = create_job(
-        db,
-        kind="onboarding_generation",
-        subject_type="onboarding_generation",
-        status="queued",
-    )
-    db.flush()
-    job_record.subject_id = job_record.id
-    db.commit()
-    db.refresh(job_record)
-
     try:
-        q = get_queue()
-        job = q.enqueue(
-            generate_onboarding_draft_filters,
-            input_text,
-            body.document_ids,
-            job_record.id,
-        )
-        job_record.queue_job_id = getattr(job, "id", None)
-        db.commit()
+        job_id = onboarding_service.start_extraction(db, input_text=body.input_text)
     except Exception as exc:
-        logger.exception("failed to enqueue onboarding generation=%s", job_record.id)
-        now = datetime.now(timezone.utc)
-        job_record.status = "failed"
-        job_record.error = f"Could not enqueue onboarding generation: {exc}"
-        job_record.completed_at = now
-        db.commit()
-        raise HTTPException(status_code=503, detail=job_record.error) from exc
-
-    return JobStartResponse(job_id=job_record.id)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JobStart(job_id=job_id)
 
 
-@router.post("/draft-filters/promote", response_model=list[FilterResponse])
-def promote_draft_filters(
-    body: DraftFilterPromoteRequest,
-    db: Session = Depends(get_db),
-):
-    if not body.filter_ids:
-        return []
-
-    now = datetime.now(timezone.utc)
-    filters = db.query(Filter).filter(Filter.id.in_(body.filter_ids)).all()
-    by_id = {f.id: f for f in filters}
-    ordered_filters = [by_id[fid] for fid in body.filter_ids if fid in by_id]
-    missing = [fid for fid in body.filter_ids if fid not in by_id]
-    if missing:
-        raise HTTPException(status_code=404, detail=f"Draft filter not found: {missing[0]}")
-
-    for filt in ordered_filters:
-        if filt.status != "draft":
-            raise HTTPException(status_code=400, detail=f"Filter is not a draft: {filt.id}")
-        filt.status = "active"
-        filt.updated_at = now
-
-    db.commit()
-    for filt in ordered_filters:
-        db.refresh(filt)
-    return [filt.to_pydantic() for filt in ordered_filters]
-
-
-@router.post("/extractions", response_model=JobStartResponse)
-def create_extraction(body: OnboardingExtractionCreate, db: Session = Depends(get_db)):
-    extraction = OnboardingExtraction(
-        id=str(uuid.uuid4()),
-        input_text=body.input_text,
-        status="queued",
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-    )
-    db.add(extraction)
-    job_record = create_job(
-        db,
-        kind="onboarding_extraction",
-        subject_type="onboarding_extraction",
-        subject_id=extraction.id,
-        status="queued",
-    )
-    db.commit()
-    db.refresh(extraction)
-    db.refresh(job_record)
-
-    try:
-        q = get_queue()
-        job = q.enqueue(extract_onboarding_filters, extraction.id, job_record.id)
-        job_record.queue_job_id = getattr(job, "id", None)
-        db.commit()
-        logger.info(
-            "enqueued onboarding extraction=%s job=%s",
-            extraction.id,
-            getattr(job, "id", None),
-        )
-    except Exception as exc:
-        logger.exception("failed to enqueue onboarding extraction=%s", extraction.id)
-        extraction.status = "failed"
-        extraction.error = f"Could not enqueue onboarding extraction: {exc}"
-        extraction.updated_at = datetime.now(timezone.utc)
-        job_record.status = "failed"
-        job_record.error = extraction.error
-        job_record.completed_at = extraction.updated_at
-        db.commit()
-        raise HTTPException(status_code=503, detail=extraction.error) from exc
-
-    return JobStartResponse(job_id=job_record.id)
-
-
-@router.get("/extractions/{extraction_id}", response_model=OnboardingExtractionResponse)
+@router.get("/extractions/{extraction_id}", response_model=OnboardingExtraction)
 def get_extraction(extraction_id: str, db: Session = Depends(get_db)):
-    extraction = db.query(OnboardingExtraction).filter(
-        OnboardingExtraction.id == extraction_id
-    ).first()
-    if not extraction:
-        raise HTTPException(status_code=404, detail="Extraction not found")
-    return _extraction_payload(extraction, db)
+    try:
+        extraction = onboarding_service.get_extraction(db, extraction_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return onboarding_service.extraction_payload(db, extraction)
 
 
-@router.post("/complete", response_model=list[FilterResponse])
+@router.post("/complete", response_model=list[Filter])
 def complete_onboarding(body: OnboardingCompleteRequest, db: Session = Depends(get_db)):
-    created_filters = []
-    now = datetime.now(timezone.utc)
+    filters = onboarding_service.complete_onboarding(db, body)
+    return [filter.to_pydantic() for filter in filters]
 
-    for f_data in body.filters:
-        definition = f_data.get("definition", f_data)
-        name = definition.get("name", f_data.get("name", "Unnamed Filter"))
-        definition = {
-            "name": name,
-            "description": definition.get("description", ""),
-            "mode": definition.get("mode", "topic"),
-        }
 
-        filt = Filter(
-            id=str(uuid.uuid4()),
-            name=name,
-            definition=definition,
-            status="active",
-            created_at=now,
-            updated_at=now,
+@router.post("/scholar/verify", response_model=ScholarVerify)
+def verify_profile(body: ScholarVerifyRequest):
+    author_id = extract_author_id(body.url)
+    if not author_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not parse Semantic Scholar author ID from URL",
         )
-        db.add(filt)
-        created_filters.append(filt)
 
-    db.commit()
-    for f in created_filters:
-        db.refresh(f)
+    author = get_author(author_id)
+    if not author:
+        raise HTTPException(
+            status_code=404, detail="Author not found on Semantic Scholar"
+        )
 
-    return [filt.to_pydantic() for filt in created_filters]
-
-
-def _extraction_payload(extraction: OnboardingExtraction, db: Session) -> OnboardingExtractionResponse:
-    job = latest_job_for_subject(
-        db,
-        subject_type="onboarding_extraction",
-        subject_id=extraction.id,
-        kind="onboarding_extraction",
+    return ScholarVerify(
+        author_id=author_id,
+        name=author.get("name", ""),
+        affiliations=author.get("affiliations") or [],
+        paper_count=author.get("paperCount"),
+        h_index=author.get("hIndex"),
     )
-    return extraction.to_pydantic(job_id=job.id if job else None)
+
+
+@router.post("/scholar/imports", response_model=ScholarImport)
+def start_import(body: ScholarImportRequest, db: Session = Depends(get_db)):
+    try:
+        import_id, job_id = onboarding_service.start_profile_import(
+            db,
+            url=body.url,
+            author_id=body.author_id,
+            display_name=body.display_name,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ScholarImport(id=import_id, job_id=job_id)
+
+
+@router.get("/scholar/imports/{import_id}", response_model=ScholarImportStatus)
+def get_import_status(import_id: str, db: Session = Depends(get_db)):
+    try:
+        profile_import = onboarding_service.get_import(db, import_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ScholarImportStatus(
+        id=profile_import.id,
+        status=profile_import.status,
+        display_name=profile_import.display_name,
+        error=profile_import.error,
+    )

@@ -1,14 +1,36 @@
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 
-from sqlalchemy import Column, Text, DateTime, ForeignKey, JSON
+from pydantic import BaseModel
+from sqlalchemy import Column, DateTime, ForeignKey, JSON, Text
 
 from app.models.base import Base
-from app.schemas.daily_search import FilterPayload
-from app.schemas.filters import FilterResponse
 
 
-class Filter(Base):
+class FilterPayload(BaseModel):
+    id: str
+    name: str
+    definition: dict
+
+
+class Filter(BaseModel):
+    id: str
+    name: str
+    definition: dict
+    status: str
+    source: str = "manual"
+    parent_filter_id: Optional[str] = None
+    proposed_action: Optional[str] = None
+    target_filter_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    archived_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class SQLAFilter(Base):
     __tablename__ = "filters"
 
     id = Column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -20,12 +42,19 @@ class Filter(Base):
     proposed_action = Column(Text, nullable=True)  # "create", "revise", "delete"
     target_filter_id = Column(Text, ForeignKey("filters.id"), nullable=True)
 
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
     archived_at = Column(DateTime, nullable=True)
 
-    def to_pydantic(self) -> FilterResponse:
-        return FilterResponse.model_validate(self)
+    def to_pydantic(self) -> Filter:
+        return Filter.model_validate(self)
 
     def to_search_payload(self) -> FilterPayload:
         return FilterPayload(

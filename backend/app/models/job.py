@@ -1,21 +1,37 @@
 import uuid
 from datetime import datetime, timezone
 
+from pydantic import BaseModel, Field
 from sqlalchemy import Column, DateTime, Index, JSON, Text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.models.base import Base
-from app.schemas.jobs import JobResponse
 
 
 ProgressJSON = JSON().with_variant(JSONB, "postgresql")
+PayloadJSON = JSON().with_variant(JSONB, "postgresql")
 
 
-class Job(Base):
+class Job(BaseModel):
+    id: str
+    kind: str
+    status: str
+    subject_type: str | None = None
+    subject_id: str | None = None
+    queue_name: str | None = None
+    payload: dict = Field(default_factory=dict)
+    progress: dict = Field(default_factory=dict)
+    error: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SQLAJob(Base):
     __tablename__ = "jobs"
-    __table_args__ = (
-        Index("ix_jobs_subject", "subject_type", "subject_id"),
-    )
+    __table_args__ = (Index("ix_jobs_subject", "subject_type", "subject_id"),)
 
     id = Column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
     kind = Column(Text, nullable=False)
@@ -23,13 +39,15 @@ class Job(Base):
     subject_type = Column(Text, nullable=True)
     subject_id = Column(Text, nullable=True)
     queue_name = Column(Text, nullable=True)
-    queue_job_id = Column(Text, nullable=True)
+    payload = Column(PayloadJSON, nullable=False, default=dict)
     progress = Column(ProgressJSON, nullable=False, default=dict)
     error = Column(Text, nullable=True)
 
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
 
-    def to_pydantic(self) -> JobResponse:
-        return JobResponse.model_validate(self)
+    def to_pydantic(self) -> Job:
+        return Job.model_validate(self)

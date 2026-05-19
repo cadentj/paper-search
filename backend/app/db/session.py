@@ -1,8 +1,11 @@
 import os
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker, Session
+from contextlib import contextmanager
+from typing import Iterator
 
-from app.core.config import settings
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.config import settings
 
 
 def _get_db_path(url: str) -> str:
@@ -19,7 +22,9 @@ def get_engine(url: str | None = None):
 
     engine = create_engine(
         db_url,
-        connect_args={"check_same_thread": False} if db_url.startswith("sqlite") else {},
+        connect_args={"check_same_thread": False}
+        if db_url.startswith("sqlite")
+        else {},
         pool_pre_ping=True,
     )
 
@@ -34,13 +39,33 @@ def get_engine(url: str | None = None):
     return engine
 
 
+class Database:
+    """Owns the engine and session factory; provides transactional session scopes."""
+
+    def __init__(self, engine):
+        self.engine = engine
+        self.sessionmaker = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    @contextmanager
+    def session(self) -> Iterator[Session]:
+        db = self.sessionmaker()
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+
 engine = get_engine()
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+database = Database(engine)
+
+# Compatibility export during migration; app code should use database.session().
+SessionLocal = database.sessionmaker
 
 
 def get_db():
-    db = SessionLocal()
-    try:
+    with database.session() as db:
         yield db
-    finally:
-        db.close()

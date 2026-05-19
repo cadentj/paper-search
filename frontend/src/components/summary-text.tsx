@@ -22,11 +22,13 @@ export function SummaryText({
   citations = EMPTY_CITATIONS,
   matches = EMPTY_MATCHES,
   className,
+  onPaperSelect,
 }: {
   summary: string;
   citations?: SummaryCitation[];
   matches?: PaperMatch[];
   className?: string;
+  onPaperSelect?: (paperId: string) => void;
 }) {
   const nodes: ReactNode[] = [];
   let cursor = 0;
@@ -59,17 +61,32 @@ export function SummaryText({
     const label = `Open citation ${citationIndex + 1}: ${itemId}`;
 
     if (paperMatch) {
-      nodes.push(
-        <Link
-          key={`${itemId}-${markerIndex}`}
-          href={`/dashboard/papers/${paperMatch.paper_id}`}
-          title={citation?.citedFor}
-          aria-label={label}
-          className={citationClassName(true)}
-        >
-          {itemId}
-        </Link>
-      );
+      if (onPaperSelect) {
+        nodes.push(
+          <button
+            key={`${itemId}-${markerIndex}`}
+            type="button"
+            onClick={() => onPaperSelect(paperMatch.paper_id)}
+            title={citation?.citedFor}
+            aria-label={label}
+            className={citationClassName(true)}
+          >
+            {itemId}
+          </button>
+        );
+      } else {
+        nodes.push(
+          <Link
+            key={`${itemId}-${markerIndex}`}
+            href={`/dashboard/papers/${paperMatch.paper_id}`}
+            title={citation?.citedFor}
+            aria-label={label}
+            className={citationClassName(true)}
+          >
+            {itemId}
+          </Link>
+        );
+      }
     } else {
       nodes.push(
         <span

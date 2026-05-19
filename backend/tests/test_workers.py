@@ -1,13 +1,16 @@
 """Worker job tests against temporary SQLite database."""
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 
-from app.models.filter import Filter
-from app.models.onboarding_extraction import OnboardingExtraction
-from app.models.paper import Paper
-from app.models.paper_match import PaperMatch
-from app.models.search_run import SearchRun
+import pytest
+
+from app.models.filter import SQLAFilter
+from app.models.onboarding_extraction import SQLAOnboardingExtraction
+from paper_search_core.models.paper import SQLAPaper
+from app.models.paper_match import SQLAPaperMatch
+from app.models.search_run import SQLASearchRun
 from app.llm.config import (
     FILTER_GENERATION_PROFILE,
     JUDGE_PROFILE,
@@ -15,7 +18,6 @@ from app.llm.config import (
 )
 from app.llm.schemas import (
     ClaimFilterSearchResponse,
-    FilterSearchResponse,
     OnboardingFiltersResponse,
     SearchSummaryResponse,
     TopicFilterSearchResponse,
@@ -23,12 +25,12 @@ from app.llm.schemas import (
 
 
 class TestExtractOnboardingFilters:
-    def test_persists_proposed_filters(self, db_session, db_engine, monkeypatch):
-        from sqlalchemy.orm import sessionmaker
-
+    def test_persists_proposed_filters(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
         # Create extraction record
         ext_id = str(uuid.uuid4())
-        extraction = OnboardingExtraction(
+        extraction = SQLAOnboardingExtraction(
             id=ext_id,
             input_text="I study mechanistic interpretability of neural networks",
             status="queued",
@@ -37,9 +39,6 @@ class TestExtractOnboardingFilters:
         )
         db_session.add(extraction)
         db_session.commit()
-
-        # Patch SessionLocal in the jobs module to use test DB
-        TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
 
         def fake_stream_structured_response(**kwargs):
             assert kwargs["profile"] == FILTER_GENERATION_PROFILE
@@ -63,29 +62,41 @@ class TestExtractOnboardingFilters:
                 "response_id": "onboarding-response",
             }
 
-        monkeypatch.setattr("app.jobs.onboarding.SessionLocal", TestSession)
         monkeypatch.setattr(
             "app.jobs.onboarding.stream_structured_response",
             fake_stream_structured_response,
         )
 
-        from app.jobs.onboarding import extract_onboarding_filters
-        extract_onboarding_filters(ext_id)
+        from app.services.jobs import create_job
+        from app.jobs.dispatcher import run_job
+
+        job = create_job(
+            db_session,
+            kind="onboarding_extraction",
+            subject_type="onboarding_extraction",
+            subject_id=ext_id,
+            status="queued",
+        )
+        db_session.commit()
+        run_job(job.id)
 
         db_session.expire_all()
-        updated = db_session.query(OnboardingExtraction).filter(
-            OnboardingExtraction.id == ext_id
-        ).first()
+        updated = (
+            db_session.query(SQLAOnboardingExtraction)
+            .filter(SQLAOnboardingExtraction.id == ext_id)
+            .first()
+        )
         assert updated.status == "completed"
         assert updated.proposed_filters is not None
         assert len(updated.proposed_filters) > 0
 
 
-def _paper_fixture(source_id: str, title: str) -> dict:
+def _paper_fixture(source_id: str, title: str, search_text: str | None = None) -> dict:
     return {
         "source_id": source_id,
         "title": title,
-        "search_text": f"Abstract for {title}.",
+        "search_text": search_text
+        or f"Neural network scaling laws. Abstract for {title}.",
         "authors": ["Test Author"],
         "published_at": datetime.now(timezone.utc),
         "html_url": f"https://arxiv.org/html/{source_id}",
@@ -93,12 +104,20 @@ def _paper_fixture(source_id: str, title: str) -> dict:
     }
 
 
-def _papers_from_dicts(db_session, papers: list[dict]) -> list:
-    from app.models.paper import Paper
+def _mock_papers_for_sources(monkeypatch, papers: list) -> None:
+    monkeypatch.setattr(
+        "app.jobs.daily_search.papers_for_sources",
+        lambda db, sources, rd, seeded=papers: seeded,
+    )
 
-    rows: list[Paper] = []
+
+def _papers_from_dicts(db_session, papers: list[dict]) -> list:
+    from app.services.papers_fts import index_paper
+    from paper_search_core.models.paper import SQLAPaper
+
+    rows: list[SQLAPaper] = []
     for p in papers:
-        paper = Paper(
+        paper = SQLAPaper(
             id=str(uuid.uuid4()),
             source_type=p.get("source_type", "arxiv"),
             source_id=p["source_id"],
@@ -111,39 +130,36 @@ def _papers_from_dicts(db_session, papers: list[dict]) -> list:
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(paper)
+        db_session.flush()
+        index_paper(db_session, paper)
         rows.append(paper)
     db_session.commit()
     return rows
 
 
 def _daily_job(db_session, run_id: str):
-    from app.models.job import Job
+    from app.models.job import SQLAJob
 
     return (
-        db_session.query(Job)
-        .filter(Job.kind == "daily_search", Job.subject_id == run_id)
+        db_session.query(SQLAJob)
+        .filter(SQLAJob.kind == "daily_search", SQLAJob.subject_id == run_id)
         .first()
     )
 
 
 def _daily_summary_job(db_session, run_id: str):
-    from app.models.job import Job
+    from app.models.job import SQLAJob
 
     return (
-        db_session.query(Job)
-        .filter(Job.kind == "daily_search_summary", Job.subject_id == run_id)
+        db_session.query(SQLAJob)
+        .filter(SQLAJob.kind == "daily_search_summary", SQLAJob.subject_id == run_id)
         .first()
     )
 
 
-def _run_summary_for_run(db_session, run_id: str, monkeypatch, db_engine) -> None:
-    from sqlalchemy.orm import sessionmaker
-
+def _run_summary_for_run(db_session, run_id: str) -> None:
     from app.services.jobs import create_job
-    from app.jobs.daily_search_summary import summarize_daily_search
-
-    test_session = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-    monkeypatch.setattr("app.jobs.daily_search_summary.SessionLocal", test_session)
+    from app.jobs.daily_search_summary import run as run_summary
 
     summary_job = create_job(
         db_session,
@@ -153,7 +169,29 @@ def _run_summary_for_run(db_session, run_id: str, monkeypatch, db_engine) -> Non
         status="queued",
     )
     db_session.commit()
-    summarize_daily_search(run_id, summary_job.id)
+    run_summary(db_session, summary_job)
+
+
+def _create_daily_search_job(db_session, run_id: str):
+    from app.services.jobs import create_job
+
+    job = create_job(
+        db_session,
+        kind="daily_search",
+        subject_type="search_run",
+        subject_id=run_id,
+        status="queued",
+    )
+    db_session.commit()
+    return job
+
+
+def _run_daily_search(db_session, run_id: str, job_id: str) -> None:
+    from app.models.job import SQLAJob
+    from app.jobs.daily_search import run as run_daily_search_job
+
+    job = db_session.get(SQLAJob, job_id)
+    run_daily_search_job(db_session, job)
 
 
 def _extract_prompt_arxiv_id(user_prompt: str) -> str:
@@ -163,12 +201,17 @@ def _extract_prompt_arxiv_id(user_prompt: str) -> str:
     raise ValueError("Source ID not found in prompt")
 
 
-def _fake_daily_async_llm(*, matched_arxiv_ids: set[str], assert_prompt=None, fail_arxiv_ids=None):
+def _fake_daily_async_llm(
+    matched_arxiv_ids: set[str], assert_prompt=None, fail_arxiv_ids=None
+):
     fail_arxiv_ids = fail_arxiv_ids or set()
 
     async def fake_async_call_llm(**kwargs):
         assert kwargs["profile"] == JUDGE_PROFILE
-        assert kwargs["response_model"] in (ClaimFilterSearchResponse, TopicFilterSearchResponse)
+        assert kwargs["response_model"] in (
+            ClaimFilterSearchResponse,
+            TopicFilterSearchResponse,
+        )
         if assert_prompt:
             assert_prompt(kwargs["user_prompt"])
         arxiv_id = _extract_prompt_arxiv_id(kwargs["user_prompt"])
@@ -185,9 +228,7 @@ def _fake_daily_async_llm(*, matched_arxiv_ids: set[str], assert_prompt=None, fa
             match_data["verdict"] = "positive"
             match_data["reason"] = "The paper directly addresses the filter."
         return {
-            "content": {
-                "matches": [match_data] if is_match else []
-            },
+            "content": {"matches": [match_data] if is_match else []},
             "model": "test-model",
             "response_id": f"match-response-{arxiv_id}",
         }
@@ -195,44 +236,122 @@ def _fake_daily_async_llm(*, matched_arxiv_ids: set[str], assert_prompt=None, fa
     return fake_async_call_llm
 
 
-def _fake_summary_llm(*, matched_arxiv_id: str):
-    calls = {"count": 0}
+def _fake_summary_llm(matched_arxiv_id: str):
+    calls = {"count": 0, "deltas": 0}
     item_id = f"arxiv:{matched_arxiv_id}"
+    final_content = {
+        "summary": (
+            "CLAIMS\n\n"
+            "Test Filter\n"
+            "One relevant paper matched today's filters and reports scaling behavior "
+            f'consistent with the claim <cite itemId="{item_id}"/>. '
+            "The match provides direct empirical support rather than a tangential analogy."
+        ),
+        "citations": [
+            {
+                "paperMatchId": "",
+                "itemId": item_id,
+                "sourceType": "arxiv",
+                "sourceId": matched_arxiv_id,
+                "citedFor": "Relevant claim",
+            }
+        ],
+    }
 
-    def fake_call_llm(**kwargs):
+    def fake_stream_structured_response(**kwargs):
+        import json
+
         assert kwargs["profile"] == SUMMARY_PROFILE
         assert kwargs["response_model"] is SearchSummaryResponse
         assert '<cite itemId="' in kwargs["system_prompt"]
         calls["count"] += 1
+        on_text_delta = kwargs.get("on_text_delta")
+        if on_text_delta:
+            serialized = json.dumps(final_content)
+            on_text_delta(
+                '{"summary": "CLAIMS\\n\\nTest Filter\\nOne relevant paper matched'
+            )
+            calls["deltas"] += 1
+            on_text_delta(
+                serialized[
+                    len(
+                        '{"summary": "CLAIMS\\n\\nTest Filter\\nOne relevant paper matched'
+                    ) :
+                ]
+            )
+            calls["deltas"] += 1
         return {
-            "content": {
-                "summary": (
-                    "One relevant paper matched today's filters "
-                    f'<cite itemId="{item_id}"/>.'
-                ),
-                "citations": [
-                    {
-                        "paperMatchId": "",
-                        "itemId": item_id,
-                        "sourceType": "arxiv",
-                        "sourceId": matched_arxiv_id,
-                        "citedFor": "Relevant claim",
-                    }
-                ],
-            },
+            "content": final_content,
             "model": "test-model",
             "response_id": "summary-response",
         }
 
-    return fake_call_llm
+    fake_stream_structured_response.calls = calls
+    return fake_stream_structured_response
+
+
+class TestDailySearchTimeouts:
+    @pytest.mark.asyncio
+    async def test_pair_timeout_does_not_include_semaphore_wait(self, monkeypatch):
+        from app.jobs import daily_search
+        from app.models.filter import FilterPayload
+        from paper_search_core.schemas.daily_search import PaperPayload
+
+        semaphore = asyncio.Semaphore(1)
+        await semaphore.acquire()
+        calls = {"count": 0}
+
+        async def fake_async_call_llm(**kwargs):
+            calls["count"] += 1
+            return {
+                "content": {"matches": []},
+                "model": "test-model",
+                "response_id": "test-response",
+            }
+
+        monkeypatch.setattr(daily_search, "PAIR_TIMEOUT_SECONDS", 0.01)
+        monkeypatch.setattr(daily_search, "async_call_llm", fake_async_call_llm)
+
+        task = asyncio.create_task(
+            daily_search._evaluate_filter_paper_with_timeout(
+                semaphore=semaphore,
+                filter=FilterPayload(
+                    id="filter-1",
+                    name="Test Filter",
+                    definition={"name": "Test Filter", "mode": "topic"},
+                ),
+                paper=PaperPayload(
+                    id="paper-1",
+                    title="Queued Paper",
+                    source_type="arxiv",
+                    source_id="2605.00001",
+                    item_id="arxiv:2605.00001",
+                    text="Queued paper abstract.",
+                    authors=["Test Author"],
+                ),
+            )
+        )
+
+        await asyncio.sleep(0.03)
+
+        assert not task.done()
+        assert calls["count"] == 0
+
+        semaphore.release()
+        outcome = await asyncio.wait_for(task, timeout=1)
+
+        _result, error, _model, _response_id = outcome
+        assert error is None
+        assert calls["count"] == 1
 
 
 class TestRunDailySearch:
-    def test_persists_matches_without_inline_summary(self, db_session, db_engine, monkeypatch):
-        from sqlalchemy.orm import sessionmaker
+    def test_persists_matches_without_inline_summary(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
 
         # Create active filter
-        filt = Filter(
+        filter = SQLAFilter(
             id=str(uuid.uuid4()),
             name="Test Filter",
             definition={
@@ -244,11 +363,11 @@ class TestRunDailySearch:
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
-        db_session.add(filt)
+        db_session.add(filter)
 
         # Create search run
         run_id = str(uuid.uuid4())
-        run = SearchRun(
+        run = SQLASearchRun(
             id=run_id,
             status="queued",
             run_date=datetime.now(timezone.utc).date(),
@@ -257,34 +376,30 @@ class TestRunDailySearch:
         db_session.add(run)
 
         daily_papers = [
-            _paper_fixture("2605.00001", "Included Scaling Paper"),
-            _paper_fixture("2605.00002", "Another Current Paper"),
+            _paper_fixture("2605.00001", "Included Scaling SQLAPaper"),
+            _paper_fixture("2605.00002", "Another Current SQLAPaper"),
         ]
         db_session.commit()
 
-        # Patch SessionLocal
-        TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-        monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
-        monkeypatch.setattr(
-            "app.jobs.daily_search.papers_for_sources",
-            lambda sources, rd, p=daily_papers, db=db_session: _papers_from_dicts(
-                db, p
-            ),
+        _mock_papers_for_sources(
+            monkeypatch, _papers_from_dicts(db_session, daily_papers)
         )
         monkeypatch.setattr(
             "app.jobs.daily_search.async_call_llm",
             _fake_daily_async_llm(matched_arxiv_ids={"2605.00001"}),
         )
         monkeypatch.setattr(
-            "app.jobs.daily_search_summary.call_llm",
+            "app.jobs.daily_search_summary.stream_structured_response",
             _fake_summary_llm(matched_arxiv_id="2605.00001"),
         )
 
-        from app.jobs.daily_search import run_daily_search
-        run_daily_search(run_id)
+        job = _create_daily_search_job(db_session, run_id)
+        _run_daily_search(db_session, run_id, job.id)
 
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
         job = _daily_job(db_session, run_id)
         assert job is not None
         assert job.status == "completed"
@@ -293,29 +408,33 @@ class TestRunDailySearch:
         assert updated_run.match_count == 1
         assert updated_run.candidate_count == len(daily_papers)
         assert job.progress["total"] == len(daily_papers)
+        assert job.progress["current"] == len(daily_papers)
         match_count = (
-            db_session.query(PaperMatch)
-            .filter(PaperMatch.search_run_id == run_id)
+            db_session.query(SQLAPaperMatch)
+            .filter(SQLAPaperMatch.search_run_id == run_id)
             .count()
         )
         assert match_count == updated_run.match_count
 
-        _run_summary_for_run(db_session, run_id, monkeypatch, db_engine)
+        _run_summary_for_run(db_session, run_id)
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
         summary_job = _daily_summary_job(db_session, run_id)
         assert summary_job is not None
         assert summary_job.status == "completed"
         assert updated_run.status == "completed"
         assert updated_run.summary is not None
 
-    def test_ignores_archived_filters(self, db_session, db_engine, monkeypatch):
-        from sqlalchemy.orm import sessionmaker
+    def test_ignores_archived_filters(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
 
         # Create archived filter only
-        filt = Filter(
+        filter = SQLAFilter(
             id=str(uuid.uuid4()),
-            name="Archived Filter",
+            name="Archived SQLAFilter",
             definition={
                 "name": "Archived",
                 "description": "Test",
@@ -326,10 +445,10 @@ class TestRunDailySearch:
             updated_at=datetime.now(timezone.utc),
             archived_at=datetime.now(timezone.utc),
         )
-        db_session.add(filt)
+        db_session.add(filter)
 
         run_id = str(uuid.uuid4())
-        run = SearchRun(
+        run = SQLASearchRun(
             id=run_id,
             status="queued",
             run_date=datetime.now(timezone.utc).date(),
@@ -338,20 +457,20 @@ class TestRunDailySearch:
         db_session.add(run)
         db_session.commit()
 
-        TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-        monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
-        monkeypatch.setattr(
-            "app.jobs.daily_search.papers_for_sources",
-            lambda sources, rd, db=db_session: _papers_from_dicts(
-                db, [_paper_fixture("2605.00004", "Fetched Paper")]
+        _mock_papers_for_sources(
+            monkeypatch,
+            _papers_from_dicts(
+                db_session, [_paper_fixture("2605.00004", "Fetched SQLAPaper")]
             ),
         )
 
-        from app.jobs.daily_search import run_daily_search
-        run_daily_search(run_id)
+        job = _create_daily_search_job(db_session, run_id)
+        _run_daily_search(db_session, run_id, job.id)
 
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
         job = _daily_job(db_session, run_id)
         assert job is not None
         assert job.status == "completed"
@@ -359,16 +478,19 @@ class TestRunDailySearch:
         assert updated_run.summary is None
         assert updated_run.match_count == 0
 
-        _run_summary_for_run(db_session, run_id, monkeypatch, db_engine)
+        _run_summary_for_run(db_session, run_id)
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
         assert updated_run.status == "completed"
         assert updated_run.summary == "No active filters to search."
 
-    def test_searches_only_papers_for_run_date(self, db_session, db_engine, monkeypatch):
-        from sqlalchemy.orm import sessionmaker
+    def test_searches_only_papers_for_run_date(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
 
-        filt = Filter(
+        filter = SQLAFilter(
             id=str(uuid.uuid4()),
             name="Test Filter",
             definition={
@@ -380,10 +502,10 @@ class TestRunDailySearch:
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
-        db_session.add(filt)
+        db_session.add(filter)
 
         run_id = str(uuid.uuid4())
-        run = SearchRun(
+        run = SQLASearchRun(
             id=run_id,
             status="queued",
             run_date=datetime.now(timezone.utc).date(),
@@ -391,11 +513,11 @@ class TestRunDailySearch:
         )
         db_session.add(run)
 
-        excluded = Paper(
+        excluded = SQLAPaper(
             id=str(uuid.uuid4()),
             source_type="arxiv",
             source_id="2401.00002",
-            title="Excluded Paper",
+            title="Excluded SQLAPaper",
             search_text="A cached paper from another run.",
             authors=["Author"],
             created_at=datetime.now(timezone.utc),
@@ -403,18 +525,16 @@ class TestRunDailySearch:
         db_session.add(excluded)
         db_session.commit()
 
-        TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-        monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
-        monkeypatch.setattr(
-            "app.jobs.daily_search.papers_for_sources",
-            lambda sources, rd, db=db_session: _papers_from_dicts(
-                db, [_paper_fixture("2401.00001", "Included Paper")]
+        _mock_papers_for_sources(
+            monkeypatch,
+            _papers_from_dicts(
+                db_session, [_paper_fixture("2401.00001", "Included SQLAPaper")]
             ),
         )
 
         def assert_prompt(user_prompt: str):
-            assert "Included Paper" in user_prompt
-            assert "Excluded Paper" not in user_prompt
+            assert "Included SQLAPaper" in user_prompt
+            assert "Excluded SQLAPaper" not in user_prompt
 
         monkeypatch.setattr(
             "app.jobs.daily_search.async_call_llm",
@@ -423,15 +543,19 @@ class TestRunDailySearch:
                 assert_prompt=assert_prompt,
             ),
         )
-        from app.jobs.daily_search import run_daily_search
-        run_daily_search(run_id)
+        job = _create_daily_search_job(db_session, run_id)
+        _run_daily_search(db_session, run_id, job.id)
 
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
-        matches = db_session.query(PaperMatch).all()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
+        matches = db_session.query(SQLAPaperMatch).all()
         included = (
-            db_session.query(Paper)
-            .filter(Paper.source_type == "arxiv", Paper.source_id == "2401.00001")
+            db_session.query(SQLAPaper)
+            .filter(
+                SQLAPaper.source_type == "arxiv", SQLAPaper.source_id == "2401.00001"
+            )
             .first()
         )
 
@@ -439,11 +563,10 @@ class TestRunDailySearch:
         assert {m.paper_id for m in matches} == {included.id}
 
     def test_missing_openrouter_key_fails_without_demo_data(
-        self, db_session, db_engine, monkeypatch
+        self, db_session, patch_worker_database, monkeypatch
     ):
-        from sqlalchemy.orm import sessionmaker
 
-        filt = Filter(
+        filter = SQLAFilter(
             id=str(uuid.uuid4()),
             name="Test Filter",
             definition={
@@ -455,10 +578,10 @@ class TestRunDailySearch:
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
-        db_session.add(filt)
+        db_session.add(filter)
 
         run_id = str(uuid.uuid4())
-        run = SearchRun(
+        run = SQLASearchRun(
             id=run_id,
             status="queued",
             run_date=datetime.now(timezone.utc).date(),
@@ -466,48 +589,49 @@ class TestRunDailySearch:
         )
         db_session.add(run)
 
-        paper = Paper(
+        from app.services.papers_fts import index_paper
+
+        paper = SQLAPaper(
             id=str(uuid.uuid4()),
             source_type="arxiv",
             source_id="2605.00003",
-            title="Current Paper",
-            search_text="A current paper that requires LLM matching.",
+            title="Current SQLAPaper",
+            search_text="Neural network scaling laws in large language models.",
             authors=["Author"],
+            published_at=datetime.now(timezone.utc),
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(paper)
+        db_session.flush()
+        index_paper(db_session, paper)
         db_session.commit()
 
-        TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-        monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
-        monkeypatch.setattr(
-            "app.jobs.daily_search.papers_for_sources",
-            lambda sources, rd, p=paper: [p],
-        )
-        monkeypatch.setattr("app.core.config.settings.OPENROUTER_API_KEY", "")
+        _mock_papers_for_sources(monkeypatch, [paper])
+        monkeypatch.setattr("app.config.settings.OPENROUTER_API_KEY", "")
 
-        from app.jobs.daily_search import run_daily_search
+        job = _create_daily_search_job(db_session, run_id)
 
         try:
-            run_daily_search(run_id)
+            _run_daily_search(db_session, run_id, job.id)
         except RuntimeError as exc:
-            assert "OPENROUTER_API_KEY" in str(exc)
+            assert "filter-item evaluations failed" in str(exc)
         else:
             raise AssertionError("Expected missing OPENROUTER_API_KEY to fail")
 
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
-        matches = db_session.query(PaperMatch).all()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
+        matches = db_session.query(SQLAPaperMatch).all()
         assert updated_run.status == "failed"
-        assert "OPENROUTER_API_KEY" in updated_run.error
+        assert "evaluation failed" in updated_run.error
         assert matches == []
 
     def test_pair_failures_increment_progress_when_some_pairs_succeed(
-        self, db_session, db_engine, monkeypatch
+        self, db_session, patch_worker_database, monkeypatch
     ):
-        from sqlalchemy.orm import sessionmaker
 
-        filt = Filter(
+        filter = SQLAFilter(
             id=str(uuid.uuid4()),
             name="Test Filter",
             definition={
@@ -519,11 +643,11 @@ class TestRunDailySearch:
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
-        db_session.add(filt)
+        db_session.add(filter)
 
         run_id = str(uuid.uuid4())
         db_session.add(
-            SearchRun(
+            SQLASearchRun(
                 id=run_id,
                 status="queued",
                 run_date=datetime.now(timezone.utc).date(),
@@ -531,18 +655,13 @@ class TestRunDailySearch:
             )
         )
         daily_papers = [
-            _paper_fixture("2605.00010", "Successful Paper"),
-            _paper_fixture("2605.00011", "Failing Paper"),
+            _paper_fixture("2605.00010", "Successful SQLAPaper"),
+            _paper_fixture("2605.00011", "Failing SQLAPaper"),
         ]
         db_session.commit()
 
-        TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-        monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
-        monkeypatch.setattr(
-            "app.jobs.daily_search.papers_for_sources",
-            lambda sources, rd, p=daily_papers, db=db_session: _papers_from_dicts(
-                db, p
-            ),
+        _mock_papers_for_sources(
+            monkeypatch, _papers_from_dicts(db_session, daily_papers)
         )
         monkeypatch.setattr(
             "app.jobs.daily_search.async_call_llm",
@@ -552,39 +671,45 @@ class TestRunDailySearch:
             ),
         )
         monkeypatch.setattr(
-            "app.jobs.daily_search_summary.call_llm",
+            "app.jobs.daily_search_summary.stream_structured_response",
             _fake_summary_llm(matched_arxiv_id="2605.00010"),
         )
 
-        from app.jobs.daily_search import run_daily_search
-        run_daily_search(run_id)
+        job = _create_daily_search_job(db_session, run_id)
+        _run_daily_search(db_session, run_id, job.id)
 
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
         job = _daily_job(db_session, run_id)
         assert job is not None
         assert job.status == "completed"
         assert updated_run.status == "running"
         assert updated_run.summary is None
         assert job.progress["total"] == 2
+        assert job.progress["current"] == 2
         assert updated_run.match_count == 1
         match_count = (
-            db_session.query(PaperMatch)
-            .filter(PaperMatch.search_run_id == run_id)
+            db_session.query(SQLAPaperMatch)
+            .filter(SQLAPaperMatch.search_run_id == run_id)
             .count()
         )
         assert match_count == 1
 
-        _run_summary_for_run(db_session, run_id, monkeypatch, db_engine)
+        _run_summary_for_run(db_session, run_id)
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
         assert updated_run.status == "completed"
         assert updated_run.summary is not None
 
-    def test_all_pair_failures_mark_run_failed(self, db_session, db_engine, monkeypatch):
-        from sqlalchemy.orm import sessionmaker
+    def test_all_pair_failures_mark_run_failed(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
 
-        filt = Filter(
+        filter = SQLAFilter(
             id=str(uuid.uuid4()),
             name="Test Filter",
             definition={
@@ -596,59 +721,205 @@ class TestRunDailySearch:
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
-        db_session.add(filt)
+        db_session.add(filter)
 
         run_id = str(uuid.uuid4())
         db_session.add(
-            SearchRun(
+            SQLASearchRun(
                 id=run_id,
                 status="queued",
                 run_date=datetime.now(timezone.utc).date(),
                 created_at=datetime.now(timezone.utc),
             )
         )
-        daily_papers = [_paper_fixture("2605.00012", "Failing Paper")]
+        daily_papers = [_paper_fixture("2605.00012", "Failing SQLAPaper")]
         db_session.commit()
 
-        TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-        monkeypatch.setattr("app.jobs.daily_search.SessionLocal", TestSession)
-        monkeypatch.setattr(
-            "app.jobs.daily_search.papers_for_sources",
-            lambda sources, rd, p=daily_papers, db=db_session: _papers_from_dicts(
-                db, p
-            ),
+        _mock_papers_for_sources(
+            monkeypatch, _papers_from_dicts(db_session, daily_papers)
         )
-        monkeypatch.setattr(
-            "app.jobs.daily_search.async_call_llm",
-            _fake_daily_async_llm(
-                matched_arxiv_ids=set(),
-                fail_arxiv_ids={"2605.00012"},
+        (
+            monkeypatch.setattr(
+                "app.jobs.daily_search.async_call_llm",
+                _fake_daily_async_llm(
+                    matched_arxiv_ids=set(),
+                    fail_arxiv_ids={"2605.00012"},
+                ),
             ),
         )
 
-        from app.jobs.daily_search import run_daily_search
+        job = _create_daily_search_job(db_session, run_id)
 
         try:
-            run_daily_search(run_id)
+            _run_daily_search(db_session, run_id, job.id)
         except RuntimeError as exc:
             assert "All 1 filter-item evaluations failed" in str(exc)
         else:
             raise AssertionError("Expected all pair failures to fail the run")
 
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
         job = _daily_job(db_session, run_id)
         assert job is not None
         assert updated_run.status == "failed"
         assert job.progress["total"] == 1
+        assert job.progress["current"] == 1
+
+    def test_progress_total_equals_selected_pairs(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
+        scaling_filter = SQLAFilter(
+            id=str(uuid.uuid4()),
+            name="Scaling Filter",
+            definition={
+                "description": "neural network scaling laws",
+                "mode": "claim",
+            },
+            status="active",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        quantum_filter = SQLAFilter(
+            id=str(uuid.uuid4()),
+            name="Quantum Filter",
+            definition={
+                "description": "quantum entanglement physics",
+                "mode": "claim",
+            },
+            status="active",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db_session.add(scaling_filter)
+        db_session.add(quantum_filter)
+
+        run_id = str(uuid.uuid4())
+        db_session.add(
+            SQLASearchRun(
+                id=run_id,
+                status="queued",
+                run_date=datetime.now(timezone.utc).date(),
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        daily_papers = [
+            _paper_fixture(
+                "2605.00100",
+                "Scaling paper",
+                search_text="neural network scaling laws in transformers",
+            ),
+            _paper_fixture(
+                "2605.00101",
+                "Quantum paper",
+                search_text="quantum entanglement and bell tests",
+            ),
+            _paper_fixture(
+                "2605.00102",
+                "Unrelated paper",
+                search_text="classical thermodynamics of gases",
+            ),
+        ]
+        db_session.commit()
+
+        _mock_papers_for_sources(
+            monkeypatch, _papers_from_dicts(db_session, daily_papers)
+        )
+        llm_calls = {"count": 0}
+
+        async def counting_llm(**kwargs):
+            llm_calls["count"] += 1
+            return {
+                "content": {"matches": []},
+                "model": "test-model",
+                "response_id": "test",
+            }
+
+        monkeypatch.setattr("app.jobs.daily_search.async_call_llm", counting_llm)
+
+        job = _create_daily_search_job(db_session, run_id)
+        _run_daily_search(db_session, run_id, job.id)
+
+        db_session.expire_all()
+        job = _daily_job(db_session, run_id)
+        assert job is not None
+        assert job.progress["total"] == llm_calls["count"]
+        assert job.progress["total"] == job.progress["current"]
+        assert llm_calls["count"] >= 2
+        assert llm_calls["count"] < len(daily_papers) * 2
+
+    def test_no_fts_candidates_completes_with_zero_matches(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
+        filter = SQLAFilter(
+            id=str(uuid.uuid4()),
+            name="Astrobiology Filter",
+            definition={
+                "description": "exoplanet biosignatures spectroscopy",
+                "mode": "claim",
+            },
+            status="active",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db_session.add(filter)
+
+        run_id = str(uuid.uuid4())
+        db_session.add(
+            SQLASearchRun(
+                id=run_id,
+                status="queued",
+                run_date=datetime.now(timezone.utc).date(),
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        daily_papers = [
+            _paper_fixture(
+                "2605.00200",
+                "Scaling paper",
+                search_text="neural network scaling laws only",
+            ),
+        ]
+        db_session.commit()
+
+        _mock_papers_for_sources(
+            monkeypatch, _papers_from_dicts(db_session, daily_papers)
+        )
+        llm_calls = {"count": 0}
+
+        async def counting_llm(**kwargs):
+            llm_calls["count"] += 1
+            return {
+                "content": {"matches": []},
+                "model": "test-model",
+                "response_id": "test",
+            }
+
+        monkeypatch.setattr("app.jobs.daily_search.async_call_llm", counting_llm)
+
+        job = _create_daily_search_job(db_session, run_id)
+        _run_daily_search(db_session, run_id, job.id)
+
+        db_session.expire_all()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
+        job = _daily_job(db_session, run_id)
+        assert job is not None
+        assert job.status == "completed"
+        assert updated_run.match_count == 0
+        assert job.progress == {"current": 0, "total": 0}
+        assert llm_calls["count"] == 0
 
 
 class TestSummarizeDailySearch:
-    def test_summarize_reads_matches_from_database(self, db_session, db_engine, monkeypatch):
-        from sqlalchemy.orm import sessionmaker
+    def test_summarize_reads_matches_from_database(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
 
         filt_id = str(uuid.uuid4())
-        filt = Filter(
+        filter = SQLAFilter(
             id=filt_id,
             name="Test Filter",
             definition={
@@ -660,10 +931,10 @@ class TestSummarizeDailySearch:
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
-        db_session.add(filt)
+        db_session.add(filter)
 
         run_id = str(uuid.uuid4())
-        run = SearchRun(
+        run = SQLASearchRun(
             id=run_id,
             status="running",
             run_date=datetime.now(timezone.utc).date(),
@@ -674,11 +945,11 @@ class TestSummarizeDailySearch:
         )
         db_session.add(run)
 
-        paper = Paper(
+        paper = SQLAPaper(
             id=str(uuid.uuid4()),
             source_type="arxiv",
             source_id="2605.00001",
-            title="Included Scaling Paper",
+            title="Included Scaling SQLAPaper",
             search_text="Abstract",
             authors=["Author"],
             created_at=datetime.now(timezone.utc),
@@ -686,7 +957,7 @@ class TestSummarizeDailySearch:
         db_session.add(paper)
         db_session.flush()
         db_session.add(
-            PaperMatch(
+            SQLAPaperMatch(
                 search_run_id=run_id,
                 filter_id=filt_id,
                 paper_id=paper.id,
@@ -697,22 +968,220 @@ class TestSummarizeDailySearch:
         )
         db_session.commit()
 
-        TestSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-        monkeypatch.setattr("app.jobs.daily_search_summary.SessionLocal", TestSession)
+        summary_llm = _fake_summary_llm(matched_arxiv_id="2605.00001")
         monkeypatch.setattr(
-            "app.jobs.daily_search_summary.call_llm",
-            _fake_summary_llm(matched_arxiv_id="2605.00001"),
+            "app.jobs.daily_search_summary.stream_structured_response",
+            summary_llm,
         )
 
-        from app.jobs.daily_search_summary import summarize_daily_search
+        from app.services.jobs import create_job
+        from app.jobs.daily_search_summary import run as run_summary
 
-        summarize_daily_search(run_id)
+        summary_job = create_job(
+            db_session,
+            kind="daily_search_summary",
+            subject_type="search_run",
+            subject_id=run_id,
+            status="queued",
+        )
+        db_session.commit()
+        run_summary(db_session, summary_job)
 
         db_session.expire_all()
-        updated_run = db_session.query(SearchRun).filter(SearchRun.id == run_id).first()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
         summary_job = _daily_summary_job(db_session, run_id)
         assert summary_job is not None
         assert summary_job.status == "completed"
         assert updated_run.status == "completed"
         assert updated_run.summary is not None
         assert "One relevant paper matched today's filters" in updated_run.summary
+        assert summary_llm.calls["deltas"] >= 1
+
+    def test_summarize_commits_streaming_draft(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
+        from app.services import search_runs
+        from app.services.jobs import create_job
+        from app.jobs.daily_search_summary import run as run_summary
+
+        filt_id = str(uuid.uuid4())
+        db_session.add(
+            SQLAFilter(
+                id=filt_id,
+                name="Test Filter",
+                definition={
+                    "name": "Test Filter",
+                    "description": "Neural network scaling laws",
+                    "mode": "claim",
+                },
+                status="active",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+
+        run_id = str(uuid.uuid4())
+        run = SQLASearchRun(
+            id=run_id,
+            status="running",
+            run_date=datetime.now(timezone.utc).date(),
+            candidate_count=1,
+            candidate_counts={"arxiv": 1},
+            match_count=1,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(run)
+
+        paper = SQLAPaper(
+            id=str(uuid.uuid4()),
+            source_type="arxiv",
+            source_id="2605.00001",
+            title="Included Scaling SQLAPaper",
+            search_text="Abstract",
+            authors=["Author"],
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(paper)
+        db_session.flush()
+        db_session.add(
+            SQLAPaperMatch(
+                search_run_id=run_id,
+                filter_id=filt_id,
+                paper_id=paper.id,
+                result="The paper directly addresses the filter.",
+                llm_model="test-model",
+                llm_response_id="match-response",
+            )
+        )
+        db_session.commit()
+
+        drafts: list[str] = []
+        original_update = search_runs.update_summary_draft
+
+        def track_update_summary_draft(db, run, summary: str) -> None:
+            drafts.append(summary)
+            original_update(db, run, summary)
+
+        monkeypatch.setattr(
+            search_runs, "update_summary_draft", track_update_summary_draft
+        )
+        monkeypatch.setattr(
+            "app.jobs.daily_search_summary.stream_structured_response",
+            _fake_summary_llm(matched_arxiv_id="2605.00001"),
+        )
+
+        summary_job = create_job(
+            db_session,
+            kind="daily_search_summary",
+            subject_type="search_run",
+            subject_id=run_id,
+            status="queued",
+        )
+        db_session.commit()
+        run_summary(db_session, summary_job)
+
+        assert drafts
+        assert any("One relevant paper matched" in draft for draft in drafts)
+
+    def test_summarize_recovers_summary_when_structured_content_empty(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
+        from app.services.jobs import create_job
+        from app.jobs.daily_search_summary import run as run_summary
+
+        filt_id = str(uuid.uuid4())
+        db_session.add(
+            SQLAFilter(
+                id=filt_id,
+                name="Test Filter",
+                definition={
+                    "name": "Test Filter",
+                    "description": "Neural network scaling laws",
+                    "mode": "claim",
+                },
+                status="active",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+
+        run_id = str(uuid.uuid4())
+        run = SQLASearchRun(
+            id=run_id,
+            status="running",
+            run_date=datetime.now(timezone.utc).date(),
+            candidate_count=1,
+            candidate_counts={"arxiv": 1},
+            match_count=1,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(run)
+
+        paper = SQLAPaper(
+            id=str(uuid.uuid4()),
+            source_type="arxiv",
+            source_id="2605.00002",
+            title="Included Scaling SQLAPaper",
+            search_text="Abstract",
+            authors=["Author"],
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(paper)
+        db_session.flush()
+        db_session.add(
+            SQLAPaperMatch(
+                search_run_id=run_id,
+                filter_id=filt_id,
+                paper_id=paper.id,
+                result="The paper directly addresses the filter.",
+                llm_model="test-model",
+                llm_response_id="match-response",
+            )
+        )
+        db_session.commit()
+
+        item_id = "arxiv:2605.00002"
+
+        def fake_stream_structured_response(**kwargs):
+            import json
+
+            on_text_delta = kwargs.get("on_text_delta")
+            recovered = {
+                "summary": (
+                    "CLAIMS\n\n"
+                    "Test Filter\n"
+                    f'Recovered digest text <cite itemId="{item_id}"/> '
+                    + ("Additional synthesis context. " * 8)
+                ),
+                "citations": [],
+            }
+            serialized = json.dumps(recovered)
+            if on_text_delta:
+                midpoint = len('{"summary": "') + 20
+                on_text_delta(serialized[:midpoint])
+                on_text_delta(serialized[midpoint:])
+            return {
+                "content": {"summary": "", "citations": []},
+                "model": "test-model",
+                "response_id": "summary-response",
+            }
+
+        monkeypatch.setattr(
+            "app.jobs.daily_search_summary.stream_structured_response",
+            fake_stream_structured_response,
+        )
+
+        summary_job = create_job(
+            db_session,
+            kind="daily_search_summary",
+            subject_type="search_run",
+            subject_id=run_id,
+            status="queued",
+        )
+        db_session.commit()
+        run_summary(db_session, summary_job)
+
+        db_session.refresh(run)
+        assert "Recovered digest text" in (run.summary or "")

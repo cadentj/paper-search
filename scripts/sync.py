@@ -24,7 +24,7 @@ from paper_search_core.index_records import (
     lesswrong_is_searchable,
     lesswrong_record_from_shard,
 )
-from paper_search_core.models import Base, Paper
+from paper_search_core.models import Base, SQLAPaper
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
@@ -45,7 +45,6 @@ logger = logging.getLogger(__name__)
 
 def load_arxiv_day(
     db: Session,
-    *,
     run_date: date,
     shard_items: list[dict[str, Any]],
     settings: IndexSettings,
@@ -80,7 +79,6 @@ def load_arxiv_day(
 
 def load_lesswrong_day(
     db: Session,
-    *,
     run_date: date,
     shard_items: list[dict[str, Any]],
     settings: IndexSettings,
@@ -101,14 +99,16 @@ def load_lesswrong_day(
     return total, searchable
 
 
-def _ensure_published_on_run_date(record: dict[str, Any], *, run_date: date) -> None:
+def _ensure_published_on_run_date(record: dict[str, Any], run_date: date) -> None:
     published_at = record.get("published_at")
     if published_at is None or published_at.date() != run_date:
-        record["published_at"] = datetime.combine(run_date, time.min, tzinfo=timezone.utc)
+        record["published_at"] = datetime.combine(
+            run_date, time.min, tzinfo=timezone.utc
+        )
 
 
 def _require_empty_paper_table(db: Session) -> None:
-    count = db.query(Paper).count()
+    count = db.query(SQLAPaper).count()
     if count:
         raise RuntimeError(
             f"Refusing to sync: database already has {count} paper(s). "
@@ -116,18 +116,18 @@ def _require_empty_paper_table(db: Session) -> None:
         )
 
 
-def _insert_paper(db: Session, *, record: dict[str, Any], now: datetime) -> Paper:
+def _insert_paper(db: Session, record: dict[str, Any], now: datetime) -> SQLAPaper:
     source_type = record["source_type"]
     source_id = record["source_id"]
     existing = (
-        db.query(Paper)
-        .filter(Paper.source_type == source_type, Paper.source_id == source_id)
+        db.query(SQLAPaper)
+        .filter(SQLAPaper.source_type == source_type, SQLAPaper.source_id == source_id)
         .first()
     )
     if existing:
         return existing
 
-    paper = Paper(
+    paper = SQLAPaper(
         id=str(uuid.uuid4()),
         source_type=source_type,
         source_id=source_id,
@@ -140,12 +140,14 @@ def _insert_paper(db: Session, *, record: dict[str, Any], now: datetime) -> Pape
         created_at=now,
     )
     db.add(paper)
+    from app.services.papers_fts import index_paper
+
+    index_paper(db, paper)
     return paper
 
 
 def sync_public_indexes(
     settings: Settings,
-    *,
     progress: tqdm | None = None,
 ) -> dict[str, dict[str, tuple[int, int]]]:
     settings.require_sync_urls()
@@ -156,6 +158,9 @@ def sync_public_indexes(
         connect_args={"check_same_thread": False},
     )
     Base.metadata.create_all(bind=engine)
+    from app.services.papers_fts import ensure_papers_fts
+
+    ensure_papers_fts(engine)
     session_factory = sessionmaker(bind=engine)
     index_settings = settings.index_settings()
 
@@ -198,7 +203,6 @@ def sync_public_indexes(
 
 def _sync_source(
     db: Session,
-    *,
     source_type: str,
     public_base_url: str,
     manifest_path: str,
@@ -208,7 +212,9 @@ def _sync_source(
     progress: tqdm | None,
     scanned_total: int,
 ) -> tuple[dict[str, tuple[int, int]], int]:
-    manifest = fetch_manifest(public_base_url=public_base_url, manifest_path=manifest_path)
+    manifest = fetch_manifest(
+        public_base_url=public_base_url, manifest_path=manifest_path
+    )
     dates = manifest.get("dates") or {}
     per_date: dict[str, tuple[int, int]] = {}
 
@@ -254,7 +260,13 @@ def _sync_source(
             progress.update(1)
             _set_sync_progress(progress, source_type, total, scanned_total)
         else:
-            logger.info("%s %s: total=%s searchable=%s", source_type, date_key, total, searchable)
+            logger.info(
+                "%s %s: total=%s searchable=%s",
+                source_type,
+                date_key,
+                total,
+                searchable,
+            )
 
     return per_date, scanned_total
 

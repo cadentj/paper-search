@@ -2,20 +2,43 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
+from pydantic import BaseModel
 from sqlalchemy import Column, DateTime, ForeignKey, JSON, Text
 
 from app.models.base import Base
-from app.schemas.search import PaperMatchResponse
 from paper_search_core.schemas.daily_search import paper_item_label
 
 if TYPE_CHECKING:
-    from app.models.filter import Filter
-    from app.models.paper import Paper
+    from app.models.filter import SQLAFilter
+    from paper_search_core.models.paper import SQLAPaper
 
 
-class PaperMatch(Base):
+class PaperMatch(BaseModel):
+    id: str
+    search_run_id: str
+    filter_id: str
+    paper_id: str
+    result: dict
+    llm_model: Optional[str] = None
+    created_at: datetime
+    filter_mode: Optional[str] = None
+
+    # Joined fields
+    paper_title: Optional[str] = None
+    paper_authors: Optional[list] = None
+    paper_source_type: Optional[str] = None
+    paper_source_id: Optional[str] = None
+    paper_source_url: Optional[str] = None
+    paper_item_label: Optional[str] = None
+    paper_search_text: Optional[str] = None
+    filter_name: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class SQLAPaperMatch(Base):
     __tablename__ = "paper_matches"
 
     id = Column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -27,15 +50,16 @@ class PaperMatch(Base):
 
     llm_model = Column(Text, nullable=True)
     llm_response_id = Column(Text, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
 
     def to_pydantic(
         self,
-        *,
-        paper: Paper | None = None,
-        filt: Filter | None = None,
-    ) -> PaperMatchResponse:
-        return PaperMatchResponse(
+        paper: SQLAPaper | None = None,
+        filter: SQLAFilter | None = None,
+    ) -> PaperMatch:
+        return PaperMatch(
             id=self.id,
             search_run_id=self.search_run_id,
             filter_id=self.filter_id,
@@ -50,6 +74,8 @@ class PaperMatch(Base):
             paper_source_url=paper.source_url if paper else None,
             paper_item_label=paper_item_label(paper) if paper else None,
             paper_search_text=paper.search_text if paper else None,
-            filter_name=filt.name if filt else None,
-            filter_mode=(filt.definition or {}).get("mode", "topic") if filt else None,
+            filter_name=filter.name if filter else None,
+            filter_mode=(filter.definition or {}).get("mode", "topic")
+            if filter
+            else None,
         )

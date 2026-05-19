@@ -1,8 +1,8 @@
 """Pydantic response models for structured LLM outputs."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StrictModel(BaseModel):
@@ -60,17 +60,33 @@ class TopicFilterSearchResponse(StrictModel):
     matches: list[TopicFilterSearchMatch]
 
 
-# Backward-compatible alias for tests
-FilterSearchResponse = TopicFilterSearchResponse
-
-
-class FeedbackAction(StrictModel):
-    action: Literal["create", "revise", "delete"]
-    name: str | None = None
-    description: str | None = None
-    mode: Literal["claim", "topic"] | None = None
-    target_filter_id: str | None = None
+class CreateFeedbackAction(StrictModel):
+    action: Literal["create"]
+    name: str
+    description: str
+    mode: Literal["claim", "topic"]
     rationale: str = ""
+
+
+class ReviseFeedbackAction(StrictModel):
+    action: Literal["revise"]
+    name: str
+    description: str
+    mode: Literal["claim", "topic"]
+    target_filter_id: str
+    rationale: str = ""
+
+
+class DeleteFeedbackAction(StrictModel):
+    action: Literal["delete"]
+    target_filter_id: str
+    rationale: str = ""
+
+
+FeedbackAction = Annotated[
+    CreateFeedbackAction | ReviseFeedbackAction | DeleteFeedbackAction,
+    Field(discriminator="action"),
+]
 
 
 class FeedbackReflectionResponse(StrictModel):

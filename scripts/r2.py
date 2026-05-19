@@ -63,7 +63,10 @@ class Settings(BaseSettings):
         )
 
     def require_sync_urls(self) -> None:
-        if not self.ARXIV_HTML_PUBLIC_BASE_URL or not self.LESSWRONG_HTML_PUBLIC_BASE_URL:
+        if (
+            not self.ARXIV_HTML_PUBLIC_BASE_URL
+            or not self.LESSWRONG_HTML_PUBLIC_BASE_URL
+        ):
             raise SystemExit(
                 "ARXIV_HTML_PUBLIC_BASE_URL and LESSWRONG_HTML_PUBLIC_BASE_URL are required for sync"
             )
@@ -90,13 +93,20 @@ class Settings(BaseSettings):
     def lesswrong_cookie(self) -> str:
         if not self.LESSWRONG_COOKIE_FILE.strip():
             return ""
-        return Path(self.LESSWRONG_COOKIE_FILE).expanduser().read_text(encoding="utf-8").strip()
+        return (
+            Path(self.LESSWRONG_COOKIE_FILE)
+            .expanduser()
+            .read_text(encoding="utf-8")
+            .strip()
+        )
 
 
 def resolve_sqlite_path(database_url: str) -> Path:
     prefix = "sqlite:///"
     if not database_url.startswith(prefix):
-        raise ValueError(f"Only SQLite URLs are supported for sync, got: {database_url}")
+        raise ValueError(
+            f"Only SQLite URLs are supported for sync, got: {database_url}"
+        )
     raw = database_url.removeprefix(prefix)
     path = Path(raw)
     if not path.is_absolute():
@@ -104,14 +114,14 @@ def resolve_sqlite_path(database_url: str) -> Path:
     return path
 
 
-def fetch_manifest(*, public_base_url: str, manifest_path: str) -> dict[str, Any]:
+def fetch_manifest(public_base_url: str, manifest_path: str) -> dict[str, Any]:
     url = public_url_for_base(public_base_url, manifest_path)
     response = httpx.get(url, timeout=30.0, follow_redirects=True)
     response.raise_for_status()
     return response.json()
 
 
-def fetch_date_shard(*, public_base_url: str, index_key: str) -> dict[str, Any]:
+def fetch_date_shard(public_base_url: str, index_key: str) -> dict[str, Any]:
     url = public_url_for_base(public_base_url, index_key)
     response = httpx.get(url, timeout=30.0, follow_redirects=True)
     response.raise_for_status()
@@ -119,7 +129,6 @@ def fetch_date_shard(*, public_base_url: str, index_key: str) -> dict[str, Any]:
 
 
 def items_for_date(
-    *,
     public_base_url: str,
     run_date: str,
     date_payload: dict[str, Any],
@@ -135,7 +144,7 @@ def items_for_date(
     return items if isinstance(items, list) else []
 
 
-def r2_client(settings: Settings, *, max_pool_connections: int = 32):
+def r2_client(settings: Settings, max_pool_connections: int = 32):
     missing = [
         name
         for name, value in {
@@ -167,11 +176,11 @@ def normalize_prefix(prefix: str) -> str:
     return f"{stripped}/" if stripped else ""
 
 
-def date_index_key(*, date: str, date_index_prefix: str) -> str:
+def date_index_key(date: str, date_index_prefix: str) -> str:
     return f"{normalize_prefix(date_index_prefix)}{date}.json"
 
 
-def json_body(payload: dict[str, Any], *, pretty: bool = False) -> str:
+def json_body(payload: dict[str, Any], pretty: bool = False) -> str:
     if pretty:
         return json.dumps(payload, indent=2, sort_keys=False) + "\n"
     return json.dumps(payload, separators=(",", ":"), sort_keys=False) + "\n"
@@ -179,7 +188,6 @@ def json_body(payload: dict[str, Any], *, pretty: bool = False) -> str:
 
 def upload_sharded_index(
     client,
-    *,
     bucket: str,
     index_key: str,
     manifest: dict[str, Any],
@@ -222,7 +230,6 @@ class UploadResult:
 
 def upload_html(
     client,
-    *,
     bucket: str,
     cache_dir: Path,
     prefix: str,
@@ -247,12 +254,15 @@ def upload_html(
     ]
 
     stats = {"uploaded": 0, "skipped": 0, "error": 0}
-    with ThreadPoolExecutor(max_workers=max(workers, 1)) as executor, tqdm(
-        total=len(tasks),
-        desc="uploading",
-        unit="file",
-        dynamic_ncols=True,
-    ) as progress:
+    with (
+        ThreadPoolExecutor(max_workers=max(workers, 1)) as executor,
+        tqdm(
+            total=len(tasks),
+            desc="uploading",
+            unit="file",
+            dynamic_ncols=True,
+        ) as progress,
+    ):
         futures = [
             executor.submit(
                 _upload_one,
@@ -281,7 +291,6 @@ def upload_html(
 
 def _upload_one(
     client,
-    *,
     bucket: str,
     task: UploadTask,
     skip_existing: bool,
@@ -290,7 +299,9 @@ def _upload_one(
     try:
         if skip_existing and _object_exists(client, bucket, task.key):
             return UploadResult(status="skipped", key=task.key)
-        resolved_type = content_type or mimetypes.guess_type(task.path.name)[0] or "text/html"
+        resolved_type = (
+            content_type or mimetypes.guess_type(task.path.name)[0] or "text/html"
+        )
         client.upload_file(
             str(task.path),
             bucket,

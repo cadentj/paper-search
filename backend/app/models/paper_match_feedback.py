@@ -1,12 +1,12 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, Text, DateTime, ForeignKey
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Text
 
 from app.models.base import Base
 
 
-class PaperMatchFeedback(Base):
+class SQLAPaperMatchFeedback(Base):
     __tablename__ = "paper_match_feedback"
 
     id = Column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -17,5 +17,12 @@ class PaperMatchFeedback(Base):
     value = Column(Text, nullable=False)  # "up" or "down"
     processed = Column(Boolean, nullable=False, default=False)
 
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )

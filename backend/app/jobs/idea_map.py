@@ -3,24 +3,27 @@
 from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
+
+import httpx
 from queue import Empty, Queue
 from datetime import datetime, timezone
 
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.db.session import SessionLocal
-from app.models.job import Job
-from app.models.paper import Paper
-from app.models.idea_map import IdeaMap
-from app.services.jobs import get_or_create_job_for_subject, job_progress, set_job_status
-from app.core.config import LLM_MAX_CONCURRENCY
-from app.services.html_parser import (
+from sqlalchemy.orm import Session
+
+from app.models.job import SQLAJob
+from paper_search_core.models.paper import SQLAPaper
+from app.models.idea_map import SQLAIdeaMap
+from app.services import papers as papers_service
+from app.services.jobs import job_progress, set_job_status
+from app.config import LLM_MAX_CONCURRENCY
+from app.utils.html_parser import (
     MAX_PROMPT_BLOCKS,
     blocks_to_prompt_text,
     citation_validation_diagnostics,
     parse_arxiv_html,
 )
-from app.services.public_r2_index import http_get_text
 from app.llm.client import stream_structured_response
 from app.llm.config import IDEA_MAP_PROFILE
 from app.llm.prompts import (
@@ -41,46 +44,42 @@ from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 
-def _resolve_idea_map_job(db, idea_map_id: str, job_id: str | None) -> Job:
-    if job_id:
-        job = db.query(Job).filter(Job.id == job_id).first()
-        if job:
-            return job
-    return get_or_create_job_for_subject(
-        db,
-        kind="idea_map",
-        subject_type="idea_map",
-        subject_id=idea_map_id,
-    )
+def run(db: Session, job: SQLAJob) -> None:
+    """Generate idea map from arXiv HTML."""
+    idea_map_id = job.subject_id
+    if not idea_map_id:
+        return
 
-
-def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
-    """Worker job: generate idea map from arXiv HTML."""
-    db = SessionLocal()
     try:
-        idea_map = db.query(IdeaMap).filter(IdeaMap.id == idea_map_id).first()
+        idea_map = db.query(SQLAIdeaMap).filter(SQLAIdeaMap.id == idea_map_id).first()
         if not idea_map:
             return
 
-        job = _resolve_idea_map_job(db, idea_map_id, job_id)
-        idea_map.status = "running"
-        idea_map.updated_at = datetime.now(timezone.utc)
-        set_job_status(job, status="running")
-        db.commit()
+        papers_service.mark_idea_map_running(db, idea_map, job)
 
-        paper = db.query(Paper).filter(Paper.id == idea_map.paper_id).first()
+        paper = db.query(SQLAPaper).filter(SQLAPaper.id == idea_map.paper_id).first()
         if not paper or paper.source_type != "arxiv" or not paper.source_id:
-            idea_map.status = "skipped"
-            idea_map.dropped_reason = "Paper not found or not an arXiv paper with source_id"
-            idea_map.updated_at = datetime.now(timezone.utc)
-            set_job_status(job, status="skipped")
-            db.commit()
+            papers_service.mark_idea_map_skipped(
+                db,
+                idea_map,
+                job,
+                "Paper not found or not an arXiv paper with source_id",
+            )
             return
 
         html_url = paper.html_url or paper.source_url
         idea_map.source_url = html_url
 
-        html_content = http_get_text(paper.html_url) if paper.html_url else None
+        html_content = None
+        if paper.html_url:
+            try:
+                response = httpx.get(
+                    paper.html_url, timeout=30.0, follow_redirects=True
+                )
+                response.raise_for_status()
+                html_content = response.text
+            except httpx.HTTPError:
+                html_content = None
         if not html_content:
             idea_map.status = "skipped"
             idea_map.dropped_reason = f"HTML not found for {paper.source_id}"
@@ -119,7 +118,8 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
             claims_result = _stream_claims(db, idea_map, blocks_text, claims_progress)
             raw_claims = claims_result["content"].get("claims", [])
             normalized_claims = [
-                normalized for raw in raw_claims
+                normalized
+                for raw in raw_claims
                 if (normalized := _normalize_claim(raw))
             ]
             if len(normalized_claims) > claims_progress.n:
@@ -169,13 +169,16 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
         warrant_failures = 0
         valid_warrant_count = _count_warrants(idea_map.claims)
         max_workers = max(1, min(len(claims), LLM_MAX_CONCURRENCY))
-        with tqdm(
-            total=len(claims),
-            desc="idea-map warrants",
-            unit="claim",
-            dynamic_ncols=True,
-            disable=None,
-        ) as warrants_progress, ThreadPoolExecutor(max_workers=max_workers) as executor:
+        with (
+            tqdm(
+                total=len(claims),
+                desc="idea-map warrants",
+                unit="claim",
+                dynamic_ncols=True,
+                disable=None,
+            ) as warrants_progress,
+            ThreadPoolExecutor(max_workers=max_workers) as executor,
+        ):
             _set_warrant_progress(
                 warrants_progress,
                 valid=valid_warrant_count,
@@ -342,17 +345,10 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
 
     except Exception as e:
         db.rollback()
-        idea_map = db.query(IdeaMap).filter(IdeaMap.id == idea_map_id).first()
+        idea_map = db.query(SQLAIdeaMap).filter(SQLAIdeaMap.id == idea_map_id).first()
         if idea_map:
-            idea_map.status = "failed"
-            idea_map.error = str(e)
-            idea_map.updated_at = datetime.now(timezone.utc)
-            job = _resolve_idea_map_job(db, idea_map_id, job_id)
-            set_job_status(job, status="failed", error=idea_map.error)
-            db.commit()
+            papers_service.fail_idea_map(db, idea_map, job, str(e))
         raise
-    finally:
-        db.close()
 
 
 def _preview(value: object, limit: int = 500) -> str:
@@ -364,7 +360,7 @@ def _preview(value: object, limit: int = 500) -> str:
 
 def _stream_claims(
     db,
-    idea_map: IdeaMap,
+    idea_map: SQLAIdeaMap,
     blocks_text: str,
     progress: tqdm | None = None,
 ) -> dict:
@@ -400,7 +396,6 @@ def _stream_claims(
 
 def _set_warrant_progress(
     progress: tqdm,
-    *,
     valid: int,
     rejected: int,
     failures: int,
@@ -416,7 +411,7 @@ def _count_warrants(claims: list[dict] | None) -> int:
     return sum(len(claim.get("warrants", [])) for claim in claims or [])
 
 
-def _set_claims(idea_map: IdeaMap, claims: list[dict]) -> None:
+def _set_claims(idea_map: SQLAIdeaMap, claims: list[dict]) -> None:
     idea_map.claims = claims
     flag_modified(idea_map, "claims")
 
@@ -505,7 +500,6 @@ def _normalize_claim(raw: dict) -> dict | None:
 
 def _normalize_warrant(
     raw: dict,
-    *,
     idea_map_id: str | None = None,
     paper_id: str | None = None,
     claim_id: str | None = None,
@@ -555,7 +549,7 @@ def _merge_claims(existing: list[dict], incoming: list[dict]) -> list[dict]:
 
 def _persist_warrants(
     db,
-    idea_map: IdeaMap,
+    idea_map: SQLAIdeaMap,
     blocks,
     block_map,
     claim_id: str,
@@ -566,7 +560,9 @@ def _persist_warrants(
         return 0
 
     claims = list(idea_map.claims or [])
-    target_claim = next((claim for claim in claims if claim.get("id") == claim_id), None)
+    target_claim = next(
+        (claim for claim in claims if claim.get("id") == claim_id), None
+    )
     if not target_claim:
         return 0
 
@@ -587,7 +583,8 @@ def _persist_warrants(
             warrant["citation"] = {
                 "startBlockId": citation["startBlockId"],
                 "endBlockId": citation["endBlockId"],
-                "sectionTitle": citation.get("sectionTitle") or start_block.section_title,
+                "sectionTitle": citation.get("sectionTitle")
+                or start_block.section_title,
             }
             valid_warrants.append(warrant)
         else:

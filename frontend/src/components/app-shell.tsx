@@ -2,15 +2,14 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import {
   Newspaper,
-  Search,
   Filter,
   Settings,
+  ListTodo,
+  Loader2,
 } from "lucide-react";
-import { api } from "@/lib/api";
-import type { FeedbackStatus } from "@/lib/api";
+import { useFeedbackStatus, useJobsOverview } from "@/hooks/use-queries";
 import {
   Sidebar,
   SidebarContent,
@@ -20,27 +19,50 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarProvider,
   SidebarInset,
 } from "@/components/ui/sidebar";
 import { type ReactNode } from "react";
+import { cn } from "@/lib/utils";
 
-const NAV_ITEMS = [
-  { label: "Daily", href: "/dashboard/daily", icon: Newspaper },
-  { label: "Filters", href: "/dashboard/filters", icon: Filter },
-  { label: "Search", href: "/dashboard/search", icon: Search },
-  { label: "Settings", href: "/dashboard/settings", icon: Settings },
-];
+const SETTINGS_HREF = "/dashboard/settings";
+const JOBS_HREF = "/dashboard/jobs";
+
+const DAILY_SUB_ITEMS = [
+  { label: "Report", href: "/dashboard/daily/report" },
+  { label: "All Papers", href: "/dashboard/daily/all-papers" },
+] as const;
+
+const REPORT_JOB_KINDS = new Set(["daily_search", "daily_search_summary"]);
+
+function isDailyPath(pathname: string) {
+  return pathname === "/dashboard/daily" || pathname.startsWith("/dashboard/daily/");
+}
+
+function isDailyReportPath(pathname: string) {
+  return pathname === "/dashboard/daily" || pathname === "/dashboard/daily/report";
+}
+
+function isScrollContainedPath(pathname: string) {
+  return (
+    pathname.startsWith("/dashboard/papers/") ||
+    pathname.startsWith("/dashboard/daily/report") ||
+    pathname.startsWith("/dashboard/daily/all-papers")
+  );
+}
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const [feedbackStatus, setFeedbackStatus] = useState<FeedbackStatus | null>(null);
+  const { data: feedbackStatus } = useFeedbackStatus();
+  const { data: jobsOverview } = useJobsOverview();
 
-  useEffect(() => {
-    api.getFeedbackStatus()
-      .then(setFeedbackStatus)
-      .catch(() => {});
-  }, [pathname]);
+  const activeJobs = jobsOverview?.active ?? [];
+  const hasActiveJobs = activeJobs.length > 0;
+  const hasReportJob = activeJobs.some((entry) => REPORT_JOB_KINDS.has(entry.job.kind));
+  const ideaMapCount = activeJobs.filter((entry) => entry.job.kind === "idea_map").length;
 
   const hasPendingFeedback = feedbackStatus
     ? feedbackStatus.pending_votes > 0 || feedbackStatus.pending_notes > 0
@@ -48,38 +70,97 @@ export function AppShell({ children }: { children: ReactNode }) {
   const hasPendingProposals = feedbackStatus
     ? feedbackStatus.pending_proposals > 0
     : false;
+  const shouldContainScroll = isScrollContainedPath(pathname);
 
   return (
-    <SidebarProvider>
+    <SidebarProvider
+      className={cn(shouldContainScroll && "h-svh min-h-0 overflow-hidden")}
+    >
       <Sidebar>
         <SidebarContent>
           <SidebarGroup>
             <SidebarGroupLabel>Paper Search</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {NAV_ITEMS.map((item) => (
-                  <SidebarMenuItem key={item.href}>
-                    <SidebarMenuButton
-                      isActive={pathname === item.href}
-                      render={<Link href={item.href} />}
-                    >
-                      <item.icon className="size-4" />
-                      <span>{item.label}</span>
-                      {item.label === "Filters" && hasPendingProposals && (
-                        <span className="ml-auto inline-flex size-2 rounded-full bg-green-500" />
-                      )}
-                      {item.label === "Filters" && !hasPendingProposals && hasPendingFeedback && (
-                        <span className="ml-auto inline-flex size-2 rounded-full bg-blue-500" />
-                      )}
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={pathname === "/dashboard/filters"}
+                    render={<Link href="/dashboard/filters" />}
+                  >
+                    <Filter className="size-4" />
+                    <span>Filters</span>
+                    {hasPendingProposals && (
+                      <span className="ml-auto inline-flex size-2 rounded-full bg-green-500" />
+                    )}
+                    {!hasPendingProposals && hasPendingFeedback && (
+                      <span className="ml-auto inline-flex size-2 rounded-full bg-blue-500" />
+                    )}
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={isDailyPath(pathname)}
+                    render={<Link href="/dashboard/daily/report" />}
+                  >
+                    <Newspaper className="size-4" />
+                    <span>Daily</span>
+                    {ideaMapCount > 0 && (
+                      <span className="ml-auto rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums">
+                        {ideaMapCount}
+                      </span>
+                    )}
+                  </SidebarMenuButton>
+                  <SidebarMenuSub>
+                    {DAILY_SUB_ITEMS.map((item) => (
+                      <SidebarMenuSubItem key={item.href}>
+                        <SidebarMenuSubButton
+                          isActive={
+                            item.href === "/dashboard/daily/report"
+                              ? isDailyReportPath(pathname)
+                              : pathname === item.href
+                          }
+                          render={<Link href={item.href} />}
+                        >
+                          {item.label}
+                          {item.href === "/dashboard/daily/report" && hasReportJob && (
+                            <Loader2 className="ml-auto size-3.5 animate-spin text-muted-foreground" />
+                          )}
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                    ))}
+                  </SidebarMenuSub>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={pathname === JOBS_HREF}
+                    render={<Link href={JOBS_HREF} />}
+                  >
+                    <ListTodo className="size-4" />
+                    <span>Jobs</span>
+                    {hasActiveJobs && (
+                      <Loader2 className="ml-auto size-3.5 animate-spin text-muted-foreground" />
+                    )}
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={pathname === SETTINGS_HREF}
+                    render={<Link href={SETTINGS_HREF} />}
+                  >
+                    <Settings className="size-4" />
+                    <span>Settings</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
       </Sidebar>
-      <SidebarInset>{children}</SidebarInset>
+      <SidebarInset
+        className={cn(shouldContainScroll && "h-svh min-h-0 overflow-hidden")}
+      >
+        {children}
+      </SidebarInset>
     </SidebarProvider>
   );
 }

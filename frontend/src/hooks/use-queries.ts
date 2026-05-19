@@ -1,10 +1,57 @@
 "use client";
 
 import { useRef } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, FilterDefinition, FilterResponse, PaperMatch } from "@/lib/api";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
+import { api, DailySchedule, FilterDefinition, FilterResponse, PaperMatch } from "@/lib/api";
 
 const ACTIVE_JOB_STATUSES = new Set(["queued", "running"]);
+
+const PENDING_PROPOSAL_STATUSES = new Set([
+  "pending_create",
+  "pending_revision",
+  "pending_deletion",
+]);
+
+export function countProposalFilters(filters: FilterResponse[]): number {
+  return filters.filter(
+    (filter) =>
+      filter.proposed_action &&
+      PENDING_PROPOSAL_STATUSES.has(filter.status)
+  ).length;
+}
+
+export function getAllFiltersFromCache(qc: QueryClient): FilterResponse[] {
+  const entries = qc.getQueriesData<FilterResponse[]>({ queryKey: ["filters"] });
+  const byId = new Map<string, FilterResponse>();
+  for (const [, filters] of entries) {
+    for (const filter of filters ?? []) {
+      byId.set(filter.id, filter);
+    }
+  }
+  return Array.from(byId.values());
+}
+
+export function invalidateFeedbackCompletionQueries(qc: QueryClient) {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ["feedback", "status"] }),
+    qc.invalidateQueries({ queryKey: ["feedback", "items", "pending"] }),
+    qc.invalidateQueries({ queryKey: ["filters"] }),
+    qc.invalidateQueries({ queryKey: ["jobs", "overview"] }),
+  ]);
+}
+
+export function useJobsOverview() {
+  return useQuery({
+    queryKey: ["jobs", "overview"],
+    queryFn: api.getJobsOverview,
+    refetchInterval: 2000,
+  });
+}
 
 export function useJob(id: string | null) {
   return useQuery({
@@ -24,7 +71,7 @@ export function useDailySearchSummaryJob(id: string | null) {
     queryKey: ["jobs", "daily-search-summary", id],
     queryFn: () => api.getDailySearchSummaryJob(id!),
     enabled: !!id,
-    refetchInterval: (query) => (query.state.data?.done ? false : 1000),
+    refetchInterval: (query) => (query.state.data?.done ? false : 500),
   });
 }
 
@@ -247,7 +294,7 @@ export function useRestoreFilter() {
 // Data sources
 export function useDataSources() {
   return useQuery({
-    queryKey: ["data-sources"],
+    queryKey: ["settings", "data-sources"],
     queryFn: api.getDataSources,
   });
 }
@@ -263,8 +310,79 @@ export function useUpdateDataSource() {
       input: { enabled?: boolean; settings?: Record<string, unknown> };
     }) => api.updateDataSource(sourceType, input),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["data-sources"] });
+      qc.invalidateQueries({ queryKey: ["settings", "data-sources"] });
       qc.invalidateQueries({ queryKey: ["search-runs", "daily-candidate-count"] });
+    },
+  });
+}
+
+export function useDailySchedule() {
+  return useQuery({
+    queryKey: ["settings", "daily-schedule"],
+    queryFn: api.getDailySchedule,
+  });
+}
+
+export function useUpdateDailySchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: DailySchedule) => api.updateDailySchedule(data),
+    onSuccess: (schedule) => {
+      qc.setQueryData(["settings", "daily-schedule"], schedule);
+    },
+  });
+}
+
+export function useFeedbackStatus() {
+  return useQuery({
+    queryKey: ["feedback", "status"],
+    queryFn: api.getFeedbackStatus,
+    refetchInterval: 10_000,
+  });
+}
+
+export function usePendingFeedbackItems(enabled: boolean) {
+  return useQuery({
+    queryKey: ["feedback", "items", "pending"],
+    queryFn: api.getPendingFeedbackItems,
+    enabled,
+  });
+}
+
+export function useProcessFeedback() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.processFeedback,
+    onSuccess: () => {
+      return Promise.all([
+        qc.invalidateQueries({ queryKey: ["feedback", "status"] }),
+        qc.invalidateQueries({ queryKey: ["feedback", "items", "pending"] }),
+        qc.invalidateQueries({ queryKey: ["filters"] }),
+        qc.invalidateQueries({ queryKey: ["jobs", "overview"] }),
+      ]);
+    },
+  });
+}
+
+export function useSubmitMatchFeedback() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ matchId, value }: { matchId: string; value: "up" | "down" }) =>
+      api.submitMatchFeedback(matchId, value),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["feedback", "status"] });
+      qc.invalidateQueries({ queryKey: ["feedback", "items", "pending"] });
+    },
+  });
+}
+
+export function useSubmitPaperFeedback() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (paperId: string) => api.submitPaperFeedback(paperId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["feedback", "status"] });
+      qc.invalidateQueries({ queryKey: ["feedback", "items", "pending"] });
     },
   });
 }
@@ -364,6 +482,25 @@ export function usePaperHtml(id: string | null) {
     queryKey: ["papers", id, "html"],
     queryFn: () => api.getPaperHtml(id!),
     enabled: !!id,
+  });
+}
+
+export function usePaperNotes(paperId: string | null) {
+  return useQuery({
+    queryKey: ["papers", paperId, "notes"],
+    queryFn: () => api.getPaperNotes(paperId!),
+    enabled: !!paperId,
+  });
+}
+
+export function useUpdatePaperNotes(paperId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (text: string) => api.updatePaperNotes(paperId, text),
+    onSuccess: (note) => {
+      qc.setQueryData(["papers", paperId, "notes"], note);
+      qc.invalidateQueries({ queryKey: ["feedback", "status"] });
+    },
   });
 }
 

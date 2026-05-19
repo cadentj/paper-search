@@ -1,0 +1,16 @@
+.git
+.venv
+backend/.venv
+backend/data
+backend/.pytest_cache
+backend/__pycache__
+core/.pytest_cache
+data
+frontend/.next
+frontend/node_modules
+__pycache__
+*.pyc
+*.pyo
+*.db
+*.db-shm
+*.db-wal

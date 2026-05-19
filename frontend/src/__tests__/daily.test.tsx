@@ -1,10 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import DailyPage from "@/app/dashboard/daily/page";
+import { DailyProvider } from "@/components/daily/daily-provider";
+import { DailyChrome } from "@/components/daily/daily-chrome";
+import { DailyReportView } from "@/components/daily/daily-report-view";
+import { DailyAllPapersView } from "@/components/daily/daily-all-papers-view";
+
+const mockPathname = vi.hoisted(() => ({ current: "/dashboard/daily/report" }));
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/dashboard/daily",
+  usePathname: () => mockPathname.current,
 }));
 
 const mockApi = vi.hoisted(() => ({
@@ -17,33 +22,84 @@ const mockApi = vi.hoisted(() => ({
   createDailySearchSummary: vi.fn(),
   getDailySearchSummaryJob: vi.fn(),
   getDailyCandidateCount: vi.fn(),
-  getFilters: vi.fn(),
-  createFilter: vi.fn(),
   archiveFilter: vi.fn(),
+  getDailyPapers: vi.fn(),
+  getPaper: vi.fn(),
+  getPaperHtml: vi.fn(),
+  submitPaperFeedback: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
   api: mockApi,
 }));
 
-function renderWithProviders(ui: React.ReactElement) {
+function renderDaily(
+  ui: React.ReactElement,
+  pathname = "/dashboard/daily/report"
+) {
+  mockPathname.current = pathname;
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return render(
+    <QueryClientProvider client={qc}>
+      <DailyProvider>
+        <DailyChrome>{ui}</DailyChrome>
+      </DailyProvider>
+    </QueryClientProvider>
+  );
 }
 
-describe("DailyPage", () => {
+describe("Daily report page", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPathname.current = "/dashboard/daily/report";
     mockApi.getDailyCandidateCount.mockResolvedValue({
       date: "2026-05-18",
       count: 5,
       counts_by_source: { arxiv: 5 },
     });
+    mockApi.getDailyPapers.mockResolvedValue({
+      papers: [
+        {
+          id: "p1",
+          title: "Daily Paper One",
+          authors: ["Author A"],
+          source_type: "arxiv",
+          source_id: "2401.00001",
+          search_text: "Abstract text",
+          created_at: "2026-05-17T19:00:00Z",
+        },
+      ],
+      total: 1,
+      page: 1,
+      per_page: 20,
+    });
+    mockApi.getPaper.mockResolvedValue({
+      id: "p1",
+      title: "Daily Paper One",
+      authors: ["Author A"],
+      source_type: "arxiv",
+      source_id: "2401.00001",
+      search_text: "Full paper text for preview",
+      created_at: "2026-05-17T19:00:00Z",
+    });
+    mockApi.getPaperHtml.mockResolvedValue({ html: null, source_url: null });
+    mockApi.submitPaperFeedback.mockResolvedValue({});
   });
 
-  it("shows loading skeletons when search is running", async () => {
+  it("does not show quick-add filter UI", async () => {
+    mockApi.getLatestSearchRun.mockResolvedValue(null);
+    renderDaily(<DailyReportView />);
+    await waitFor(() => {
+      expect(screen.getByText("Daily")).toBeInTheDocument();
+    });
+    expect(screen.queryByLabelText(/quick add filter/i)).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/quick add a filter/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /run daily search/i })).toBeInTheDocument();
+  });
+
+  it("shows loading state when search is running", async () => {
     mockApi.getLatestSearchRun.mockResolvedValue({
       id: "r1",
       job_id: "j1",
@@ -65,18 +121,7 @@ describe("DailyPage", () => {
           current: 2,
           total: 5,
           message: "Matching filter 1/3: LLM Reasoning",
-          log: [
-            {
-              at: "2026-05-17T19:00:00Z",
-              stage: "fetching_papers",
-              message: "Fetched 50 arXiv papers",
-            },
-            {
-              at: "2026-05-17T19:00:01Z",
-              stage: "matching_filters",
-              message: "Matching filter 1/3: LLM Reasoning",
-            },
-          ],
+          log: [],
         },
         created_at: "2026-05-17T19:00:00Z",
         updated_at: "2026-05-17T19:00:01Z",
@@ -98,11 +143,11 @@ describe("DailyPage", () => {
       next_cursor: "cursor-1",
       done: false,
     });
-    renderWithProviders(<DailyPage />);
+    renderDaily(<DailyReportView />);
     await waitFor(() => {
       expect(screen.getByText(/searching/i)).toBeInTheDocument();
-      expect(screen.getAllByText(/matching filter 1\/3/i).length).toBeGreaterThan(0);
       expect(screen.getByText("40%")).toBeInTheDocument();
+      expect(screen.getByText(/2 \/ 5 evaluations/i)).toBeInTheDocument();
       expect(mockApi.getSearchRunMatches).not.toHaveBeenCalled();
       expect(screen.getByRole("button", { name: /LLM Reasoning/i })).toBeInTheDocument();
     });
@@ -142,28 +187,204 @@ describe("DailyPage", () => {
         paper_source_type: "arxiv",
         paper_source_id: "2401.00001",
         filter_name: "LLM Reasoning",
+        filter_mode: "claim",
       },
     ]);
-    renderWithProviders(<DailyPage />);
+    renderDaily(<DailyReportView />);
     await waitFor(() => {
       expect(screen.getByText(/daily summary/i)).toBeInTheDocument();
       expect(screen.getByText(/today we found interesting papers/i)).toBeInTheDocument();
       expect(
-        screen.getByRole("link", { name: /open citation 1: 2401.00001/i })
+        screen.getByRole("button", { name: /open citation 1: 2401.00001/i })
       ).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /LLM Reasoning/i })).toBeInTheDocument();
+      expect(screen.getByText("Claim")).toBeInTheDocument();
     });
 
     expect(
-      screen.getByRole("link", { name: /open citation 1: 2401.00001/i })
-    ).toHaveAttribute("href", "/dashboard/papers/p1");
+      screen.queryByRole("link", { name: /open citation 1: 2401.00001/i })
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/reasoning evidence/i)).not.toBeInTheDocument();
-
     expect(screen.queryByText("CoT Paper")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /open citation 1: 2401.00001/i }));
+    expect(await screen.findByText("Daily Paper One")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /LLM Reasoning/i }));
     expect(await screen.findByText("CoT Paper")).toBeInTheDocument();
-    expect(screen.queryByLabelText(/mark paper match/i)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/hide paper match/i)).not.toBeInTheDocument();
+  });
+
+  it("recovers in-flight summary job on reload without starting a duplicate", async () => {
+    mockApi.getLatestSearchRun.mockResolvedValue({
+      id: "r1",
+      job_id: "j1",
+      summary_job_id: "s1",
+      status: "running",
+    });
+    mockApi.getSearchRun.mockResolvedValue({
+      id: "r1",
+      job_id: "j1",
+      summary_job_id: "s1",
+      status: "running",
+      match_count: 1,
+    });
+    mockApi.getDailySearchSummaryJob.mockResolvedValue({
+      job: {
+        id: "s1",
+        kind: "daily_search_summary",
+        status: "running",
+        subject_type: "search_run",
+        subject_id: "r1",
+        created_at: "2026-05-17T19:00:00Z",
+        updated_at: "2026-05-17T19:00:01Z",
+      },
+      run: { id: "r1", status: "running", summary_job_id: "s1" },
+      summary: {
+        search_run_id: "r1",
+        summary: "CLAIMS\n\nRecovered partial summary",
+        citations: [],
+      },
+      done: false,
+    });
+
+    renderDaily(<DailyReportView />);
+
+    await waitFor(() => {
+      expect(mockApi.getDailySearchSummaryJob).toHaveBeenCalledWith("s1");
+      expect(screen.getByText(/recovered partial summary/i)).toBeInTheDocument();
+    });
+    expect(mockApi.createDailySearchSummary).not.toHaveBeenCalled();
+  });
+
+  it("shows partial summary while summary job is streaming", async () => {
+    mockApi.getLatestSearchRun.mockResolvedValue({
+      id: "r1",
+      job_id: "j1",
+      summary_job_id: "s1",
+      status: "running",
+    });
+    mockApi.getSearchRun.mockResolvedValue({
+      id: "r1",
+      status: "running",
+      match_count: 1,
+    });
+    mockApi.getDailySearchJob.mockResolvedValue({
+      job: {
+        id: "j1",
+        kind: "daily_search",
+        status: "completed",
+        subject_type: "search_run",
+        subject_id: "r1",
+        created_at: "2026-05-17T19:00:00Z",
+        updated_at: "2026-05-17T19:00:01Z",
+      },
+      subject: {
+        id: "r1",
+        job_id: "j1",
+        summary_job_id: "s1",
+        status: "running",
+      },
+      items: [
+        {
+          id: "m1",
+          search_run_id: "r1",
+          filter_id: "f1",
+          paper_id: "p1",
+          result: "Already found during the run",
+          created_at: "2026-05-17T19:00:00Z",
+          paper_title: "Streaming Match",
+          paper_authors: ["Author A"],
+          filter_name: "LLM Reasoning",
+        },
+      ],
+      done: true,
+    });
+    mockApi.createDailySearchSummary.mockResolvedValue({ job_id: "s1" });
+    mockApi.getDailySearchSummaryJob.mockResolvedValue({
+      job: {
+        id: "s1",
+        kind: "daily_search_summary",
+        status: "running",
+        subject_type: "search_run",
+        subject_id: "r1",
+        created_at: "2026-05-17T19:00:00Z",
+        updated_at: "2026-05-17T19:00:01Z",
+      },
+      run: { id: "r1", status: "running" },
+      summary: {
+        search_run_id: "r1",
+        summary: "CLAIMS\n\nPartial summary text",
+        citations: [],
+      },
+      done: false,
+    });
+
+    renderDaily(<DailyReportView />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/partial summary text/i)).toBeInTheDocument();
+      expect(screen.getByText("Writing…")).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/writing daily summary/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("Daily all papers page", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockApi.getDailyCandidateCount.mockResolvedValue({
+      date: "2026-05-18",
+      count: 5,
+      counts_by_source: { arxiv: 5 },
+    });
+    mockApi.getDailyPapers.mockResolvedValue({
+      papers: [
+        {
+          id: "p1",
+          title: "Daily Paper One",
+          authors: ["Author A"],
+          source_type: "arxiv",
+          source_id: "2401.00001",
+          search_text: "Abstract text",
+          created_at: "2026-05-17T19:00:00Z",
+        },
+      ],
+      total: 1,
+      page: 1,
+      per_page: 20,
+    });
+    mockApi.getPaper.mockResolvedValue({
+      id: "p1",
+      title: "Daily Paper One",
+      authors: ["Author A"],
+      source_type: "arxiv",
+      source_id: "2401.00001",
+      search_text: "Full paper text for preview",
+      created_at: "2026-05-17T19:00:00Z",
+    });
+    mockApi.getPaperHtml.mockResolvedValue({ html: null, source_url: null });
+    mockApi.submitPaperFeedback.mockResolvedValue({});
+    mockApi.getLatestSearchRun.mockResolvedValue(null);
+  });
+
+  it("shows paper list without collapsible and opens preview on click", async () => {
+    renderDaily(<DailyAllPapersView />, "/dashboard/daily/all-papers");
+
+    await waitFor(() => {
+      expect(mockApi.getDailyPapers).toHaveBeenCalled();
+      expect(screen.getByText("Daily Paper One")).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/all papers for/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /run daily search/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /daily paper one/i }));
+
+    await waitFor(() => {
+      expect(mockApi.getPaper).toHaveBeenCalledWith("p1");
+      expect(screen.getByText("Full paper text for preview")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /close preview/i }));
+    expect(screen.queryByText("Full paper text for preview")).not.toBeInTheDocument();
   });
 });

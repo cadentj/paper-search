@@ -1,13 +1,30 @@
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 
+from pydantic import BaseModel
 from sqlalchemy import JSON, Column, DateTime, Text, UniqueConstraint
 
 from paper_search_core.models.base import Base
 from paper_search_core.schemas.daily_search import PaperPayload, paper_item_id
 
 
-class Paper(Base):
+class Paper(BaseModel):
+    id: str
+    source_type: str = "arxiv"
+    source_id: Optional[str] = None
+    title: str
+    search_text: str
+    authors: list
+    published_at: Optional[datetime] = None
+    html_url: Optional[str] = None
+    source_url: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SQLAPaper(Base):
     __tablename__ = "papers"
     __table_args__ = (
         UniqueConstraint("source_type", "source_id", name="uq_papers_source"),
@@ -29,6 +46,9 @@ class Paper(Base):
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
+
+    def to_pydantic(self) -> Paper:
+        return Paper.model_validate(self)
 
     def to_search_payload(self) -> PaperPayload:
         source_type = self.source_type or "arxiv"

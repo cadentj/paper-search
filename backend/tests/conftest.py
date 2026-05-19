@@ -1,5 +1,6 @@
 """Test fixtures for backend tests."""
 
+import importlib
 import os
 
 import pytest
@@ -11,9 +12,10 @@ for _key, _default in (
 ):
     if not os.environ.get(_key, "").strip():
         os.environ[_key] = _default
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 
+from app.db.session import Database
 from app.models.base import Base
 
 
@@ -29,43 +31,88 @@ def db_engine(tmp_path):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA busy_timeout=5000")
         cursor.close()
 
     # Import all models so they register with Base
+    import app.models.app_setting  # noqa: F401
     import app.models.filter
     import app.models.job
-    import app.models.onboarding_extraction
-    import app.models.paper
+    import app.models.onboarding_extraction  # noqa: F401
+    import paper_search_core.models.paper  # noqa: F401
     import app.models.search_run
     import app.models.paper_match
+    import app.models.paper_match_feedback
+    import app.models.paper_note
     import app.models.idea_map
 
     Base.metadata.create_all(bind=engine)
+    from app.services.papers_fts import ensure_papers_fts
+
+    ensure_papers_fts(engine)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT OR IGNORE INTO app_settings (key, value, updated_at)
+                VALUES (
+                    'data_sources',
+                    '{"arxiv": {"enabled": true, "settings": {}}, "lesswrong": {"enabled": false, "settings": {"view": "new"}}}',
+                    datetime('now')
+                )
+                """
+            )
+        )
     yield engine
     engine.dispose()
 
 
 @pytest.fixture
+def test_database(db_engine):
+    """Test Database wrapper around the temporary engine."""
+    return Database(db_engine)
+
+
+@pytest.fixture
 def db_session(db_engine):
-    """Create a database session for testing."""
+    """Long-lived session for test setup assertions (avoids SQLite lock vs workers)."""
     Session = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
     session = Session()
     yield session
     session.close()
 
 
+_WORKER_DATABASE_MODULES = (
+    "app.jobs.dispatcher",
+    "app.jobs.daily_search",
+    "app.jobs.daily_search_summary",
+    "app.jobs.documents",
+    "app.jobs.feedback_reflection",
+    "app.jobs.idea_map",
+    "app.jobs.onboarding",
+    "app.jobs.scholar_import",
+)
+
+
 @pytest.fixture
-def client(db_engine, monkeypatch):
+def patch_worker_database(monkeypatch, test_database):
+    """Point app workers at the test database (patch use-sites, not only session)."""
+    monkeypatch.setattr("app.db.session.database", test_database)
+    for module_name in _WORKER_DATABASE_MODULES:
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            continue
+        monkeypatch.setattr(module, "database", test_database, raising=False)
+
+
+@pytest.fixture
+def client(test_database):
     """Create a FastAPI test client with a test database."""
-    from sqlalchemy.orm import sessionmaker
-    Session = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
 
     def override_get_db():
-        db = Session()
-        try:
+        with test_database.session() as db:
             yield db
-        finally:
-            db.close()
 
     # Must import after engine setup
     from app.main import app
@@ -73,6 +120,6 @@ def client(db_engine, monkeypatch):
     from fastapi.testclient import TestClient
 
     app.dependency_overrides[get_db] = override_get_db
-    client = TestClient(app)
-    yield client
+    test_client = TestClient(app)
+    yield test_client
     app.dependency_overrides.clear()

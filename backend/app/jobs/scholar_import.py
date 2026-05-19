@@ -1,16 +1,18 @@
 """Scholar profile import worker job."""
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
 
-from app.db.session import SessionLocal
-from app.models.filter import Filter
-from app.models.job import Job
-from app.models.research_profile_import import ResearchProfileImport
+from sqlalchemy.orm import Session
+
+from app.models.filter import SQLAFilter
+from app.models.job import SQLAJob
+from app.models.research_profile_import import SQLAResearchProfileImport
 from app.services.jobs import set_job_status
 from app.services.semantic_scholar import get_author_papers, build_publications_text
-from app.llm.client import call_llm
+from app.llm.client import async_call_llm
 from app.llm.config import FILTER_GENERATION_PROFILE
 from app.llm.prompts import SCHOLAR_PROFILE_SYSTEM_PROMPT, SCHOLAR_PROFILE_USER_PROMPT
 from app.llm.schemas import OnboardingFiltersResponse
@@ -18,17 +20,19 @@ from app.llm.schemas import OnboardingFiltersResponse
 logger = logging.getLogger(__name__)
 
 
-def run_scholar_import(import_id: str, job_id: str) -> None:
-    db = SessionLocal()
+def run(db: Session, job: SQLAJob) -> None:
+    import_id = job.subject_id
+    if not import_id:
+        return
+
     try:
-        job = db.query(Job).filter(Job.id == job_id).first()
-        if not job:
-            return
         set_job_status(job, status="running")
 
-        profile_import = db.query(ResearchProfileImport).filter(
-            ResearchProfileImport.id == import_id
-        ).first()
+        profile_import = (
+            db.query(SQLAResearchProfileImport)
+            .filter(SQLAResearchProfileImport.id == import_id)
+            .first()
+        )
         if not profile_import:
             set_job_status(job, status="failed", error="Import not found")
             db.commit()
@@ -47,7 +51,11 @@ def run_scholar_import(import_id: str, job_id: str) -> None:
 
         papers = get_author_papers(author_id)
         profile_import.publications = [
-            {"title": p.get("title"), "year": p.get("year"), "abstract": (p.get("abstract") or "")[:300]}
+            {
+                "title": p.get("title"),
+                "year": p.get("year"),
+                "abstract": (p.get("abstract") or "")[:300],
+            }
             for p in papers
         ]
         db.commit()
@@ -61,7 +69,7 @@ def run_scholar_import(import_id: str, job_id: str) -> None:
         publications_text = build_publications_text(papers)
         fields = set()
         for p in papers:
-            for f in (p.get("fieldsOfStudy") or []):
+            for f in p.get("fieldsOfStudy") or []:
                 fields.add(f)
 
         user_prompt = SCHOLAR_PROFILE_USER_PROMPT.format(
@@ -70,18 +78,20 @@ def run_scholar_import(import_id: str, job_id: str) -> None:
             publications_text=publications_text,
         )
 
-        result = call_llm(
-            system_prompt=SCHOLAR_PROFILE_SYSTEM_PROMPT,
-            user_prompt=user_prompt,
-            response_model=OnboardingFiltersResponse,
-            profile=FILTER_GENERATION_PROFILE,
+        result = asyncio.run(
+            async_call_llm(
+                system_prompt=SCHOLAR_PROFILE_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                response_model=OnboardingFiltersResponse,
+                profile=FILTER_GENERATION_PROFILE,
+            )
         )
 
         proposed = result["content"].get("proposedFilters", [])
         now = datetime.now(timezone.utc)
 
         for raw in proposed[:10]:
-            filt = Filter(
+            filter = SQLAFilter(
                 id=str(uuid.uuid4()),
                 name=raw.get("name", "Unnamed Filter"),
                 definition={
@@ -94,7 +104,7 @@ def run_scholar_import(import_id: str, job_id: str) -> None:
                 created_at=now,
                 updated_at=now,
             )
-            db.add(filt)
+            db.add(filter)
 
         profile_import.status = "completed"
         set_job_status(job, status="completed")
@@ -102,16 +112,14 @@ def run_scholar_import(import_id: str, job_id: str) -> None:
 
     except Exception as e:
         db.rollback()
-        profile_import = db.query(ResearchProfileImport).filter(
-            ResearchProfileImport.id == import_id
-        ).first()
+        profile_import = (
+            db.query(SQLAResearchProfileImport)
+            .filter(SQLAResearchProfileImport.id == import_id)
+            .first()
+        )
         if profile_import:
             profile_import.status = "failed"
             profile_import.error = str(e)
-        job = db.query(Job).filter(Job.id == job_id).first()
-        if job:
-            set_job_status(job, status="failed", error=str(e))
+        set_job_status(job, status="failed", error=str(e))
         db.commit()
         logger.exception("scholar_import import=%s failed", import_id)
-    finally:
-        db.close()

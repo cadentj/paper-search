@@ -1,25 +1,21 @@
 """Backend unit tests."""
 
 import pytest
+from bs4 import BeautifulSoup
+from pydantic import ValidationError
 
-from app.services.html_parser import (
+from app.llm.schemas import (
+    CreateFeedbackAction,
+    DeleteFeedbackAction,
+    FeedbackReflectionResponse,
+    ReviseFeedbackAction,
+)
+from app.utils.html_parser import (
     blocks_to_prompt_text,
     parse_arxiv_html,
     prepare_arxiv_html_for_viewer,
     validate_citation,
 )
-
-
-class TestPublicR2IndexHelpers:
-    def test_has_searchable_text(self):
-        from app.services.public_r2_index import has_searchable_text
-
-        assert has_searchable_text({"abstract": "x"}, text_fields=("abstract",))
-        assert not has_searchable_text({"abstract": " "}, text_fields=("abstract",))
-        assert has_searchable_text(
-            {"text_preview": "", "excerpt": "hi"},
-            text_fields=("text_preview", "excerpt"),
-        )
 
 
 class TestHtmlParser:
@@ -48,7 +44,9 @@ class TestHtmlParser:
             assert b.text
             assert len(b.text) >= 10
         sections = [b.section_title for b in blocks if b.section_title]
-        assert any("Introduction" in s for s in sections) or any("Methods" in s for s in sections)
+        assert any("Introduction" in s for s in sections) or any(
+            "Methods" in s for s in sections
+        )
         assert blocks[0].html_anchor == "#title"
 
     def test_prepares_viewer_html_with_canonical_block_markers(self):
@@ -56,6 +54,48 @@ class TestHtmlParser:
         assert 'data-paper-block-id="B000"' in html
         assert 'data-paper-block-id="B001"' in html
         assert 'id="title"' in html
+
+    def test_prepares_viewer_html_removes_arxiv_chrome(self):
+        source = """
+        <html>
+        <head><title>Paper</title></head>
+        <body>
+            <header class="arxiv-html-header">arXiv header</header>
+            <nav class="arxiv-navbar">arXiv nav</nav>
+            <article>
+                <h1 id="title">A Paper Title With Enough Text</h1>
+                <p id="para1">This paragraph has enough text to become addressable.</p>
+            </article>
+            <div id="beta-badge">BETA</div>
+        </body>
+        </html>
+        """
+        html = prepare_arxiv_html_for_viewer(source)
+
+        assert "arxiv-html-header" not in html
+        assert "arxiv-navbar" not in html
+        assert 'id="beta-badge"' not in html
+        assert "A Paper Title With Enough Text" in html
+
+    def test_prepares_viewer_html_replaces_existing_base(self):
+        source = """
+        <html>
+        <head><base href="https://r2.example/data/2012/2012.14425.html"></head>
+        <body>
+            <base href="https://r2.example/duplicate-base.html">
+            <p id="para1">This paragraph has enough text to become addressable.</p>
+        </body>
+        </html>
+        """
+        html = prepare_arxiv_html_for_viewer(
+            source,
+            "https://arxiv.org/html/2012.14425",
+        )
+        soup = BeautifulSoup(html, "lxml")
+        bases = soup.select("base")
+
+        assert len(bases) == 1
+        assert bases[0]["href"] == "https://arxiv.org/html/2012.14425"
 
 
 class TestCitationValidation:
@@ -68,32 +108,45 @@ class TestCitationValidation:
 
     def test_accepts_valid_block_ranges(self):
         blocks = parse_arxiv_html(self.SAMPLE_HTML)
-        assert validate_citation(
-            blocks, {"startBlockId": "B000", "endBlockId": "B000"}
-        ) is True
-        assert validate_citation(
-            blocks, {"startBlockId": "B000", "endBlockId": "B001"}
-        ) is True
+        assert (
+            validate_citation(blocks, {"startBlockId": "B000", "endBlockId": "B000"})
+            is True
+        )
+        assert (
+            validate_citation(blocks, {"startBlockId": "B000", "endBlockId": "B001"})
+            is True
+        )
 
     def test_rejects_invalid_block_ranges(self):
         blocks = parse_arxiv_html(self.SAMPLE_HTML)
-        assert validate_citation(
-            blocks, {"startBlockId": "nonexistent", "endBlockId": "B001"}
-        ) is False
-        assert validate_citation(
-            blocks, {"startBlockId": "B000", "endBlockId": "nonexistent"}
-        ) is False
-        assert validate_citation(
-            blocks, {"startBlockId": "B001", "endBlockId": "B000"}
-        ) is False
+        assert (
+            validate_citation(
+                blocks, {"startBlockId": "nonexistent", "endBlockId": "B001"}
+            )
+            is False
+        )
+        assert (
+            validate_citation(
+                blocks, {"startBlockId": "B000", "endBlockId": "nonexistent"}
+            )
+            is False
+        )
+        assert (
+            validate_citation(blocks, {"startBlockId": "B001", "endBlockId": "B000"})
+            is False
+        )
 
 
 class TestBlocksToPromptText:
     def test_converts_blocks_to_text_and_respects_limit(self):
-        html = "<html><body>" + "".join(
-            f"<p id='p{i}'>This is paragraph number {i} with enough text to pass the filter.</p>"
-            for i in range(20)
-        ) + "</body></html>"
+        html = (
+            "<html><body>"
+            + "".join(
+                f"<p id='p{i}'>This is paragraph number {i} with enough text to pass the filter.</p>"
+                for i in range(20)
+            )
+            + "</body></html>"
+        )
         blocks = parse_arxiv_html(html)
         text = blocks_to_prompt_text(blocks, max_blocks=5)
         lines = [l for l in text.split("\n\n") if l.strip()]
@@ -121,8 +174,8 @@ class TestLLMClient:
         assert filter_generation.provider == "cerebras"
         assert judge.model == "deepseek/deepseek-v4-flash"
         assert judge.provider == "novita"
-        assert idea_map.model == "deepseek/deepseek-v4-flash"
-        assert idea_map.provider == "novita"
+        assert idea_map.model == "openai/gpt-oss-120b"
+        assert idea_map.provider == "cerebras"
         assert summary.model == "deepseek/deepseek-v4-flash"
         assert summary.provider == "novita"
 
@@ -148,13 +201,13 @@ class TestLLMClient:
 
         from app.llm import client as llm_client
         from app.llm.config import FILTER_GENERATION_PROFILE
-        from app.llm.schemas import FilterSearchResponse
+        from app.llm.schemas import TopicFilterSearchResponse
 
         request = httpx.Request("POST", "https://openrouter.ai/api/v1/responses")
         attempts = {"count": 0}
         parse_calls = []
 
-        parsed = FilterSearchResponse(matches=[])
+        parsed = TopicFilterSearchResponse(matches=[])
         parsed_response = SimpleNamespace(
             id="response-id",
             model="test-model",
@@ -184,25 +237,141 @@ class TestLLMClient:
             async def __aexit__(self, *args):
                 return None
 
+        import asyncio
+
         async def fake_sleep(delay):
             return None
 
         monkeypatch.setattr(llm_client.settings, "OPENROUTER_API_KEY", "test-key")
         monkeypatch.setattr(llm_client, "LLM_MAX_RETRIES", 1)
         monkeypatch.setattr(llm_client, "LLM_RETRY_BASE_SECONDS", 0)
-        monkeypatch.setattr(llm_client.asyncio, "sleep", fake_sleep)
+        monkeypatch.setattr(asyncio, "sleep", fake_sleep)
         monkeypatch.setattr(llm_client, "_async_client", lambda: FakeAsyncClient())
 
         result = await llm_client.async_call_llm(
             "system",
             "user",
-            response_model=FilterSearchResponse,
+            response_model=TopicFilterSearchResponse,
             profile=FILTER_GENERATION_PROFILE,
         )
 
         assert attempts["count"] == 2
         assert parse_calls[0]["model"] == "openai/gpt-oss-120b"
         assert parse_calls[0]["extra_body"] == {"provider": {"order": ["cerebras"]}}
-        assert parse_calls[0]["text_format"] is FilterSearchResponse
+        assert parse_calls[0]["text_format"] is TopicFilterSearchResponse
         assert result["content"] == {"matches": []}
         assert result["model"] == "test-model"
+
+    @pytest.mark.asyncio
+    async def test_async_call_llm_retries_structured_parse_validation(
+        self, monkeypatch
+    ):
+        from types import SimpleNamespace
+
+        from app.llm import client as llm_client
+        from app.llm.config import FILTER_GENERATION_PROFILE
+
+        attempts = {"count": 0}
+        parsed = FeedbackReflectionResponse(actions=[])
+        parsed_response = SimpleNamespace(
+            id="response-id",
+            model="test-model",
+            output=[
+                SimpleNamespace(
+                    content=[
+                        SimpleNamespace(parsed=parsed),
+                    ]
+                )
+            ],
+        )
+
+        class FakeResponses:
+            async def parse(self, **kwargs):
+                attempts["count"] += 1
+                if attempts["count"] == 1:
+                    FeedbackReflectionResponse.model_validate(-float("inf"))
+                return parsed_response
+
+        class FakeAsyncClient:
+            responses = FakeResponses()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+        import asyncio
+
+        async def fake_sleep(delay):
+            return None
+
+        monkeypatch.setattr(llm_client.settings, "OPENROUTER_API_KEY", "test-key")
+        monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+        monkeypatch.setattr(llm_client, "_async_client", lambda: FakeAsyncClient())
+
+        result = await llm_client.async_call_llm(
+            "system",
+            "user",
+            response_model=FeedbackReflectionResponse,
+            profile=FILTER_GENERATION_PROFILE,
+        )
+
+        assert attempts["count"] == 2
+        assert result["content"] == {"actions": []}
+        assert result["model"] == "test-model"
+
+
+class TestFeedbackReflectionSchema:
+    def test_parses_create_revise_and_delete_actions(self):
+        reflection = FeedbackReflectionResponse.model_validate(
+            {
+                "actions": [
+                    {
+                        "action": "create",
+                        "name": "New topic",
+                        "description": "Papers on X",
+                        "mode": "topic",
+                    },
+                    {
+                        "action": "revise",
+                        "name": "Updated",
+                        "description": "Broader scope",
+                        "mode": "claim",
+                        "target_filter_id": "filter-1",
+                    },
+                    {
+                        "action": "delete",
+                        "target_filter_id": "filter-2",
+                    },
+                ]
+            }
+        )
+
+        assert isinstance(reflection.actions[0], CreateFeedbackAction)
+        assert isinstance(reflection.actions[1], ReviseFeedbackAction)
+        assert isinstance(reflection.actions[2], DeleteFeedbackAction)
+
+    def test_rejects_create_without_required_fields(self):
+        with pytest.raises(ValidationError):
+            FeedbackReflectionResponse.model_validate(
+                {
+                    "actions": [
+                        {"action": "create", "name": "Incomplete", "mode": "topic"}
+                    ]
+                }
+            )
+
+    def test_rejects_delete_with_filter_definition_fields(self):
+        with pytest.raises(ValidationError):
+            FeedbackReflectionResponse.model_validate(
+                {
+                    "actions": [
+                        {
+                            "action": "delete",
+                            "target_filter_id": "filter-1",
+                            "name": "Should not be here",
+                        }
+                    ]
+                }
+            )

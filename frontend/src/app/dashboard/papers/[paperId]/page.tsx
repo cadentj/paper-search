@@ -12,6 +12,8 @@ import {
   useIdeaMap,
   useGenerateIdeaMap,
   useIdeaMapJob,
+  usePaperNotes,
+  useUpdatePaperNotes,
 } from "@/hooks/use-queries";
 import {
   Loader2,
@@ -24,7 +26,6 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { IdeaMap, IdeaMapClaim, IdeaMapWarrant, Job, Paper } from "@/lib/api";
-import { api } from "@/lib/api";
 import { Textarea } from "@/components/ui/textarea";
 
 const BLOCK_SELECTOR = "[data-paper-block-id]";
@@ -77,7 +78,7 @@ function PaperHeader({
   const sourceLabel = paper?.source_type === "lesswrong" ? "LessWrong" : "arXiv";
 
   return (
-    <div className="flex items-center gap-3 p-4 border-b">
+    <div className="flex shrink-0 items-center gap-3 border-b p-4">
       <Button variant="ghost" size="sm" aria-label="Go back" onClick={onBack}>
         <ArrowLeft className="size-4" />
       </Button>
@@ -137,8 +138,8 @@ function IdeaMapPanel({
 }) {
   if (!supportsIdeaMap) {
     return (
-      <div className="w-96 border-r flex flex-col">
-        <div className="p-3 border-b">
+      <div className="flex min-h-0 w-96 shrink-0 flex-col overflow-hidden border-r">
+        <div className="shrink-0 border-b p-3">
           <h2 className="text-sm font-semibold">Idea Map</h2>
         </div>
         <CenteredMessage>
@@ -169,8 +170,8 @@ function IdeaMapPanel({
         : "Generating idea map…";
 
   return (
-    <div className="w-96 border-r flex flex-col">
-      <div className="p-3 border-b flex items-center justify-between">
+    <div className="flex min-h-0 w-96 shrink-0 flex-col overflow-hidden border-r">
+      <div className="flex shrink-0 items-center justify-between border-b p-3">
         <h2 className="text-sm font-semibold">Idea Map</h2>
         {!ideaMap && !hasIdeaMapError && !isLoading && (
           <GenerateButton
@@ -188,7 +189,7 @@ function IdeaMapPanel({
         )}
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1 overflow-hidden">
         <div className="p-3 space-y-2">
           {isLoading && (
             <IdeaMapLoading label={loadingLabel} showSkeletons={!hasClaims} />
@@ -400,46 +401,38 @@ function IdeaMapWarrantButton({
       onClick={() => onWarrantClick(warrant)}
     >
       <p className="leading-snug">{warrant.text}</p>
-      {warrant.citation?.sectionTitle && (
-        <Badge variant="outline" className="mt-1 text-xs">
-          {warrant.citation.sectionTitle}
-        </Badge>
-      )}
     </button>
   );
 }
 
 function PaperNotesPanel({ paperId }: { paperId: string }) {
-  const [text, setText] = useState("");
-  const [loaded, setLoaded] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const { data: note, isLoading } = usePaperNotes(paperId);
+  const updateNotes = useUpdatePaperNotes(paperId);
+  const [draft, setDraft] = useState<{
+    paperId: string;
+    text: string;
+  } | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const text = draft?.paperId === paperId ? draft.text : note?.text ?? "";
 
-  useEffect(() => {
-    api.getPaperNotes(paperId).then((note) => {
-      if (note) setText(note.text);
-      setLoaded(true);
-    }).catch(() => setLoaded(true));
-  }, [paperId]);
+  useEffect(
+    () => () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    },
+    []
+  );
 
   const handleChange = (value: string) => {
-    setText(value);
+    setDraft({ paperId, text: value });
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(async () => {
-      setSaving(true);
-      try {
-        await api.updatePaperNotes(paperId, value);
-      } catch {
-        // ignore
-      } finally {
-        setSaving(false);
-      }
+    saveTimeoutRef.current = setTimeout(() => {
+      updateNotes.mutate(value);
     }, 1000);
   };
 
   return (
-    <div className="border-t flex flex-col">
+    <div className="flex shrink-0 flex-col border-t">
       <button
         className="flex items-center gap-2 p-2 text-sm font-semibold hover:bg-muted/50"
         onClick={() => setCollapsed(!collapsed)}
@@ -447,9 +440,11 @@ function PaperNotesPanel({ paperId }: { paperId: string }) {
         {collapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
         <StickyNote className="size-3.5" />
         Notes
-        {saving && <span className="text-xs text-muted-foreground ml-auto">Saving...</span>}
+        {updateNotes.isPending && (
+          <span className="text-xs text-muted-foreground ml-auto">Saving…</span>
+        )}
       </button>
-      {!collapsed && loaded && (
+      {!collapsed && !isLoading && (
         <div className="p-2 space-y-2">
           <Textarea
             value={text}
@@ -480,7 +475,7 @@ function PaperHtmlViewer({
         ref={iframeRef}
         srcDoc={htmlData.html}
         title="Paper HTML"
-        className="flex-1 w-full border-0"
+        className="min-h-0 flex-1 w-full border-0"
         sandbox="allow-same-origin"
       />
     );
@@ -488,7 +483,7 @@ function PaperHtmlViewer({
 
   if (htmlData?.source_url) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex min-h-0 flex-1 items-center justify-center">
         <div className="text-center space-y-2">
           <p className="text-sm text-muted-foreground">HTML not available yet.</p>
           <Button
@@ -512,7 +507,7 @@ function PaperHtmlViewer({
   }
 
   return (
-    <div className="flex-1 flex items-center justify-center">
+    <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto">
       <p className="text-sm text-muted-foreground">
         {paper?.search_text || "Loading paper…"}
       </p>
@@ -615,9 +610,9 @@ export default function PaperDetailPage({
   };
 
   return (
-    <div className="flex-1 flex flex-col h-screen">
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
       <PaperHeader paper={paper} onBack={back} />
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         <IdeaMapPanel
           supportsIdeaMap={paper?.source_type !== "lesswrong"}
           ideaMap={ideaMap}
@@ -634,7 +629,7 @@ export default function PaperDetailPage({
           onToggleClaim={toggleClaim}
           onWarrantClick={handleWarrantClick}
         />
-        <div className="flex-1 flex flex-col">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <PaperHtmlViewer
             paper={paper}
             htmlData={htmlData}

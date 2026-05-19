@@ -1,146 +1,89 @@
-import uuid
-from datetime import datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.filter import Filter
-from app.schemas.filters import FilterCreate, FilterUpdate, FilterResponse
+from app.services import filters as filter_service
 
 router = APIRouter(prefix="/filters", tags=["filters"])
 
 
-@router.get("", response_model=list[FilterResponse])
+class FilterDefinition(BaseModel):
+    name: str
+    description: str
+    mode: Literal["claim", "topic"] = "topic"
+
+
+class FilterCreate(BaseModel):
+    name: str
+    definition: FilterDefinition
+
+
+class FilterUpdate(BaseModel):
+    name: Optional[str] = None
+    definition: Optional[FilterDefinition] = None
+
+
+@router.get("", response_model=list[Filter])
 def list_filters(
     status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    query = db.query(Filter)
-    if status:
-        query = query.filter(Filter.status == status)
-    query = query.order_by(Filter.created_at.desc())
-    return [filt.to_pydantic() for filt in query.all()]
+    return [
+        filter.to_pydantic()
+        for filter in filter_service.list_filters(db, status=status)
+    ]
 
 
-@router.post("", response_model=FilterResponse)
+@router.post("", response_model=Filter)
 def create_filter(body: FilterCreate, db: Session = Depends(get_db)):
-    now = datetime.now(timezone.utc)
-    filt = Filter(
-        id=str(uuid.uuid4()),
-        name=body.name,
-        definition=body.definition.model_dump(),
-        status="active",
-        created_at=now,
-        updated_at=now,
-    )
-    db.add(filt)
-    db.commit()
-    db.refresh(filt)
-    return filt.to_pydantic()
+    filter = filter_service.create_filter(db, body)
+    return filter.to_pydantic()
 
 
-@router.patch("/{filter_id}", response_model=FilterResponse)
+@router.patch("/{filter_id}", response_model=Filter)
 def update_filter(filter_id: str, body: FilterUpdate, db: Session = Depends(get_db)):
-    filt = db.query(Filter).filter(Filter.id == filter_id).first()
-    if not filt:
-        raise HTTPException(status_code=404, detail="Filter not found")
-
-    if body.name is not None:
-        filt.name = body.name
-    if body.definition is not None:
-        filt.definition = body.definition.model_dump()
-        filt.name = body.definition.name
-
-    filt.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(filt)
-    return filt.to_pydantic()
+    try:
+        filter = filter_service.update_filter(db, filter_id, body)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return filter.to_pydantic()
 
 
-@router.post("/{filter_id}/archive", response_model=FilterResponse)
+@router.post("/{filter_id}/archive", response_model=Filter)
 def archive_filter(filter_id: str, db: Session = Depends(get_db)):
-    filt = db.query(Filter).filter(Filter.id == filter_id).first()
-    if not filt:
-        raise HTTPException(status_code=404, detail="Filter not found")
-
-    filt.status = "archived"
-    filt.archived_at = datetime.now(timezone.utc)
-    filt.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(filt)
-    return filt.to_pydantic()
+    try:
+        filter = filter_service.archive_filter(db, filter_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return filter.to_pydantic()
 
 
-@router.post("/{filter_id}/restore", response_model=FilterResponse)
+@router.post("/{filter_id}/restore", response_model=Filter)
 def restore_filter(filter_id: str, db: Session = Depends(get_db)):
-    filt = db.query(Filter).filter(Filter.id == filter_id).first()
-    if not filt:
-        raise HTTPException(status_code=404, detail="Filter not found")
-
-    filt.status = "active"
-    filt.archived_at = None
-    filt.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(filt)
-    return filt.to_pydantic()
+    try:
+        filter = filter_service.restore_filter(db, filter_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return filter.to_pydantic()
 
 
-@router.post("/{filter_id}/accept", response_model=FilterResponse)
+@router.post("/{filter_id}/accept", response_model=Filter)
 def accept_proposal(filter_id: str, db: Session = Depends(get_db)):
-    filt = db.query(Filter).filter(Filter.id == filter_id).first()
-    if not filt:
-        raise HTTPException(status_code=404, detail="Filter not found")
-
-    now = datetime.now(timezone.utc)
-
-    if filt.proposed_action == "create":
-        filt.status = "active"
-        filt.proposed_action = None
-        filt.updated_at = now
-
-    elif filt.proposed_action == "revise" and filt.target_filter_id:
-        target = db.query(Filter).filter(Filter.id == filt.target_filter_id).first()
-        if target:
-            target.definition = dict(filt.definition or {})
-            target.name = filt.name
-            target.updated_at = now
-        filt.status = "archived"
-        filt.archived_at = now
-        filt.updated_at = now
-
-    elif filt.proposed_action == "delete" and filt.target_filter_id:
-        target = db.query(Filter).filter(Filter.id == filt.target_filter_id).first()
-        if target:
-            target.status = "archived"
-            target.archived_at = now
-            target.updated_at = now
-        filt.status = "archived"
-        filt.archived_at = now
-        filt.updated_at = now
-
-    else:
-        raise HTTPException(status_code=400, detail="Not a pending proposal")
-
-    db.commit()
-    db.refresh(filt)
-    return filt.to_pydantic()
+    try:
+        filter = filter_service.accept_proposal(db, filter_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return filter.to_pydantic()
 
 
-@router.post("/{filter_id}/reject", response_model=FilterResponse)
+@router.post("/{filter_id}/reject", response_model=Filter)
 def reject_proposal(filter_id: str, db: Session = Depends(get_db)):
-    filt = db.query(Filter).filter(Filter.id == filter_id).first()
-    if not filt:
-        raise HTTPException(status_code=404, detail="Filter not found")
-
-    if not filt.proposed_action:
-        raise HTTPException(status_code=400, detail="Not a pending proposal")
-
-    now = datetime.now(timezone.utc)
-    filt.status = "archived"
-    filt.archived_at = now
-    filt.updated_at = now
-    db.commit()
-    db.refresh(filt)
-    return filt.to_pydantic()
+    try:
+        filter = filter_service.reject_proposal(db, filter_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return filter.to_pydantic()
