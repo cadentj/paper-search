@@ -42,8 +42,15 @@ class SQLAOnboardingExtraction(Base):
     llm_model = Column(Text, nullable=True)
     llm_response_id = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
     completed_at = Column(DateTime, nullable=True)
 
     def to_pydantic(self, *, job_id: str | None = None) -> OnboardingExtraction:

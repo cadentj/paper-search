@@ -65,7 +65,9 @@ class TestOnboarding:
         assert status["completed"] is True
         assert status["active_filter_count"] == 1
 
-    def test_create_extraction_fails_fast_when_queue_unavailable(self, client, monkeypatch):
+    def test_create_extraction_fails_fast_when_queue_unavailable(
+        self, client, monkeypatch
+    ):
         def broken_queue():
             raise RuntimeError("redis unavailable")
 
@@ -205,7 +207,9 @@ class TestSearchRuns:
         assert summary_resp.status_code == 400
         assert "complete" in summary_resp.json()["detail"].lower()
 
-    def test_create_daily_run_fails_fast_when_queue_unavailable(self, client, monkeypatch):
+    def test_create_daily_run_fails_fast_when_queue_unavailable(
+        self, client, monkeypatch
+    ):
         self._setup_filters(client)
 
         def broken_queue():
@@ -255,4 +259,3 @@ class TestPapers:
         idea_map = client.get("/papers/paper-1/idea-map").json()
         assert idea_map["status"] == "failed"
         assert "Could not enqueue idea map" in idea_map["error"]
-

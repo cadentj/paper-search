@@ -36,7 +36,11 @@ def summarize_daily_search(search_run_id: str, job_id: str | None = None) -> Non
 
     with database.session() as db:
         try:
-            run = db.query(SQLASearchRun).filter(SQLASearchRun.id == search_run_id).first()
+            run = (
+                db.query(SQLASearchRun)
+                .filter(SQLASearchRun.id == search_run_id)
+                .first()
+            )
             if not run:
                 return
             job = search_runs.resolve_summary_job(db, search_run_id, job_id)
@@ -44,7 +48,9 @@ def summarize_daily_search(search_run_id: str, job_id: str | None = None) -> Non
 
             match_payloads = search_runs.match_payloads_for_run(db, search_run_id)
             if match_payloads:
-                matches_text = "\n---\n".join(p.model_dump_json() for p in match_payloads)
+                matches_text = "\n---\n".join(
+                    p.model_dump_json() for p in match_payloads
+                )
                 user_prompt = SUMMARY_USER_PROMPT.format(matches_text=matches_text)
                 result = call_llm(
                     system_prompt=SUMMARY_SYSTEM_PROMPT,
@@ -66,11 +72,17 @@ def summarize_daily_search(search_run_id: str, job_id: str | None = None) -> Non
 
         except Exception as e:
             db.rollback()
-            run = db.query(SQLASearchRun).filter(SQLASearchRun.id == search_run_id).first()
+            run = (
+                db.query(SQLASearchRun)
+                .filter(SQLASearchRun.id == search_run_id)
+                .first()
+            )
             if run:
                 run.error = str(e)
                 run.completed_at = datetime.now(timezone.utc)
                 job = search_runs.resolve_summary_job(db, search_run_id, job_id)
-                search_runs.set_summary_status(db, run, job, status="failed", error=run.error)
+                search_runs.set_summary_status(
+                    db, run, job, status="failed", error=run.error
+                )
             logger.exception("daily_search_summary run=%s failed", search_run_id)
             raise

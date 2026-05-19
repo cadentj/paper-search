@@ -10,7 +10,12 @@ from app.models.document import SQLADocument
 from app.models.job import SQLAJob
 from app.services.errors import NotFound
 from app.services.job_enqueue import persist_then_enqueue
-from app.services.jobs import create_job, job_progress, latest_job_for_subject, set_job_status
+from app.services.jobs import (
+    create_job,
+    job_progress,
+    latest_job_for_subject,
+    set_job_status,
+)
 
 
 def get_document(db: Session, document_id: str) -> SQLADocument:
@@ -91,7 +96,9 @@ def mark_document_processing(db: Session, document: SQLADocument, job: SQLAJob) 
     db.commit()
 
 
-def complete_document_needs_ocr(db: Session, document: SQLADocument, job: SQLAJob, error: str) -> None:
+def complete_document_needs_ocr(
+    db: Session, document: SQLADocument, job: SQLAJob, error: str
+) -> None:
     document.status = "needs_ocr"
     document.error = error
     set_job_status(job, status="completed")
@@ -102,7 +109,9 @@ def commit_document_progress(db: Session) -> None:
     db.commit()
 
 
-def complete_document(db: Session, document: SQLADocument, job: SQLAJob, *, summary: str) -> None:
+def complete_document(
+    db: Session, document: SQLADocument, job: SQLAJob, *, summary: str
+) -> None:
     document.summary = summary
     document.status = "ready"
     document.error = None
@@ -111,7 +120,9 @@ def complete_document(db: Session, document: SQLADocument, job: SQLAJob, *, summ
     db.commit()
 
 
-def fail_document(db: Session, document: SQLADocument | None, job: SQLAJob | None, error: str) -> None:
+def fail_document(
+    db: Session, document: SQLADocument | None, job: SQLAJob | None, error: str
+) -> None:
     now = datetime.now(timezone.utc)
     if document:
         document.status = "failed"

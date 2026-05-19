@@ -7,7 +7,10 @@ from typing import TYPE_CHECKING
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.jobs.onboarding import extract_onboarding_filters, generate_onboarding_draft_filters
+from app.jobs.onboarding import (
+    extract_onboarding_filters,
+    generate_onboarding_draft_filters,
+)
 from app.jobs.queues import enqueue_for_job
 from app.jobs.scholar_import import run_scholar_import
 from app.models.filter import SQLAFilter
@@ -22,9 +25,7 @@ if TYPE_CHECKING:
 
 
 def onboarding_status(db: Session) -> tuple[bool, int]:
-    active_count = (
-        db.query(SQLAFilter).filter(SQLAFilter.status == "active").count()
-    )
+    active_count = db.query(SQLAFilter).filter(SQLAFilter.status == "active").count()
     return active_count > 0, active_count
 
 
@@ -155,7 +156,9 @@ def promote_draft_filters(db: Session, filter_ids: list[str]) -> list[SQLAFilter
     return ordered
 
 
-def complete_onboarding(db: Session, body: OnboardingCompleteRequest) -> list[SQLAFilter]:
+def complete_onboarding(
+    db: Session, body: OnboardingCompleteRequest
+) -> list[SQLAFilter]:
     created_filters = []
     now = datetime.now(timezone.utc)
 

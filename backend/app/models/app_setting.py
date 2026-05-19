@@ -10,4 +10,9 @@ class SQLAAppSetting(Base):
 
     key = Column(Text, primary_key=True)
     value = Column(JSON, nullable=False)
-    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )

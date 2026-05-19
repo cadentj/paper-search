@@ -13,3 +13,17 @@ members = ["core", "backend", "scripts"]
 [tool.uv.sources]
 paper-search-core = { workspace = true }
 paper-search-backend = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.0.0",
+    "ruff>=0.15.0",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+src = ["backend", "core", "scripts"]
+
+[tool.ruff.format]
+docstring-code-format = true

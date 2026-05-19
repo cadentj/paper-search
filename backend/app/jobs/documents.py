@@ -31,7 +31,9 @@ def _extract_text(path: Path) -> str:
 def process_document(document_id: str, job_id: str) -> None:
     with database.session() as db:
         try:
-            document = db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
+            document = (
+                db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
+            )
             job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
             if not document or not job:
                 return
@@ -43,7 +45,9 @@ def process_document(document_id: str, job_id: str) -> None:
             text_path = pdf_path.with_suffix(".txt")
             text_path.write_text(text, encoding="utf-8")
 
-            document = db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
+            document = (
+                db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
+            )
             job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
             if not document or not job:
                 return
@@ -72,14 +76,18 @@ def process_document(document_id: str, job_id: str) -> None:
             if not summary:
                 raise RuntimeError("Document summary was empty")
 
-            document = db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
+            document = (
+                db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
+            )
             job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
             if not document or not job:
                 return
             documents_service.complete_document(db, document, job, summary=summary)
         except Exception as exc:
             db.rollback()
-            document = db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
+            document = (
+                db.query(SQLADocument).filter(SQLADocument.id == document_id).first()
+            )
             job = db.query(SQLAJob).filter(SQLAJob.id == job_id).first()
             documents_service.fail_document(db, document, job, str(exc))
             raise

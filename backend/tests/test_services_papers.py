@@ -39,7 +39,9 @@ def test_start_idea_map_creates_new(db_session, monkeypatch):
 
     job_id = papers_service.start_idea_map(db_session, paper.id)
     assert job_id
-    idea_map = db_session.query(SQLAIdeaMap).filter(SQLAIdeaMap.paper_id == paper.id).first()
+    idea_map = (
+        db_session.query(SQLAIdeaMap).filter(SQLAIdeaMap.paper_id == paper.id).first()
+    )
     assert idea_map is not None
     assert idea_map.status == "queued"
 

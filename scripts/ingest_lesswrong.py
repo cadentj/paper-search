@@ -199,12 +199,17 @@ def scrape_windows(
     if cookie:
         headers["Cookie"] = cookie
 
-    with httpx.Client(timeout=args.timeout, follow_redirects=True, headers=headers) as client, tqdm(
-        total=len(windows),
-        desc="lesswrong windows",
-        unit="window",
-        dynamic_ncols=True,
-    ) as progress:
+    with (
+        httpx.Client(
+            timeout=args.timeout, follow_redirects=True, headers=headers
+        ) as client,
+        tqdm(
+            total=len(windows),
+            desc="lesswrong windows",
+            unit="window",
+            dynamic_ncols=True,
+        ) as progress,
+    ):
         for start_day, end_day in windows:
             if window_done(conn, start_day, end_day):
                 progress.update(1)
@@ -247,7 +252,7 @@ def fetch_posts_for_window(
     payload = response.json()
     if payload.get("errors"):
         raise RuntimeError(f"LessWrong GraphQL error: {payload['errors']}")
-    records = (((payload.get("data") or {}).get("posts") or {}).get("results") or [])
+    records = ((payload.get("data") or {}).get("posts") or {}).get("results") or []
     if len(records) >= args.limit_per_window:
         raise RuntimeError(
             f"Window {start_day}..{end_day} hit --limit-per-window={args.limit_per_window}"
@@ -272,7 +277,9 @@ def post_from_record(record: dict[str, Any]) -> LessWrongPost:
 def write_post(output_dir: Path, post: LessWrongPost) -> None:
     html_dir = output_dir / "html" / post.post_id[:2]
     html_dir.mkdir(parents=True, exist_ok=True)
-    (html_dir / f"{SAFE_ID_RE.sub('_', post.post_id)}.html").write_text(post.html, encoding="utf-8")
+    (html_dir / f"{SAFE_ID_RE.sub('_', post.post_id)}.html").write_text(
+        post.html, encoding="utf-8"
+    )
 
 
 def publish_index(settings: Settings) -> None:
@@ -329,7 +336,9 @@ def build_index(
         ).fetchall()
 
     for row in rows:
-        post = _post_from_row(row, cache_dir=cache_dir, prefix=prefix, preview_words=preview_words)
+        post = _post_from_row(
+            row, cache_dir=cache_dir, prefix=prefix, preview_words=preview_words
+        )
         if not post:
             skipped_missing += 1
             continue
@@ -345,7 +354,9 @@ def build_index(
     date_shards: dict[str, dict[str, Any]] = {}
 
     for day in sorted(dates.keys(), reverse=True):
-        posts = sorted(dates[day]["posts"], key=lambda item: item["posted_at"], reverse=True)
+        posts = sorted(
+            dates[day]["posts"], key=lambda item: item["posted_at"], reverse=True
+        )
         index_key = date_index_key(date=day, date_index_prefix=normalized_date_prefix)
         manifest_dates[day] = {"count": len(posts), "index_key": index_key}
         date_shards[day] = {
@@ -384,7 +395,9 @@ def _post_from_row(
     if not html_path.is_file():
         return None
     text_preview = row["text_preview"] or _preview_from_file(html_path, preview_words)
-    html_key = f"{normalize_prefix(prefix)}{html_path.relative_to(cache_dir).as_posix()}"
+    html_key = (
+        f"{normalize_prefix(prefix)}{html_path.relative_to(cache_dir).as_posix()}"
+    )
     return {
         "post_id": post_id,
         "title": row["title"] or "Untitled LessWrong post",
@@ -474,9 +487,13 @@ def create_state(conn: sqlite3.Connection) -> None:
         )
         """
     )
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(lesswrong_html_scrape)")}
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(lesswrong_html_scrape)")
+    }
     if "text_preview" not in columns:
-        conn.execute("ALTER TABLE lesswrong_html_scrape ADD COLUMN text_preview TEXT NOT NULL DEFAULT ''")
+        conn.execute(
+            "ALTER TABLE lesswrong_html_scrape ADD COLUMN text_preview TEXT NOT NULL DEFAULT ''"
+        )
     conn.commit()
 
 
@@ -488,7 +505,9 @@ def window_done(conn: sqlite3.Connection, start_day: date, end_day: date) -> boo
     return bool(row)
 
 
-def record_window(conn: sqlite3.Connection, start_day: date, end_day: date, post_count: int) -> None:
+def record_window(
+    conn: sqlite3.Connection, start_day: date, end_day: date, post_count: int
+) -> None:
     conn.execute(
         """
         INSERT INTO lesswrong_window_scrape (start_day, end_day, post_count, updated_at)
@@ -507,7 +526,9 @@ def record_window(conn: sqlite3.Connection, start_day: date, end_day: date, post
     conn.commit()
 
 
-def record_post(conn: sqlite3.Connection, post: LessWrongPost, *, preview_words: int) -> None:
+def record_post(
+    conn: sqlite3.Connection, post: LessWrongPost, *, preview_words: int
+) -> None:
     html_path = f"{post.post_id[:2]}/{SAFE_ID_RE.sub('_', post.post_id)}.html"
     text_preview = _first_words(_extract_plaintext(post.html), preview_words)
     conn.execute(

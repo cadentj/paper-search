@@ -17,7 +17,9 @@ from app.services.job_enqueue import commit_entities, enqueue_job, mark_job_fail
 from app.services.jobs import create_job
 
 
-def upsert_match_feedback(db: Session, match_id: str, value: str) -> SQLAPaperMatchFeedback:
+def upsert_match_feedback(
+    db: Session, match_id: str, value: str
+) -> SQLAPaperMatchFeedback:
     if value not in ("up", "down"):
         raise ValidationFailed("value must be 'up' or 'down'")
 
@@ -54,7 +56,9 @@ def upsert_match_feedback(db: Session, match_id: str, value: str) -> SQLAPaperMa
     return feedback
 
 
-def upsert_paper_feedback(db: Session, paper_id: str, value: str) -> SQLAPaperMatchFeedback:
+def upsert_paper_feedback(
+    db: Session, paper_id: str, value: str
+) -> SQLAPaperMatchFeedback:
     if value != "up":
         raise ValidationFailed("Only 'up' is allowed for unmatched papers")
 
@@ -103,7 +107,11 @@ def feedback_counts(db: Session) -> tuple[int, int, int]:
     )
     pending_proposals = (
         db.query(SQLAFilter)
-        .filter(SQLAFilter.status.in_(["pending_create", "pending_revision", "pending_deletion"]))
+        .filter(
+            SQLAFilter.status.in_(
+                ["pending_create", "pending_revision", "pending_deletion"]
+            )
+        )
         .count()
     )
     return pending_votes, pending_notes, pending_proposals
@@ -125,7 +133,9 @@ def start_feedback_processing(db: Session) -> str:
     enqueue_job(
         db,
         job=job_record,
-        enqueue=lambda: enqueue_for_job(job_record, process_all_feedback, job_record.id),
+        enqueue=lambda: enqueue_for_job(
+            job_record, process_all_feedback, job_record.id
+        ),
         on_failure=lambda sess, error: mark_job_failed(sess, job_record, error),
         store_queue_job_id=False,
     )

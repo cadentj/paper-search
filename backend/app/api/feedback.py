@@ -36,7 +36,9 @@ class FeedbackStatus(BaseModel):
 
 
 @router.post("/paper-matches/{match_id}/feedback", response_model=Feedback)
-def submit_match_feedback(match_id: str, body: MatchFeedbackRequest, db: Session = Depends(get_db)):
+def submit_match_feedback(
+    match_id: str, body: MatchFeedbackRequest, db: Session = Depends(get_db)
+):
     try:
         feedback = feedback_service.upsert_match_feedback(db, match_id, body.value)
     except Exception as exc:
@@ -51,7 +53,9 @@ def submit_match_feedback(match_id: str, body: MatchFeedbackRequest, db: Session
 
 
 @router.post("/papers/{paper_id}/feedback", response_model=Feedback)
-def submit_paper_feedback(paper_id: str, body: PaperFeedbackRequest, db: Session = Depends(get_db)):
+def submit_paper_feedback(
+    paper_id: str, body: PaperFeedbackRequest, db: Session = Depends(get_db)
+):
     try:
         feedback = feedback_service.upsert_paper_feedback(db, paper_id, body.value)
     except Exception as exc:
@@ -66,7 +70,9 @@ def submit_paper_feedback(paper_id: str, body: PaperFeedbackRequest, db: Session
 
 @router.get("/feedback/status", response_model=FeedbackStatus)
 def get_feedback_status(db: Session = Depends(get_db)):
-    pending_votes, pending_notes, pending_proposals = feedback_service.feedback_counts(db)
+    pending_votes, pending_notes, pending_proposals = feedback_service.feedback_counts(
+        db
+    )
     return FeedbackStatus(
         pending_votes=pending_votes,
         pending_notes=pending_notes,

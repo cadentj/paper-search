@@ -50,7 +50,9 @@ class SQLAPaperMatch(Base):
 
     llm_model = Column(Text, nullable=True)
     llm_response_id = Column(Text, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
 
     def to_pydantic(
         self,

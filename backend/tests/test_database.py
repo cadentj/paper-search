@@ -21,7 +21,11 @@ def test_session_commits_on_success(isolated_database):
             SQLAFilter(
                 id=filt_id,
                 name="Committed SQLAFilter",
-                definition={"name": "Committed SQLAFilter", "description": "", "mode": "topic"},
+                definition={
+                    "name": "Committed SQLAFilter",
+                    "description": "",
+                    "mode": "topic",
+                },
                 status="active",
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
@@ -42,7 +46,11 @@ def test_session_rolls_back_on_exception(isolated_database):
                 SQLAFilter(
                     id=filt_id,
                     name="Rolled Back",
-                    definition={"name": "Rolled Back", "description": "", "mode": "topic"},
+                    definition={
+                        "name": "Rolled Back",
+                        "description": "",
+                        "mode": "topic",
+                    },
                     status="active",
                     created_at=datetime.now(timezone.utc),
                     updated_at=datetime.now(timezone.utc),
@@ -61,7 +69,11 @@ def test_explicit_commit_inside_session_is_harmless(isolated_database):
             SQLAFilter(
                 id=filt_id,
                 name="Double Commit",
-                definition={"name": "Double Commit", "description": "", "mode": "topic"},
+                definition={
+                    "name": "Double Commit",
+                    "description": "",
+                    "mode": "topic",
+                },
                 status="active",
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),

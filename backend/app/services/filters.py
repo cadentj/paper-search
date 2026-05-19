@@ -90,7 +90,9 @@ def accept_proposal(db: Session, filter_id: str) -> SQLAFilter:
         filt.proposed_action = None
         filt.updated_at = now
     elif filt.proposed_action == "revise" and filt.target_filter_id:
-        target = db.query(SQLAFilter).filter(SQLAFilter.id == filt.target_filter_id).first()
+        target = (
+            db.query(SQLAFilter).filter(SQLAFilter.id == filt.target_filter_id).first()
+        )
         if target:
             target.definition = dict(filt.definition or {})
             target.name = filt.name
@@ -99,7 +101,9 @@ def accept_proposal(db: Session, filter_id: str) -> SQLAFilter:
         filt.archived_at = now
         filt.updated_at = now
     elif filt.proposed_action == "delete" and filt.target_filter_id:
-        target = db.query(SQLAFilter).filter(SQLAFilter.id == filt.target_filter_id).first()
+        target = (
+            db.query(SQLAFilter).filter(SQLAFilter.id == filt.target_filter_id).first()
+        )
         if target:
             target.status = "archived"
             target.archived_at = now

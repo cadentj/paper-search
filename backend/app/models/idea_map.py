@@ -37,8 +37,15 @@ class SQLAIdeaMap(Base):
     llm_response_id = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
     def to_pydantic(self, *, job_id: str | None = None) -> IdeaMap:
         resp = IdeaMap.model_validate(self)

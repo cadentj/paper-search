@@ -26,9 +26,11 @@ def run_scholar_import(import_id: str, job_id: str) -> None:
                 return
             set_job_status(job, status="running")
 
-            profile_import = db.query(SQLAResearchProfileImport).filter(
-                SQLAResearchProfileImport.id == import_id
-            ).first()
+            profile_import = (
+                db.query(SQLAResearchProfileImport)
+                .filter(SQLAResearchProfileImport.id == import_id)
+                .first()
+            )
             if not profile_import:
                 set_job_status(job, status="failed", error="Import not found")
                 db.commit()
@@ -47,7 +49,11 @@ def run_scholar_import(import_id: str, job_id: str) -> None:
 
             papers = get_author_papers(author_id)
             profile_import.publications = [
-                {"title": p.get("title"), "year": p.get("year"), "abstract": (p.get("abstract") or "")[:300]}
+                {
+                    "title": p.get("title"),
+                    "year": p.get("year"),
+                    "abstract": (p.get("abstract") or "")[:300],
+                }
                 for p in papers
             ]
             db.commit()
@@ -61,12 +67,14 @@ def run_scholar_import(import_id: str, job_id: str) -> None:
             publications_text = build_publications_text(papers)
             fields = set()
             for p in papers:
-                for f in (p.get("fieldsOfStudy") or []):
+                for f in p.get("fieldsOfStudy") or []:
                     fields.add(f)
 
             user_prompt = SCHOLAR_PROFILE_USER_PROMPT.format(
                 author_name=profile_import.display_name or "Unknown",
-                fields_of_study=", ".join(sorted(fields)) if fields else "Not specified",
+                fields_of_study=", ".join(sorted(fields))
+                if fields
+                else "Not specified",
                 publications_text=publications_text,
             )
 
@@ -102,9 +110,11 @@ def run_scholar_import(import_id: str, job_id: str) -> None:
 
         except Exception as e:
             db.rollback()
-            profile_import = db.query(SQLAResearchProfileImport).filter(
-                SQLAResearchProfileImport.id == import_id
-            ).first()
+            profile_import = (
+                db.query(SQLAResearchProfileImport)
+                .filter(SQLAResearchProfileImport.id == import_id)
+                .first()
+            )
             if profile_import:
                 profile_import.status = "failed"
                 profile_import.error = str(e)

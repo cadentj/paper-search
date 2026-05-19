@@ -8,7 +8,9 @@ from app.services.errors import ValidationFailed
 from app.services import filters as filter_service
 
 
-def _proposal_filter(db_session, *, action: str, target_id: str | None = None) -> SQLAFilter:
+def _proposal_filter(
+    db_session, *, action: str, target_id: str | None = None
+) -> SQLAFilter:
     now = datetime.now(timezone.utc)
     filt = SQLAFilter(
         id=str(uuid.uuid4()),

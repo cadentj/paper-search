@@ -46,7 +46,10 @@ class DailyCandidateCount(BaseModel):
 
 @router.get("", response_model=list[SearchRun])
 def list_search_runs(db: Session = Depends(get_db)):
-    return [search_runs.search_run_payload(db, run) for run in search_runs.list_search_runs(db)]
+    return [
+        search_runs.search_run_payload(db, run)
+        for run in search_runs.list_search_runs(db)
+    ]
 
 
 @router.get("/latest", response_model=Optional[SearchRun])

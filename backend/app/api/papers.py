@@ -99,7 +99,9 @@ def get_paper_notes(paper_id: str, db: Session = Depends(get_db)):
 
 
 @router.put("/{paper_id}/notes", response_model=PaperNote)
-def update_paper_notes(paper_id: str, body: PaperNoteUpdate, db: Session = Depends(get_db)):
+def update_paper_notes(
+    paper_id: str, body: PaperNoteUpdate, db: Session = Depends(get_db)
+):
     note = papers_service.upsert_paper_note(db, paper_id, body.text)
     return PaperNote(
         id=note.id,

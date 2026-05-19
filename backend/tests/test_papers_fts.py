@@ -18,6 +18,7 @@ from app.services.papers_fts import (
 )
 from paper_search_core.models.paper import SQLAPaper
 
+
 def _run_date() -> date:
     return date(2026, 5, 19)
 
@@ -188,12 +189,8 @@ class TestFtsSearch:
             papers_by_id=papers_by_id,
             run_date=run_date,
         )
-        quantum_ids = {
-            paper.id for filt, paper in pairs if filt.id == "q"
-        }
-        scaling_ids = {
-            paper.id for filt, paper in pairs if filt.id == "s"
-        }
+        quantum_ids = {paper.id for filt, paper in pairs if filt.id == "q"}
+        scaling_ids = {paper.id for filt, paper in pairs if filt.id == "s"}
 
         assert "paper-quantum" in quantum_ids
         assert "paper-scaling" not in quantum_ids

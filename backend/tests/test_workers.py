@@ -69,18 +69,23 @@ class TestExtractOnboardingFilters:
         )
 
         from app.jobs.onboarding import extract_onboarding_filters
+
         extract_onboarding_filters(ext_id)
 
         db_session.expire_all()
-        updated = db_session.query(SQLAOnboardingExtraction).filter(
-            SQLAOnboardingExtraction.id == ext_id
-        ).first()
+        updated = (
+            db_session.query(SQLAOnboardingExtraction)
+            .filter(SQLAOnboardingExtraction.id == ext_id)
+            .first()
+        )
         assert updated.status == "completed"
         assert updated.proposed_filters is not None
         assert len(updated.proposed_filters) > 0
 
 
-def _paper_fixture(source_id: str, title: str, *, search_text: str | None = None) -> dict:
+def _paper_fixture(
+    source_id: str, title: str, *, search_text: str | None = None
+) -> dict:
     return {
         "source_id": source_id,
         "title": title,
@@ -188,12 +193,17 @@ def _extract_prompt_arxiv_id(user_prompt: str) -> str:
     raise ValueError("Source ID not found in prompt")
 
 
-def _fake_daily_async_llm(*, matched_arxiv_ids: set[str], assert_prompt=None, fail_arxiv_ids=None):
+def _fake_daily_async_llm(
+    *, matched_arxiv_ids: set[str], assert_prompt=None, fail_arxiv_ids=None
+):
     fail_arxiv_ids = fail_arxiv_ids or set()
 
     async def fake_async_call_llm(**kwargs):
         assert kwargs["profile"] == JUDGE_PROFILE
-        assert kwargs["response_model"] in (ClaimFilterSearchResponse, TopicFilterSearchResponse)
+        assert kwargs["response_model"] in (
+            ClaimFilterSearchResponse,
+            TopicFilterSearchResponse,
+        )
         if assert_prompt:
             assert_prompt(kwargs["user_prompt"])
         arxiv_id = _extract_prompt_arxiv_id(kwargs["user_prompt"])
@@ -210,9 +220,7 @@ def _fake_daily_async_llm(*, matched_arxiv_ids: set[str], assert_prompt=None, fa
             match_data["verdict"] = "positive"
             match_data["reason"] = "The paper directly addresses the filter."
         return {
-            "content": {
-                "matches": [match_data] if is_match else []
-            },
+            "content": {"matches": [match_data] if is_match else []},
             "model": "test-model",
             "response_id": f"match-response-{arxiv_id}",
         }
@@ -307,7 +315,9 @@ class TestDailySearchTimeouts:
 
 
 class TestRunDailySearch:
-    def test_persists_matches_without_inline_summary(self, db_session, patch_worker_database, monkeypatch):
+    def test_persists_matches_without_inline_summary(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
 
         # Create active filter
         filt = SQLAFilter(
@@ -356,7 +366,9 @@ class TestRunDailySearch:
         _run_daily_search(db_session, run_id, job.id)
 
         db_session.expire_all()
-        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
         job = _daily_job(db_session, run_id)
         assert job is not None
         assert job.status == "completed"
@@ -375,14 +387,18 @@ class TestRunDailySearch:
 
         _run_summary_for_run(db_session, run_id)
         db_session.expire_all()
-        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
         summary_job = _daily_summary_job(db_session, run_id)
         assert summary_job is not None
         assert summary_job.status == "completed"
         assert updated_run.status == "completed"
         assert updated_run.summary is not None
 
-    def test_ignores_archived_filters(self, db_session, patch_worker_database, monkeypatch):
+    def test_ignores_archived_filters(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
 
         # Create archived filter only
         filt = SQLAFilter(
@@ -412,14 +428,18 @@ class TestRunDailySearch:
 
         _mock_papers_for_sources(
             monkeypatch,
-            _papers_from_dicts(db_session, [_paper_fixture("2605.00004", "Fetched SQLAPaper")]),
+            _papers_from_dicts(
+                db_session, [_paper_fixture("2605.00004", "Fetched SQLAPaper")]
+            ),
         )
 
         job = _create_daily_search_job(db_session, run_id)
         _run_daily_search(db_session, run_id, job.id)
 
         db_session.expire_all()
-        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
         job = _daily_job(db_session, run_id)
         assert job is not None
         assert job.status == "completed"
@@ -429,11 +449,15 @@ class TestRunDailySearch:
 
         _run_summary_for_run(db_session, run_id)
         db_session.expire_all()
-        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
         assert updated_run.status == "completed"
         assert updated_run.summary == "No active filters to search."
 
-    def test_searches_only_papers_for_run_date(self, db_session, patch_worker_database, monkeypatch):
+    def test_searches_only_papers_for_run_date(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
 
         filt = SQLAFilter(
             id=str(uuid.uuid4()),
@@ -472,7 +496,9 @@ class TestRunDailySearch:
 
         _mock_papers_for_sources(
             monkeypatch,
-            _papers_from_dicts(db_session, [_paper_fixture("2401.00001", "Included SQLAPaper")]),
+            _papers_from_dicts(
+                db_session, [_paper_fixture("2401.00001", "Included SQLAPaper")]
+            ),
         )
 
         def assert_prompt(user_prompt: str):
@@ -490,11 +516,15 @@ class TestRunDailySearch:
         _run_daily_search(db_session, run_id, job.id)
 
         db_session.expire_all()
-        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
         matches = db_session.query(SQLAPaperMatch).all()
         included = (
             db_session.query(SQLAPaper)
-            .filter(SQLAPaper.source_type == "arxiv", SQLAPaper.source_id == "2401.00001")
+            .filter(
+                SQLAPaper.source_type == "arxiv", SQLAPaper.source_id == "2401.00001"
+            )
             .first()
         )
 
@@ -558,7 +588,9 @@ class TestRunDailySearch:
             raise AssertionError("Expected missing OPENROUTER_API_KEY to fail")
 
         db_session.expire_all()
-        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
         matches = db_session.query(SQLAPaperMatch).all()
         assert updated_run.status == "failed"
         assert "OPENROUTER_API_KEY" in updated_run.error
@@ -616,7 +648,9 @@ class TestRunDailySearch:
         _run_daily_search(db_session, run_id, job.id)
 
         db_session.expire_all()
-        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
         job = _daily_job(db_session, run_id)
         assert job is not None
         assert job.status == "completed"
@@ -634,11 +668,15 @@ class TestRunDailySearch:
 
         _run_summary_for_run(db_session, run_id)
         db_session.expire_all()
-        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
         assert updated_run.status == "completed"
         assert updated_run.summary is not None
 
-    def test_all_pair_failures_mark_run_failed(self, db_session, patch_worker_database, monkeypatch):
+    def test_all_pair_failures_mark_run_failed(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
 
         filt = SQLAFilter(
             id=str(uuid.uuid4()),
@@ -669,13 +707,15 @@ class TestRunDailySearch:
         _mock_papers_for_sources(
             monkeypatch, _papers_from_dicts(db_session, daily_papers)
         )
-        monkeypatch.setattr(
-            "app.jobs.daily_search.async_call_llm",
-            _fake_daily_async_llm(
-                matched_arxiv_ids=set(),
-                fail_arxiv_ids={"2605.00012"},
+        (
+            monkeypatch.setattr(
+                "app.jobs.daily_search.async_call_llm",
+                _fake_daily_async_llm(
+                    matched_arxiv_ids=set(),
+                    fail_arxiv_ids={"2605.00012"},
+                ),
             ),
-        ),
+        )
 
         job = _create_daily_search_job(db_session, run_id)
 
@@ -687,7 +727,9 @@ class TestRunDailySearch:
             raise AssertionError("Expected all pair failures to fail the run")
 
         db_session.expire_all()
-        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
         job = _daily_job(db_session, run_id)
         assert job is not None
         assert updated_run.status == "failed"
@@ -841,7 +883,9 @@ class TestRunDailySearch:
 
 
 class TestSummarizeDailySearch:
-    def test_summarize_reads_matches_from_database(self, db_session, patch_worker_database, monkeypatch):
+    def test_summarize_reads_matches_from_database(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
 
         filt_id = str(uuid.uuid4())
         filt = SQLAFilter(
@@ -903,7 +947,9 @@ class TestSummarizeDailySearch:
         summarize_daily_search(run_id)
 
         db_session.expire_all()
-        updated_run = db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        updated_run = (
+            db_session.query(SQLASearchRun).filter(SQLASearchRun.id == run_id).first()
+        )
         summary_job = _daily_summary_job(db_session, run_id)
         assert summary_job is not None
         assert summary_job.status == "completed"

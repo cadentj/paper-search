@@ -38,7 +38,9 @@ ALWAYS_ADDRESSABLE_TAGS = {
 CONTENT_TAGS = ALWAYS_ADDRESSABLE_TAGS | {"li"}
 
 
-def parse_arxiv_html(html: str, *, exclude_back_matter: bool = False) -> list[HtmlBlock]:
+def parse_arxiv_html(
+    html: str, *, exclude_back_matter: bool = False
+) -> list[HtmlBlock]:
     """Parse arXiv HTML into addressable blocks preserving section titles."""
     return _parse_arxiv_html_document(html, exclude_back_matter=exclude_back_matter)[0]
 
@@ -120,7 +122,9 @@ def citation_validation_diagnostics(blocks: list[HtmlBlock], citation: dict) -> 
     }
 
 
-def blocks_to_prompt_text(blocks: list[HtmlBlock], max_blocks: int = MAX_PROMPT_BLOCKS) -> str:
+def blocks_to_prompt_text(
+    blocks: list[HtmlBlock], max_blocks: int = MAX_PROMPT_BLOCKS
+) -> str:
     """Convert blocks to a text representation for LLM prompts."""
     lines = []
     for b in blocks[:max_blocks]:
@@ -168,14 +172,16 @@ def _parse_arxiv_html_document(
         html_anchor = f"#{existing_id}" if existing_id else ""
         element["data-paper-block-id"] = block_id
 
-        blocks.append(HtmlBlock(
-            block_id=block_id,
-            order_index=len(blocks),
-            tag=element.name,
-            text=text,
-            section_title=current_section,
-            html_anchor=html_anchor,
-        ))
+        blocks.append(
+            HtmlBlock(
+                block_id=block_id,
+                order_index=len(blocks),
+                tag=element.name,
+                text=text,
+                section_title=current_section,
+                html_anchor=html_anchor,
+            )
+        )
 
     return blocks, soup
 

@@ -30,9 +30,7 @@ class Job(BaseModel):
 
 class SQLAJob(Base):
     __tablename__ = "jobs"
-    __table_args__ = (
-        Index("ix_jobs_subject", "subject_type", "subject_id"),
-    )
+    __table_args__ = (Index("ix_jobs_subject", "subject_type", "subject_id"),)
 
     id = Column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
     kind = Column(Text, nullable=False)
@@ -46,7 +44,9 @@ class SQLAJob(Base):
 
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
 
     def to_pydantic(self) -> Job:
         return Job.model_validate(self)

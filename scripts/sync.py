@@ -104,7 +104,9 @@ def load_lesswrong_day(
 def _ensure_published_on_run_date(record: dict[str, Any], *, run_date: date) -> None:
     published_at = record.get("published_at")
     if published_at is None or published_at.date() != run_date:
-        record["published_at"] = datetime.combine(run_date, time.min, tzinfo=timezone.utc)
+        record["published_at"] = datetime.combine(
+            run_date, time.min, tzinfo=timezone.utc
+        )
 
 
 def _require_empty_paper_table(db: Session) -> None:
@@ -214,7 +216,9 @@ def _sync_source(
     progress: tqdm | None,
     scanned_total: int,
 ) -> tuple[dict[str, tuple[int, int]], int]:
-    manifest = fetch_manifest(public_base_url=public_base_url, manifest_path=manifest_path)
+    manifest = fetch_manifest(
+        public_base_url=public_base_url, manifest_path=manifest_path
+    )
     dates = manifest.get("dates") or {}
     per_date: dict[str, tuple[int, int]] = {}
 
@@ -260,7 +264,13 @@ def _sync_source(
             progress.update(1)
             _set_sync_progress(progress, source_type, total, scanned_total)
         else:
-            logger.info("%s %s: total=%s searchable=%s", source_type, date_key, total, searchable)
+            logger.info(
+                "%s %s: total=%s searchable=%s",
+                source_type,
+                date_key,
+                total,
+                searchable,
+            )
 
     return per_date, scanned_total
 

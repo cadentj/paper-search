@@ -16,7 +16,10 @@ from app.models.paper_note import SQLAPaperNote
 from app.services.jobs import set_job_status
 from app.llm.client import call_llm
 from app.llm.config import FILTER_GENERATION_PROFILE
-from app.llm.prompts import FEEDBACK_REFLECTION_SYSTEM_PROMPT, FEEDBACK_REFLECTION_USER_PROMPT
+from app.llm.prompts import (
+    FEEDBACK_REFLECTION_SYSTEM_PROMPT,
+    FEEDBACK_REFLECTION_USER_PROMPT,
+)
 from app.llm.schemas import FeedbackReflectionResponse
 
 logger = logging.getLogger(__name__)
@@ -66,19 +69,31 @@ def process_all_feedback(job_id: str) -> None:
                 paper_abstract = paper.abstract if paper else ""
 
                 if v.paper_match_id and v.filter_id:
-                    match = db.query(SQLAPaperMatch).filter(SQLAPaperMatch.id == v.paper_match_id).first()
-                    match_filter = db.query(SQLAFilter).filter(SQLAFilter.id == v.filter_id).first()
+                    match = (
+                        db.query(SQLAPaperMatch)
+                        .filter(SQLAPaperMatch.id == v.paper_match_id)
+                        .first()
+                    )
+                    match_filter = (
+                        db.query(SQLAFilter)
+                        .filter(SQLAFilter.id == v.filter_id)
+                        .first()
+                    )
                     filter_name = match_filter.name if match_filter else "Unknown"
                     match_result = ""
                     if match and match.result:
-                        match_result = match.result if isinstance(match.result, str) else json.dumps(match.result)
+                        match_result = (
+                            match.result
+                            if isinstance(match.result, str)
+                            else json.dumps(match.result)
+                        )
                     vote_descriptions.append(
-                        f"- {v.value.upper()} on matched paper \"{paper_title}\" "
+                        f'- {v.value.upper()} on matched paper "{paper_title}" '
                         f"(filter: {filter_name}, result: {match_result})"
                     )
                 else:
                     vote_descriptions.append(
-                        f"- UP on unmatched paper \"{paper_title}\" "
+                        f'- UP on unmatched paper "{paper_title}" '
                         f"(abstract: {paper_abstract[:200]}...)"
                     )
 
@@ -88,13 +103,19 @@ def process_all_feedback(job_id: str) -> None:
                 paper_title = paper.title if paper else "Unknown"
                 paper_abstract = paper.abstract if paper else ""
                 note_descriptions.append(
-                    f"- Note on \"{paper_title}\" (abstract: {paper_abstract[:200]}...): {n.text}"
+                    f'- Note on "{paper_title}" (abstract: {paper_abstract[:200]}...): {n.text}'
                 )
 
             user_prompt = FEEDBACK_REFLECTION_USER_PROMPT.format(
-                existing_filters="\n".join(filter_summaries) if filter_summaries else "(none)",
-                vote_feedback="\n".join(vote_descriptions) if vote_descriptions else "(none)",
-                note_feedback="\n".join(note_descriptions) if note_descriptions else "(none)",
+                existing_filters="\n".join(filter_summaries)
+                if filter_summaries
+                else "(none)",
+                vote_feedback="\n".join(vote_descriptions)
+                if vote_descriptions
+                else "(none)",
+                note_feedback="\n".join(note_descriptions)
+                if note_descriptions
+                else "(none)",
             )
 
             result = call_llm(
@@ -151,7 +172,9 @@ def process_all_feedback(job_id: str) -> None:
                     target_id = action.get("target_filter_id")
                     if not target_id:
                         continue
-                    target = db.query(SQLAFilter).filter(SQLAFilter.id == target_id).first()
+                    target = (
+                        db.query(SQLAFilter).filter(SQLAFilter.id == target_id).first()
+                    )
                     if not target:
                         continue
                     filt = SQLAFilter(

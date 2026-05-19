@@ -143,7 +143,9 @@ def call_llm(
                     model_config,
                     response_model,
                 )
-                return _parse_structured_response(response, response_model, model_config)
+                return _parse_structured_response(
+                    response, response_model, model_config
+                )
             except Exception as exc:
                 last_exc = exc
                 if attempt >= LLM_MAX_RETRIES or not _is_transient_error(exc):
@@ -174,7 +176,9 @@ async def async_call_llm(
                     model_config,
                     response_model,
                 )
-                return _parse_structured_response(response, response_model, model_config)
+                return _parse_structured_response(
+                    response, response_model, model_config
+                )
             except Exception as exc:
                 last_exc = exc
                 if attempt >= LLM_MAX_RETRIES or not _is_transient_error(exc):
@@ -194,12 +198,15 @@ def stream_structured_response(
 ) -> dict:
     """Stream an OpenRouter Responses API structured output via the OpenAI SDK."""
     model_config = get_llm_config(profile)
-    with _client() as client, client.responses.stream(
-        model=model_config.model,
-        input=_response_input(system_prompt, user_prompt),
-        extra_body=_provider_body(model_config),
-        text_format=response_model,
-    ) as stream:
+    with (
+        _client() as client,
+        client.responses.stream(
+            model=model_config.model,
+            input=_response_input(system_prompt, user_prompt),
+            extra_body=_provider_body(model_config),
+            text_format=response_model,
+        ) as stream,
+    ):
         for event in stream:
             if event.type == "response.output_text.delta":
                 if on_text_delta:

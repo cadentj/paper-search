@@ -84,8 +84,7 @@ def apply_cursor(items: list, cursor: str | None) -> list:
     return [
         item
         for item in items
-        if item.created_at > value
-        or (item.created_at == value and item.id > item_id)
+        if item.created_at > value or (item.created_at == value and item.id > item_id)
     ]
 
 
@@ -177,7 +176,9 @@ def get_document_for_job(db: Session, job: SQLAJob) -> SQLADocument:
     return document
 
 
-def list_matches_for_run_ordered(db: Session, search_run_id: str) -> list[SQLAPaperMatch]:
+def list_matches_for_run_ordered(
+    db: Session, search_run_id: str
+) -> list[SQLAPaperMatch]:
     return (
         db.query(SQLAPaperMatch)
         .filter(SQLAPaperMatch.search_run_id == search_run_id)

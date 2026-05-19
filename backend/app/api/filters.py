@@ -33,7 +33,9 @@ def list_filters(
     status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    return [filt.to_pydantic() for filt in filter_service.list_filters(db, status=status)]
+    return [
+        filt.to_pydantic() for filt in filter_service.list_filters(db, status=status)
+    ]
 
 
 @router.post("", response_model=Filter)

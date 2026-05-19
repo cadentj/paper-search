@@ -116,7 +116,9 @@ def start_daily_search(
         db,
         job=job_record,
         entities=(run,),
-        enqueue=lambda: enqueue_for_job(job_record, run_daily_search, run.id, job_record.id),
+        enqueue=lambda: enqueue_for_job(
+            job_record, run_daily_search, run.id, job_record.id
+        ),
         on_failure=on_failure,
         log_context=f"daily search run={run.id}",
     )
@@ -207,7 +209,9 @@ def mark_running(db: Session, run: SQLASearchRun, job: SQLAJob) -> None:
     db.commit()
 
 
-def set_pair_progress(db: Session, job: SQLAJob, *, total: int, current: int = 0) -> None:
+def set_pair_progress(
+    db: Session, job: SQLAJob, *, total: int, current: int = 0
+) -> None:
     from app.services.jobs import job_progress
 
     job.progress = job_progress(current=current, total=max(total, 1))
@@ -244,7 +248,14 @@ def fail_run(db: Session, run: SQLASearchRun, job: SQLAJob, error: str) -> None:
     db.commit()
 
 
-def set_summary_status(db: Session, run: SQLASearchRun, job: SQLAJob, *, status: str, error: str | None = None) -> None:
+def set_summary_status(
+    db: Session,
+    run: SQLASearchRun,
+    job: SQLAJob,
+    *,
+    status: str,
+    error: str | None = None,
+) -> None:
     run.status = status
     if error is not None:
         run.error = error
@@ -252,7 +263,9 @@ def set_summary_status(db: Session, run: SQLASearchRun, job: SQLAJob, *, status:
     db.commit()
 
 
-def complete_summary(db: Session, run: SQLASearchRun, job: SQLAJob, *, summary: str, citations: list) -> None:
+def complete_summary(
+    db: Session, run: SQLASearchRun, job: SQLAJob, *, summary: str, citations: list
+) -> None:
     run.summary = summary
     run.summary_citations = citations
     run.completed_at = datetime.now(timezone.utc)

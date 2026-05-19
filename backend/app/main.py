@@ -68,9 +68,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
 
 app.include_router(onboarding_router)
 app.include_router(filters_router)

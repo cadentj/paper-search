@@ -87,7 +87,9 @@ def create_generation(body: OnboardingGenerationCreate, db: Session = Depends(ge
 
 
 @router.post("/draft-filters/promote", response_model=list[Filter])
-def promote_draft_filters(body: DraftFilterPromoteRequest, db: Session = Depends(get_db)):
+def promote_draft_filters(
+    body: DraftFilterPromoteRequest, db: Session = Depends(get_db)
+):
     try:
         filters = onboarding_service.promote_draft_filters(db, body.filter_ids)
     except Exception as exc:
@@ -135,7 +137,9 @@ def verify_profile(body: ScholarVerifyRequest):
 
     author = get_author(author_id)
     if not author:
-        raise HTTPException(status_code=404, detail="Author not found on Semantic Scholar")
+        raise HTTPException(
+            status_code=404, detail="Author not found on Semantic Scholar"
+        )
 
     return ScholarVerify(
         author_id=author_id,

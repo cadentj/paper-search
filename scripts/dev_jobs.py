@@ -41,7 +41,9 @@ def _fail_subject(db, job: SQLAJob, *, message: str, now: datetime) -> None:
         return
 
     if job.subject_type == "document":
-        document = db.query(SQLADocument).filter(SQLADocument.id == job.subject_id).first()
+        document = (
+            db.query(SQLADocument).filter(SQLADocument.id == job.subject_id).first()
+        )
         if document and document.status in ACTIVE_STATUSES:
             document.status = "failed"
             document.error = message
@@ -60,7 +62,9 @@ def _fail_subject(db, job: SQLAJob, *, message: str, now: datetime) -> None:
         return
 
     if job.subject_type == "idea_map":
-        idea_map = db.query(SQLAIdeaMap).filter(SQLAIdeaMap.id == job.subject_id).first()
+        idea_map = (
+            db.query(SQLAIdeaMap).filter(SQLAIdeaMap.id == job.subject_id).first()
+        )
         if idea_map and idea_map.status in ACTIVE_STATUSES:
             idea_map.status = "failed"
             idea_map.error = message

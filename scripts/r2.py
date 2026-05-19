@@ -63,7 +63,10 @@ class Settings(BaseSettings):
         )
 
     def require_sync_urls(self) -> None:
-        if not self.ARXIV_HTML_PUBLIC_BASE_URL or not self.LESSWRONG_HTML_PUBLIC_BASE_URL:
+        if (
+            not self.ARXIV_HTML_PUBLIC_BASE_URL
+            or not self.LESSWRONG_HTML_PUBLIC_BASE_URL
+        ):
             raise SystemExit(
                 "ARXIV_HTML_PUBLIC_BASE_URL and LESSWRONG_HTML_PUBLIC_BASE_URL are required for sync"
             )
@@ -90,13 +93,20 @@ class Settings(BaseSettings):
     def lesswrong_cookie(self) -> str:
         if not self.LESSWRONG_COOKIE_FILE.strip():
             return ""
-        return Path(self.LESSWRONG_COOKIE_FILE).expanduser().read_text(encoding="utf-8").strip()
+        return (
+            Path(self.LESSWRONG_COOKIE_FILE)
+            .expanduser()
+            .read_text(encoding="utf-8")
+            .strip()
+        )
 
 
 def resolve_sqlite_path(database_url: str) -> Path:
     prefix = "sqlite:///"
     if not database_url.startswith(prefix):
-        raise ValueError(f"Only SQLite URLs are supported for sync, got: {database_url}")
+        raise ValueError(
+            f"Only SQLite URLs are supported for sync, got: {database_url}"
+        )
     raw = database_url.removeprefix(prefix)
     path = Path(raw)
     if not path.is_absolute():
@@ -247,12 +257,15 @@ def upload_html(
     ]
 
     stats = {"uploaded": 0, "skipped": 0, "error": 0}
-    with ThreadPoolExecutor(max_workers=max(workers, 1)) as executor, tqdm(
-        total=len(tasks),
-        desc="uploading",
-        unit="file",
-        dynamic_ncols=True,
-    ) as progress:
+    with (
+        ThreadPoolExecutor(max_workers=max(workers, 1)) as executor,
+        tqdm(
+            total=len(tasks),
+            desc="uploading",
+            unit="file",
+            dynamic_ncols=True,
+        ) as progress,
+    ):
         futures = [
             executor.submit(
                 _upload_one,
@@ -290,7 +303,9 @@ def _upload_one(
     try:
         if skip_existing and _object_exists(client, bucket, task.key):
             return UploadResult(status="skipped", key=task.key)
-        resolved_type = content_type or mimetypes.guess_type(task.path.name)[0] or "text/html"
+        resolved_type = (
+            content_type or mimetypes.guess_type(task.path.name)[0] or "text/html"
+        )
         client.upload_file(
             str(task.path),
             bucket,

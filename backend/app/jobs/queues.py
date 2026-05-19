@@ -33,5 +33,7 @@ def resolve_queue_name(job: SQLAJob) -> str:
     return job.queue_name or queue_for_kind(job.kind)
 
 
-def enqueue_for_job(job: SQLAJob, func: Callable[..., Any], *args: Any, **kwargs: Any) -> object:
+def enqueue_for_job(
+    job: SQLAJob, func: Callable[..., Any], *args: Any, **kwargs: Any
+) -> object:
     return get_queue(resolve_queue_name(job)).enqueue(func, *args, **kwargs)

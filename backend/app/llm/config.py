@@ -44,7 +44,9 @@ def load_llm_config(path: Path = LLM_CONFIG_PATH) -> dict[str, LLMModelConfig]:
         model = raw_profile.get("model")
         provider = raw_profile.get("provider")
         if not isinstance(model, str) or not model.strip():
-            raise RuntimeError(f"Missing model for LLM config group [{profile}] in {path}")
+            raise RuntimeError(
+                f"Missing model for LLM config group [{profile}] in {path}"
+            )
         if not isinstance(provider, str) or not provider.strip():
             raise RuntimeError(
                 f"Missing provider for LLM config group [{profile}] in {path}"

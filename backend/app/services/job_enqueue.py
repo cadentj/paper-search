@@ -35,7 +35,9 @@ def enqueue_job(
             job.queue_job_id = getattr(rq_job, "id", None)
         db.commit()
         if log_context:
-            logger.info("%s enqueued job=%s queue=%s", log_context, job.id, job.queue_job_id)
+            logger.info(
+                "%s enqueued job=%s queue=%s", log_context, job.id, job.queue_job_id
+            )
     except Exception as exc:
         error = str(exc)
         if on_failure:

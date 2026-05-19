@@ -47,14 +47,18 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
     """Worker job: generate idea map from arXiv HTML."""
     with database.session() as db:
         try:
-            idea_map = db.query(SQLAIdeaMap).filter(SQLAIdeaMap.id == idea_map_id).first()
+            idea_map = (
+                db.query(SQLAIdeaMap).filter(SQLAIdeaMap.id == idea_map_id).first()
+            )
             if not idea_map:
                 return
 
             job = papers_service.resolve_idea_map_job(db, idea_map_id, job_id)
             papers_service.mark_idea_map_running(db, idea_map, job)
 
-            paper = db.query(SQLAPaper).filter(SQLAPaper.id == idea_map.paper_id).first()
+            paper = (
+                db.query(SQLAPaper).filter(SQLAPaper.id == idea_map.paper_id).first()
+            )
             if not paper or paper.source_type != "arxiv" or not paper.source_id:
                 papers_service.mark_idea_map_skipped(
                     db,
@@ -88,7 +92,9 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
             blocks = parse_arxiv_html(html_content, exclude_back_matter=True)
             if not blocks:
                 idea_map.status = "skipped"
-                idea_map.dropped_reason = "HTML could not be parsed into addressable blocks"
+                idea_map.dropped_reason = (
+                    "HTML could not be parsed into addressable blocks"
+                )
                 idea_map.updated_at = datetime.now(timezone.utc)
                 set_job_status(job, status="skipped")
                 db.commit()
@@ -112,10 +118,13 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
                 dynamic_ncols=True,
                 disable=None,
             ) as claims_progress:
-                claims_result = _stream_claims(db, idea_map, blocks_text, claims_progress)
+                claims_result = _stream_claims(
+                    db, idea_map, blocks_text, claims_progress
+                )
                 raw_claims = claims_result["content"].get("claims", [])
                 normalized_claims = [
-                    normalized for raw in raw_claims
+                    normalized
+                    for raw in raw_claims
                     if (normalized := _normalize_claim(raw))
                 ]
                 if len(normalized_claims) > claims_progress.n:
@@ -165,13 +174,16 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
             warrant_failures = 0
             valid_warrant_count = _count_warrants(idea_map.claims)
             max_workers = max(1, min(len(claims), LLM_MAX_CONCURRENCY))
-            with tqdm(
-                total=len(claims),
-                desc="idea-map warrants",
-                unit="claim",
-                dynamic_ncols=True,
-                disable=None,
-            ) as warrants_progress, ThreadPoolExecutor(max_workers=max_workers) as executor:
+            with (
+                tqdm(
+                    total=len(claims),
+                    desc="idea-map warrants",
+                    unit="claim",
+                    dynamic_ncols=True,
+                    disable=None,
+                ) as warrants_progress,
+                ThreadPoolExecutor(max_workers=max_workers) as executor,
+            ):
                 _set_warrant_progress(
                     warrants_progress,
                     valid=valid_warrant_count,
@@ -338,7 +350,9 @@ def generate_idea_map(idea_map_id: str, job_id: str | None = None) -> None:
 
         except Exception as e:
             db.rollback()
-            idea_map = db.query(SQLAIdeaMap).filter(SQLAIdeaMap.id == idea_map_id).first()
+            idea_map = (
+                db.query(SQLAIdeaMap).filter(SQLAIdeaMap.id == idea_map_id).first()
+            )
             if idea_map:
                 job = papers_service.resolve_idea_map_job(db, idea_map_id, job_id)
                 papers_service.fail_idea_map(db, idea_map, job, str(e))
@@ -556,7 +570,9 @@ def _persist_warrants(
         return 0
 
     claims = list(idea_map.claims or [])
-    target_claim = next((claim for claim in claims if claim.get("id") == claim_id), None)
+    target_claim = next(
+        (claim for claim in claims if claim.get("id") == claim_id), None
+    )
     if not target_claim:
         return 0
 
@@ -577,7 +593,8 @@ def _persist_warrants(
             warrant["citation"] = {
                 "startBlockId": citation["startBlockId"],
                 "endBlockId": citation["endBlockId"],
-                "sectionTitle": citation.get("sectionTitle") or start_block.section_title,
+                "sectionTitle": citation.get("sectionTitle")
+                or start_block.section_title,
             }
             valid_warrants.append(warrant)
         else:

@@ -55,15 +55,27 @@ def _candidate_counts_by_source(papers: list[SQLAPaper]) -> dict[str, int]:
 
 def _prompts_for_mode(mode: str):
     if mode == "claim":
-        return CLAIM_FILTER_SEARCH_SYSTEM_PROMPT, CLAIM_FILTER_SEARCH_USER_PROMPT, ClaimFilterSearchResponse
-    return TOPIC_FILTER_SEARCH_SYSTEM_PROMPT, TOPIC_FILTER_SEARCH_USER_PROMPT, TopicFilterSearchResponse
+        return (
+            CLAIM_FILTER_SEARCH_SYSTEM_PROMPT,
+            CLAIM_FILTER_SEARCH_USER_PROMPT,
+            ClaimFilterSearchResponse,
+        )
+    return (
+        TOPIC_FILTER_SEARCH_SYSTEM_PROMPT,
+        TOPIC_FILTER_SEARCH_USER_PROMPT,
+        TopicFilterSearchResponse,
+    )
 
 
 def _extract_result(mode: str, match: dict | None) -> dict | None:
     if not match:
         return None
     if mode == "claim":
-        return {"verdict": match.get("verdict", "positive"), "reason": match.get("reason", ""), "evidence": match.get("evidence")}
+        return {
+            "verdict": match.get("verdict", "positive"),
+            "reason": match.get("reason", ""),
+            "evidence": match.get("evidence"),
+        }
     return {"reason": match.get("reason", ""), "evidence": match.get("evidence")}
 
 
@@ -323,7 +335,11 @@ def run_daily_search(search_run_id: str, job_id: str) -> None:
 
         except Exception as e:
             db.rollback()
-            run = db.query(SQLASearchRun).filter(SQLASearchRun.id == search_run_id).first()
+            run = (
+                db.query(SQLASearchRun)
+                .filter(SQLASearchRun.id == search_run_id)
+                .first()
+            )
             if run:
                 job = search_runs.resolve_daily_search_job(db, search_run_id, job_id)
                 search_runs.fail_run(db, run, job, str(e))

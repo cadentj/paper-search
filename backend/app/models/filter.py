@@ -42,8 +42,15 @@ class SQLAFilter(Base):
     proposed_action = Column(Text, nullable=True)  # "create", "revise", "delete"
     target_filter_id = Column(Text, ForeignKey("filters.id"), nullable=True)
 
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
     archived_at = Column(DateTime, nullable=True)
 
     def to_pydantic(self) -> Filter:

@@ -21,6 +21,7 @@ class PaperPayload(BaseModel):
             f"Excerpt: {self.text}\n"
         )
 
+
 class PaperMatchPayload(BaseModel):
     match_id: str
     paper: PaperPayload

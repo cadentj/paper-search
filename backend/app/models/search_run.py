@@ -40,7 +40,9 @@ class SQLASearchRun(Base):
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     error = Column(Text, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
 
     def to_pydantic(self, *, job_id: str | None = None) -> SearchRun:
         resp = SearchRun.model_validate(self)

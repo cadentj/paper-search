@@ -43,6 +43,7 @@ def db_engine(tmp_path):
     import app.models.search_run
     import app.models.paper_match
     import app.models.idea_map
+
     Base.metadata.create_all(bind=engine)
     from app.services.papers_fts import ensure_papers_fts
 
@@ -105,6 +106,7 @@ def patch_worker_database(monkeypatch, test_database):
 @pytest.fixture
 def client(test_database):
     """Create a FastAPI test client with a test database."""
+
     def override_get_db():
         with test_database.session() as db:
             yield db

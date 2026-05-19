@@ -19,7 +19,12 @@ from app.services.jobs import create_job, latest_job_for_subject, set_job_status
 
 logger = logging.getLogger(__name__)
 
-IN_FLIGHT_IDEA_MAP_STATUSES = {"queued", "running", "claims_running", "warrants_running"}
+IN_FLIGHT_IDEA_MAP_STATUSES = {
+    "queued",
+    "running",
+    "claims_running",
+    "warrants_running",
+}
 
 
 def get_paper(db: Session, paper_id: str) -> SQLAPaper:
@@ -190,7 +195,9 @@ def mark_idea_map_running(db: Session, idea_map: SQLAIdeaMap, job: SQLAJob) -> N
     db.commit()
 
 
-def mark_idea_map_skipped(db: Session, idea_map: SQLAIdeaMap, job: SQLAJob, reason: str) -> None:
+def mark_idea_map_skipped(
+    db: Session, idea_map: SQLAIdeaMap, job: SQLAJob, reason: str
+) -> None:
     idea_map.status = "skipped"
     idea_map.dropped_reason = reason
     idea_map.updated_at = datetime.now(timezone.utc)

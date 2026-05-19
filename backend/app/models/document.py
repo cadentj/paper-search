@@ -40,7 +40,9 @@ class SQLADocument(Base):
     status = Column(Text, nullable=False, default="queued")
     error = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
     updated_at = Column(
         DateTime,
         nullable=False,

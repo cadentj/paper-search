@@ -22,7 +22,9 @@ def get_engine(url: str | None = None):
 
     engine = create_engine(
         db_url,
-        connect_args={"check_same_thread": False} if db_url.startswith("sqlite") else {},
+        connect_args={"check_same_thread": False}
+        if db_url.startswith("sqlite")
+        else {},
         pool_pre_ping=True,
     )
 
@@ -42,9 +44,7 @@ class Database:
 
     def __init__(self, engine):
         self.engine = engine
-        self.sessionmaker = sessionmaker(
-            autocommit=False, autoflush=False, bind=engine
-        )
+        self.sessionmaker = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
     @contextmanager
     def session(self) -> Iterator[Session]:

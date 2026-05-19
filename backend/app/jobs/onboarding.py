@@ -206,9 +206,11 @@ def extract_onboarding_filters(extraction_id: str, job_id: str | None = None) ->
     """Worker job: extract proposed filters from onboarding text."""
     with database.session() as db:
         try:
-            extraction = db.query(SQLAOnboardingExtraction).filter(
-                SQLAOnboardingExtraction.id == extraction_id
-            ).first()
+            extraction = (
+                db.query(SQLAOnboardingExtraction)
+                .filter(SQLAOnboardingExtraction.id == extraction_id)
+                .first()
+            )
             if not extraction:
                 return
 
@@ -219,7 +221,9 @@ def extract_onboarding_filters(extraction_id: str, job_id: str | None = None) ->
             set_job_status(job, status="running")
             db.commit()
 
-            user_prompt = ONBOARDING_USER_PROMPT.format(input_text=extraction.input_text)
+            user_prompt = ONBOARDING_USER_PROMPT.format(
+                input_text=extraction.input_text
+            )
             text_buffer = ""
             last_count = 0
 
@@ -266,9 +270,11 @@ def extract_onboarding_filters(extraction_id: str, job_id: str | None = None) ->
 
         except Exception as e:
             db.rollback()
-            extraction = db.query(SQLAOnboardingExtraction).filter(
-                SQLAOnboardingExtraction.id == extraction_id
-            ).first()
+            extraction = (
+                db.query(SQLAOnboardingExtraction)
+                .filter(SQLAOnboardingExtraction.id == extraction_id)
+                .first()
+            )
             if extraction:
                 now = datetime.now(timezone.utc)
                 extraction.status = "failed"

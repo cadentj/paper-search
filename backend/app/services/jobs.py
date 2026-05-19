@@ -7,7 +7,9 @@ from app.jobs.queues import queue_for_kind
 from app.models.job import SQLAJob
 
 
-def job_progress(*, current: int | None = None, total: int | None = None, **extra) -> dict:
+def job_progress(
+    *, current: int | None = None, total: int | None = None, **extra
+) -> dict:
     payload: dict = {}
     if total is not None:
         payload["total"] = max(total, 1)

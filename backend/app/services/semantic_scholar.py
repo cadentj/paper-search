@@ -45,7 +45,9 @@ def get_author_papers(author_id: str, limit: int = MAX_PUBLICATIONS) -> list[dic
             resp.raise_for_status()
             data = resp.json()
         except Exception:
-            logger.exception("Failed to fetch S2 author papers %s offset=%d", author_id, offset)
+            logger.exception(
+                "Failed to fetch S2 author papers %s offset=%d", author_id, offset
+            )
             break
 
         batch = data.get("data", [])

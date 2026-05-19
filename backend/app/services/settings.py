@@ -29,7 +29,11 @@ SOURCE_ORDER = ("arxiv", "lesswrong")
 
 
 def get_daily_schedule(db: Session) -> dict:
-    setting = db.query(SQLAAppSetting).filter(SQLAAppSetting.key == DAILY_SCHEDULE_KEY).first()
+    setting = (
+        db.query(SQLAAppSetting)
+        .filter(SQLAAppSetting.key == DAILY_SCHEDULE_KEY)
+        .first()
+    )
     if not setting:
         return {"time": None, "enabled": False}
     return dict(setting.value)
@@ -37,7 +41,11 @@ def get_daily_schedule(db: Session) -> dict:
 
 def update_daily_schedule(db: Session, data: dict) -> dict:
     now = datetime.now(timezone.utc)
-    setting = db.query(SQLAAppSetting).filter(SQLAAppSetting.key == DAILY_SCHEDULE_KEY).first()
+    setting = (
+        db.query(SQLAAppSetting)
+        .filter(SQLAAppSetting.key == DAILY_SCHEDULE_KEY)
+        .first()
+    )
     if setting:
         setting.value = data
         setting.updated_at = now
@@ -105,7 +113,10 @@ def _data_source_view(source_type: str, row: dict[str, Any]) -> dict[str, Any]:
 
 def get_data_sources(db: Session) -> list[dict[str, Any]]:
     stored = _get_stored_data_sources(db)
-    return [_data_source_view(source_type, stored[source_type]) for source_type in SOURCE_ORDER]
+    return [
+        _data_source_view(source_type, stored[source_type])
+        for source_type in SOURCE_ORDER
+    ]
 
 
 def update_data_source(
@@ -131,7 +142,5 @@ def update_data_source(
 def enabled_source_types(db: Session) -> set[str]:
     stored = _get_stored_data_sources(db)
     return {
-        source_type
-        for source_type in SOURCE_CATALOG
-        if stored[source_type]["enabled"]
+        source_type for source_type in SOURCE_CATALOG if stored[source_type]["enabled"]
     }

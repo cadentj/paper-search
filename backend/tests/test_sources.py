@@ -4,7 +4,11 @@ import uuid
 from datetime import date, datetime, timezone
 
 from paper_search_core.models.paper import SQLAPaper
-from app.services.sources import counts_by_source_for_date, paper_html, papers_for_sources
+from app.services.sources import (
+    counts_by_source_for_date,
+    paper_html,
+    papers_for_sources,
+)
 
 
 def test_papers_for_sources_uses_injected_session(db_session):
