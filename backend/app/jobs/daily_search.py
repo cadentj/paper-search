@@ -17,10 +17,12 @@ from app.services.source_settings import enabled_source_types
 from app.llm.client import async_call_llm
 from app.llm.config import JUDGE_PROFILE
 from app.llm.prompts import (
-    FILTER_SEARCH_SYSTEM_PROMPT,
-    FILTER_SEARCH_USER_PROMPT,
+    CLAIM_FILTER_SEARCH_SYSTEM_PROMPT,
+    CLAIM_FILTER_SEARCH_USER_PROMPT,
+    TOPIC_FILTER_SEARCH_SYSTEM_PROMPT,
+    TOPIC_FILTER_SEARCH_USER_PROMPT,
 )
-from app.llm.schemas import FilterSearchResponse
+from app.llm.schemas import ClaimFilterSearchResponse, TopicFilterSearchResponse
 from app.schemas.daily_search import FilterPayload, PairEvaluation
 from paper_search_core.schemas.daily_search import PaperPayload
 from tqdm import tqdm
@@ -89,10 +91,18 @@ def _complete_daily_search_stage(db, run: SearchRun, job: Job) -> None:
     db.commit()
 
 
-def _filter_behavior(mode: str) -> str:
+def _prompts_for_mode(mode: str):
     if mode == "claim":
-        return "Look for evidence that supports, refutes, or complicates the described claim."
-    return "Look for items relevant to the described topic or question."
+        return CLAIM_FILTER_SEARCH_SYSTEM_PROMPT, CLAIM_FILTER_SEARCH_USER_PROMPT, ClaimFilterSearchResponse
+    return TOPIC_FILTER_SEARCH_SYSTEM_PROMPT, TOPIC_FILTER_SEARCH_USER_PROMPT, TopicFilterSearchResponse
+
+
+def _extract_result(mode: str, match: dict | None) -> dict | None:
+    if not match:
+        return None
+    if mode == "claim":
+        return {"verdict": match.get("verdict", "positive"), "reason": match.get("reason", ""), "evidence": match.get("evidence")}
+    return {"reason": match.get("reason", ""), "evidence": match.get("evidence")}
 
 
 async def _evaluate_filter_paper(
@@ -102,19 +112,20 @@ async def _evaluate_filter_paper(
     paper: PaperPayload,
 ) -> PairEvaluation:
     definition = filt.definition or {}
+    mode = definition.get("mode", "topic")
+    system_prompt, user_prompt_template, response_model = _prompts_for_mode(mode)
 
-    user_prompt = FILTER_SEARCH_USER_PROMPT.format(
+    user_prompt = user_prompt_template.format(
         filter_name=definition.get("name", filt.name),
         filter_description=definition.get("description", ""),
-        filter_behavior=_filter_behavior(definition.get("mode", "topic")),
         papers_text=_build_paper_text(paper),
     )
     async with semaphore:
         try:
             llm_result = await async_call_llm(
-                system_prompt=FILTER_SEARCH_SYSTEM_PROMPT,
+                system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                response_model=FilterSearchResponse,
+                response_model=response_model,
                 profile=JUDGE_PROFILE,
             )
         except Exception as exc:
@@ -130,10 +141,11 @@ async def _evaluate_filter_paper(
             )
 
     matches = llm_result["content"].get("matches", [])
-    match = next(
+    raw_match = next(
         (m for m in matches if m.get("itemId") == paper.item_id),
         matches[0] if matches else None,
     )
+    result = _extract_result(mode, raw_match)
 
     return PairEvaluation(
         filter_id=filt.id,
@@ -143,7 +155,7 @@ async def _evaluate_filter_paper(
         source_type=paper.source_type,
         source_id=paper.source_id,
         item_id=paper.item_id,
-        result=match,
+        result=result,
         model=llm_result["model"],
         response_id=llm_result["response_id"],
     )
@@ -279,15 +291,15 @@ def run_daily_search(search_run_id: str, job_id: str | None = None) -> None:
                     f"{evaluation.error}"
                 )
             else:
-                match_data = evaluation.result or {}
-                result_text = str(match_data.get("result") or "").strip()
-                if result_text:
+                result = evaluation.result
+                has_content = result and result.get("reason", "").strip()
+                if has_content:
                     db.add(
                         PaperMatch(
                             search_run_id=search_run_id,
                             filter_id=evaluation.filter_id,
                             paper_id=evaluation.paper_id,
-                            result=result_text,
+                            result=result,
                             llm_model=evaluation.model,
                             llm_response_id=evaluation.response_id,
                         )

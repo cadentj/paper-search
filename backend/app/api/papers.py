@@ -5,13 +5,17 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from pydantic import BaseModel
+
 from app.db.session import get_db
 from app.models.paper import Paper
+from app.models.paper_note import PaperNote
 from app.models.idea_map import IdeaMap
 from app.schemas.papers import PaperResponse, IdeaMapResponse
 from app.schemas.jobs import JobStartResponse
 from app.jobs.queue import get_queue
 from app.jobs.idea_map import generate_idea_map
+from app.jobs.paper_notes_filter_gen import generate_filters_from_notes
 from app.services.jobs import create_job, latest_job_for_subject
 from app.services.source_providers import provider_for
 
@@ -123,6 +127,90 @@ def _enqueue_idea_map(idea_map: IdeaMap, db: Session, job_record) -> JobStartRes
         job_record.completed_at = idea_map.updated_at
         db.commit()
         raise HTTPException(status_code=503, detail=idea_map.error) from exc
+
+    return JobStartResponse(job_id=job_record.id)
+
+
+class PaperNoteResponse(BaseModel):
+    id: str
+    paper_id: str
+    text: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class PaperNoteUpdate(BaseModel):
+    text: str
+
+
+@router.get("/{paper_id}/notes", response_model=PaperNoteResponse | None)
+def get_paper_notes(paper_id: str, db: Session = Depends(get_db)):
+    paper = db.query(Paper).filter(Paper.id == paper_id).first()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    note = db.query(PaperNote).filter(PaperNote.paper_id == paper_id).first()
+    if not note:
+        return None
+    return PaperNoteResponse(
+        id=note.id, paper_id=note.paper_id, text=note.text,
+        created_at=note.created_at, updated_at=note.updated_at,
+    )
+
+
+@router.put("/{paper_id}/notes", response_model=PaperNoteResponse)
+def update_paper_notes(paper_id: str, body: PaperNoteUpdate, db: Session = Depends(get_db)):
+    paper = db.query(Paper).filter(Paper.id == paper_id).first()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    now = datetime.now(timezone.utc)
+    note = db.query(PaperNote).filter(PaperNote.paper_id == paper_id).first()
+    if note:
+        note.text = body.text
+        note.updated_at = now
+    else:
+        note = PaperNote(
+            id=str(uuid.uuid4()),
+            paper_id=paper_id,
+            text=body.text,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(note)
+    db.commit()
+    db.refresh(note)
+    return PaperNoteResponse(
+        id=note.id, paper_id=note.paper_id, text=note.text,
+        created_at=note.created_at, updated_at=note.updated_at,
+    )
+
+
+@router.post("/{paper_id}/notes/generate-filters", response_model=JobStartResponse)
+def generate_filters_from_paper_notes(paper_id: str, db: Session = Depends(get_db)):
+    paper = db.query(Paper).filter(Paper.id == paper_id).first()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    note = db.query(PaperNote).filter(PaperNote.paper_id == paper_id).first()
+    if not note or not note.text.strip():
+        raise HTTPException(status_code=400, detail="No notes to generate filters from")
+
+    job_record = create_job(
+        db,
+        kind="paper_notes_filter_gen",
+        subject_type="paper_note",
+        subject_id=note.id,
+    )
+    db.commit()
+
+    try:
+        q = get_queue()
+        q.enqueue(generate_filters_from_notes, note.id, job_record.id)
+    except Exception as exc:
+        job_record.status = "failed"
+        job_record.error = str(exc)
+        job_record.completed_at = datetime.now(timezone.utc)
+        db.commit()
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return JobStartResponse(job_id=job_record.id)
 

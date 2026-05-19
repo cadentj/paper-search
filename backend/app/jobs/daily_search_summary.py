@@ -19,6 +19,19 @@ from paper_search_core.schemas.daily_search import paper_item_id
 logger = logging.getLogger(__name__)
 
 
+def _format_result(result) -> str:
+    if isinstance(result, dict):
+        parts = []
+        if result.get("verdict"):
+            parts.append(f"Verdict: {result['verdict']}")
+        if result.get("reason"):
+            parts.append(result["reason"])
+        if result.get("evidence"):
+            parts.append(f"Evidence: {result['evidence']}")
+        return " | ".join(parts) if parts else ""
+    return str(result or "")
+
+
 def _build_matches_text(matches: list[dict]) -> str:
     lines = []
     for m in matches:
@@ -26,7 +39,7 @@ def _build_matches_text(matches: list[dict]) -> str:
             f"Item: {m.get('paper_title', 'Unknown')} ({m.get('item_id', '')})\n"
             f"Source: {m.get('source_type', '')} {m.get('source_id', '')}\n"
             f"Filter: {m.get('filter_name', 'Unknown')}\n"
-            f"Result: {m.get('result', '')}\n"
+            f"Result: {_format_result(m.get('result', ''))}\n"
             f"Match ID: {m.get('match_id', '')}\n"
         )
     return "\n---\n".join(lines)

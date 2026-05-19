@@ -62,8 +62,11 @@ import {
   ChevronRight,
   PlusCircle,
   CalendarIcon,
+  ThumbsUp,
+  ThumbsDown,
 } from "lucide-react";
-import type { DailySearchSummary, Job, PaperMatch, SearchRun } from "@/lib/api";
+import type { DailySearchSummary, Job, PaperMatch, SearchRun, ClaimFilterResult } from "@/lib/api";
+import { api } from "@/lib/api";
 
 type FilterMode = "claim" | "topic";
 type MatchGroup = { name: string; matches: PaperMatch[] };
@@ -408,6 +411,78 @@ function MatchesSection({
   );
 }
 
+function MatchResultDisplay({ match }: { match: PaperMatch }) {
+  const result = match.result;
+  if (!result || typeof result !== "object") return null;
+
+  const isClaim = match.filter_mode === "claim" && "verdict" in result;
+
+  if (isClaim) {
+    const claimResult = result as ClaimFilterResult;
+    return (
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <Badge variant={claimResult.verdict === "positive" ? "default" : "destructive"} className="text-xs">
+            {claimResult.verdict}
+          </Badge>
+        </div>
+        <p className="text-sm text-muted-foreground">{claimResult.reason}</p>
+        {claimResult.evidence && (
+          <p className="text-xs text-muted-foreground italic">{claimResult.evidence}</p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      <p className="text-sm text-muted-foreground">{result.reason}</p>
+      {result.evidence && (
+        <p className="text-xs text-muted-foreground italic">{result.evidence}</p>
+      )}
+    </div>
+  );
+}
+
+function FeedbackButtons({ matchId }: { matchId: string }) {
+  const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleFeedback = async (value: "up" | "down") => {
+    if (loading) return;
+    setLoading(true);
+    try {
+      await api.submitFeedback(matchId, value);
+      setFeedback(value);
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        onClick={() => handleFeedback("up")}
+        disabled={loading}
+        className={`p-1 rounded hover:bg-muted ${feedback === "up" ? "text-green-600" : "text-muted-foreground"}`}
+        aria-label="Thumbs up"
+      >
+        <ThumbsUp className="size-3.5" />
+      </button>
+      <button
+        onClick={() => handleFeedback("down")}
+        disabled={loading}
+        className={`p-1 rounded hover:bg-muted ${feedback === "down" ? "text-red-600" : "text-muted-foreground"}`}
+        aria-label="Thumbs down"
+      >
+        <ThumbsDown className="size-3.5" />
+      </button>
+    </div>
+  );
+}
+
 function PaperMatchCard({ match }: { match: PaperMatch }) {
   const externalUrl =
     match.paper_source_url ||
@@ -445,8 +520,9 @@ function PaperMatchCard({ match }: { match: PaperMatch }) {
             )}
           </div>
         </div>
+        <FeedbackButtons matchId={match.id} />
       </div>
-      <p className="text-sm text-muted-foreground">{match.result}</p>
+      <MatchResultDisplay match={match} />
       {match.paper_authors && match.paper_authors.length > 0 && (
         <p className="text-sm text-muted-foreground">
           {match.paper_authors.join(", ")}

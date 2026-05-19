@@ -20,9 +20,13 @@ import {
   ChevronRight,
   ArrowLeft,
   ExternalLink,
+  StickyNote,
+  Wand2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { IdeaMap, IdeaMapClaim, IdeaMapWarrant, Job, Paper } from "@/lib/api";
+import { api } from "@/lib/api";
+import { Textarea } from "@/components/ui/textarea";
 
 const BLOCK_SELECTOR = "[data-paper-block-id]";
 const HIGHLIGHT_STYLE_ID = "ps-highlight-style";
@@ -406,6 +410,88 @@ function IdeaMapWarrantButton({
   );
 }
 
+function PaperNotesPanel({ paperId }: { paperId: string }) {
+  const [text, setText] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    api.getPaperNotes(paperId).then((note) => {
+      if (note) setText(note.text);
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }, [paperId]);
+
+  const handleChange = (value: string) => {
+    setText(value);
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await api.updatePaperNotes(paperId, value);
+      } catch {
+        // ignore
+      } finally {
+        setSaving(false);
+      }
+    }, 1000);
+  };
+
+  const handleGenerateFilters = async () => {
+    if (!text.trim()) return;
+    setGenerating(true);
+    try {
+      await api.updatePaperNotes(paperId, text);
+      await api.generateFiltersFromNotes(paperId);
+    } catch {
+      // ignore
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <div className="border-t flex flex-col">
+      <button
+        className="flex items-center gap-2 p-2 text-sm font-semibold hover:bg-muted/50"
+        onClick={() => setCollapsed(!collapsed)}
+      >
+        {collapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
+        <StickyNote className="size-3.5" />
+        Notes
+        {saving && <span className="text-xs text-muted-foreground ml-auto">Saving...</span>}
+      </button>
+      {!collapsed && loaded && (
+        <div className="p-2 space-y-2">
+          <Textarea
+            value={text}
+            onChange={(e) => handleChange(e.target.value)}
+            placeholder="Add notes about this paper..."
+            rows={4}
+            className="text-sm resize-none"
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleGenerateFilters}
+            disabled={!text.trim() || generating}
+          >
+            {generating ? (
+              <Loader2 className="mr-1 size-3 animate-spin" />
+            ) : (
+              <Wand2 className="mr-1 size-3" />
+            )}
+            Generate Filters from Notes
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PaperHtmlViewer({
   paper,
   htmlData,
@@ -581,6 +667,7 @@ export default function PaperDetailPage({
             htmlData={htmlData}
             iframeRef={iframeRef}
           />
+          <PaperNotesPanel paperId={paperId} />
         </div>
       </div>
     </div>

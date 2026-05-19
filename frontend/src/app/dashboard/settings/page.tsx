@@ -1,6 +1,7 @@
 "use client";
 
-import { Database, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Clock, Database, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,7 +10,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { useDataSources, useUpdateDataSource } from "@/hooks/use-queries";
+import { api } from "@/lib/api";
 import type { DataSource } from "@/lib/api";
 
 const SOURCE_DESCRIPTIONS: Record<string, string> = {
@@ -100,6 +103,75 @@ export default function SettingsPage() {
           />
         ))}
       </div>
+
+      <DailyScheduleSection />
     </div>
+  );
+}
+
+function DailyScheduleSection() {
+  const [time, setTime] = useState("");
+  const [enabled, setEnabled] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    api.getDailySchedule()
+      .then((data) => {
+        setTime(data.time || "");
+        setEnabled(data.enabled);
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const result = await api.updateDailySchedule({ time: time || null, enabled });
+      setTime(result.time || "");
+      setEnabled(result.enabled);
+    } catch {
+      // ignore
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!loaded) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Clock className="size-4" />
+          Daily Search Schedule
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-center gap-3">
+          <Input
+            type="time"
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+            className="w-36"
+          />
+          <Button
+            variant={enabled ? "outline" : "default"}
+            size="sm"
+            onClick={() => setEnabled(!enabled)}
+          >
+            {enabled ? "Enabled" : "Disabled"}
+          </Button>
+          <Button size="sm" onClick={handleSave} disabled={saving}>
+            {saving && <Loader2 className="mr-1 size-3 animate-spin" />}
+            Save
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Set a preferred time for daily searches. Scheduling is not yet automated.
+        </p>
+      </CardContent>
+    </Card>
   );
 }

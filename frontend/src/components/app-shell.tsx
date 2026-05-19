@@ -2,12 +2,14 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import {
   Newspaper,
   Search,
   Filter,
   Settings,
 } from "lucide-react";
+import { api } from "@/lib/api";
 import {
   Sidebar,
   SidebarContent,
@@ -31,6 +33,13 @@ const NAV_ITEMS = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const [feedbackCount, setFeedbackCount] = useState(0);
+
+  useEffect(() => {
+    api.getFeedbackNotifications()
+      .then((data) => setFeedbackCount(data.unseen_count))
+      .catch(() => {});
+  }, [pathname]);
 
   return (
     <SidebarProvider>
@@ -48,6 +57,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                     >
                       <item.icon className="size-4" />
                       <span>{item.label}</span>
+                      {item.label === "Filters" && feedbackCount > 0 && (
+                        <span className="ml-auto inline-flex size-2 rounded-full bg-blue-500" />
+                      )}
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}

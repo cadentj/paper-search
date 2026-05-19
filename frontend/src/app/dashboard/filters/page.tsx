@@ -35,13 +35,14 @@ import {
   useUpdateFilter,
   useUploadDocument,
 } from "@/hooks/use-queries";
-import { DocumentUploadResponse, FilterResponse } from "@/lib/api";
+import { api, DocumentUploadResponse, FilterResponse } from "@/lib/api";
 import {
   Archive,
   Check,
   ChevronDown,
   ChevronRight,
   FileText,
+  GraduationCap,
   Loader2,
   Pencil,
   Plus,
@@ -239,6 +240,108 @@ function DraftFilterCard({ filter }: { filter: FilterResponse }) {
               </Button>
             </div>
           </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ScholarImportSection() {
+  const [url, setUrl] = useState("");
+  const [step, setStep] = useState<"input" | "verifying" | "verified" | "importing" | "done" | "error">("input");
+  const [profile, setProfile] = useState<{ author_id: string; name: string; affiliations: string[]; paper_count: number | null } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  const handleVerify = async () => {
+    if (!url.trim()) return;
+    setStep("verifying");
+    setError(null);
+    try {
+      const result = await api.verifyScholarProfile(url);
+      setProfile(result);
+      setStep("verified");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Verification failed");
+      setStep("error");
+    }
+  };
+
+  const handleImport = async () => {
+    if (!profile) return;
+    setStep("importing");
+    try {
+      await api.startScholarImport({
+        url,
+        author_id: profile.author_id,
+        display_name: profile.name,
+      });
+      setStep("done");
+      queryClient.invalidateQueries({ queryKey: ["filters"] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed");
+      setStep("error");
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <GraduationCap className="size-4" />
+          Semantic Scholar Profile Import
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {step === "done" ? (
+          <p className="text-sm text-muted-foreground">
+            Import started for {profile?.name}. Draft filters will appear above shortly.
+          </p>
+        ) : (
+          <>
+            <div className="flex gap-2">
+              <Input
+                placeholder="Paste Semantic Scholar profile URL..."
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                disabled={step === "verifying" || step === "importing"}
+              />
+              {step === "input" || step === "error" ? (
+                <Button size="sm" onClick={handleVerify} disabled={!url.trim()}>
+                  Verify
+                </Button>
+              ) : null}
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            {step === "verifying" && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Verifying profile...
+              </div>
+            )}
+            {step === "verified" && profile && (
+              <div className="space-y-2">
+                <div className="text-sm">
+                  <p className="font-medium">{profile.name}</p>
+                  {profile.affiliations.length > 0 && (
+                    <p className="text-muted-foreground">{profile.affiliations.join(", ")}</p>
+                  )}
+                  {profile.paper_count != null && (
+                    <p className="text-muted-foreground">{profile.paper_count} papers</p>
+                  )}
+                </div>
+                <Button size="sm" onClick={handleImport}>
+                  Import & Generate Filters
+                </Button>
+              </div>
+            )}
+            {step === "importing" && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Importing papers and generating filters...
+              </div>
+            )}
+          </>
         )}
       </CardContent>
     </Card>
@@ -496,6 +599,8 @@ export default function FiltersPage() {
           ) : null}
         </div>
       )}
+
+      <ScholarImportSection />
 
       {activeFilters.length > 0 && (
         <div className="space-y-3">
