@@ -64,19 +64,17 @@ class TopicFilterSearchResponse(StrictModel):
 FilterSearchResponse = TopicFilterSearchResponse
 
 
+class FeedbackAction(StrictModel):
+    action: Literal["create", "revise", "delete"]
+    name: str | None = None
+    description: str | None = None
+    mode: Literal["claim", "topic"] | None = None
+    target_filter_id: str | None = None
+    rationale: str = ""
+
+
 class FeedbackReflectionResponse(StrictModel):
-    revised_description: str
-    rationale: str
-
-
-class PaperNotesFilterGenFilter(StrictModel):
-    name: str
-    description: str
-    mode: Literal["claim", "topic"]
-
-
-class PaperNotesFilterGenResponse(StrictModel):
-    proposedFilters: list[PaperNotesFilterGenFilter]
+    actions: list[FeedbackAction]
 
 
 class SearchSummaryCitation(StrictModel):

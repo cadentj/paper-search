@@ -37,6 +37,8 @@ export interface FilterResponse {
   status: string;
   source: string;
   parent_filter_id?: string | null;
+  proposed_action?: string | null;
+  target_filter_id?: string | null;
   created_at: string;
   updated_at: string;
   archived_at?: string;
@@ -209,8 +211,17 @@ export interface ScholarImportStatus {
   error?: string;
 }
 
-export interface FeedbackNotification {
-  unseen_count: number;
+export interface FeedbackStatus {
+  pending_votes: number;
+  pending_notes: number;
+  pending_proposals: number;
+}
+
+export interface PaginatedPapers {
+  papers: Paper[];
+  total: number;
+  page: number;
+  per_page: number;
 }
 
 export interface Paper {
@@ -426,6 +437,8 @@ export const api = {
     fetchApi<PaperMatch[]>(`/search-runs/${id}/matches`),
 
   // Papers
+  getDailyPapers: (runDate: string, page: number = 1) =>
+    fetchApi<PaginatedPapers>(`/papers/daily?run_date=${encodeURIComponent(runDate)}&page=${page}&per_page=20`),
   getPaper: (id: string) => fetchApi<Paper>(`/papers/${id}`),
   getPaperHtml: (id: string) =>
     fetchApi<{ html: string | null; source_url: string | null }>(`/papers/${id}/html`),
@@ -442,21 +455,27 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ text }),
     }),
-  generateFiltersFromNotes: (paperId: string) =>
-    fetchApi<JobStartResponse>(`/papers/${paperId}/notes/generate-filters`, {
-      method: "POST",
-    }),
-
   // Feedback
-  submitFeedback: (matchId: string, value: "up" | "down") =>
-    fetchApi<PaperMatchFeedback>(`/paper-matches/${matchId}/feedback`, {
+  submitMatchFeedback: (matchId: string, value: "up" | "down") =>
+    fetchApi<{ id: string; paper_id: string; value: string }>(`/paper-matches/${matchId}/feedback`, {
       method: "POST",
       body: JSON.stringify({ value }),
     }),
-  getFeedbackNotifications: () =>
-    fetchApi<FeedbackNotification>("/feedback/notifications"),
-  markFeedbackSeen: () =>
-    fetchApi<{ ok: boolean }>("/feedback/notifications/seen", { method: "POST" }),
+  submitPaperFeedback: (paperId: string) =>
+    fetchApi<{ id: string; paper_id: string; value: string }>(`/papers/${paperId}/feedback`, {
+      method: "POST",
+      body: JSON.stringify({ paper_id: paperId, value: "up" }),
+    }),
+  getFeedbackStatus: () =>
+    fetchApi<FeedbackStatus>("/feedback/status"),
+  processFeedback: () =>
+    fetchApi<{ job_id: string }>("/feedback/process", { method: "POST" }),
+
+  // Filter proposals
+  acceptProposal: (filterId: string) =>
+    fetchApi<FilterResponse>(`/filters/${filterId}/accept`, { method: "POST" }),
+  rejectProposal: (filterId: string) =>
+    fetchApi<FilterResponse>(`/filters/${filterId}/reject`, { method: "POST" }),
 
   // Settings
   getDailySchedule: () => fetchApi<DailySchedule>("/settings/daily-schedule"),

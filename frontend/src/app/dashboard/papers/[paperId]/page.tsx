@@ -21,7 +21,6 @@ import {
   ArrowLeft,
   ExternalLink,
   StickyNote,
-  Wand2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { IdeaMap, IdeaMapClaim, IdeaMapWarrant, Job, Paper } from "@/lib/api";
@@ -414,7 +413,6 @@ function PaperNotesPanel({ paperId }: { paperId: string }) {
   const [text, setText] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [generating, setGenerating] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -440,19 +438,6 @@ function PaperNotesPanel({ paperId }: { paperId: string }) {
     }, 1000);
   };
 
-  const handleGenerateFilters = async () => {
-    if (!text.trim()) return;
-    setGenerating(true);
-    try {
-      await api.updatePaperNotes(paperId, text);
-      await api.generateFiltersFromNotes(paperId);
-    } catch {
-      // ignore
-    } finally {
-      setGenerating(false);
-    }
-  };
-
   return (
     <div className="border-t flex flex-col">
       <button
@@ -473,19 +458,7 @@ function PaperNotesPanel({ paperId }: { paperId: string }) {
             rows={4}
             className="text-sm resize-none"
           />
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleGenerateFilters}
-            disabled={!text.trim() || generating}
-          >
-            {generating ? (
-              <Loader2 className="mr-1 size-3 animate-spin" />
-            ) : (
-              <Wand2 className="mr-1 size-3" />
-            )}
-            Generate Filters from Notes
-          </Button>
+
         </div>
       )}
     </div>

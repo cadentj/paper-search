@@ -10,6 +10,7 @@ import {
   Settings,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import type { FeedbackStatus } from "@/lib/api";
 import {
   Sidebar,
   SidebarContent,
@@ -33,13 +34,20 @@ const NAV_ITEMS = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const [feedbackCount, setFeedbackCount] = useState(0);
+  const [feedbackStatus, setFeedbackStatus] = useState<FeedbackStatus | null>(null);
 
   useEffect(() => {
-    api.getFeedbackNotifications()
-      .then((data) => setFeedbackCount(data.unseen_count))
+    api.getFeedbackStatus()
+      .then(setFeedbackStatus)
       .catch(() => {});
   }, [pathname]);
+
+  const hasPendingFeedback = feedbackStatus
+    ? feedbackStatus.pending_votes > 0 || feedbackStatus.pending_notes > 0
+    : false;
+  const hasPendingProposals = feedbackStatus
+    ? feedbackStatus.pending_proposals > 0
+    : false;
 
   return (
     <SidebarProvider>
@@ -57,7 +65,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                     >
                       <item.icon className="size-4" />
                       <span>{item.label}</span>
-                      {item.label === "Filters" && feedbackCount > 0 && (
+                      {item.label === "Filters" && hasPendingProposals && (
+                        <span className="ml-auto inline-flex size-2 rounded-full bg-green-500" />
+                      )}
+                      {item.label === "Filters" && !hasPendingProposals && hasPendingFeedback && (
                         <span className="ml-auto inline-flex size-2 rounded-full bg-blue-500" />
                       )}
                     </SidebarMenuButton>

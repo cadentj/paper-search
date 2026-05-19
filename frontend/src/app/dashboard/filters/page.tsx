@@ -88,7 +88,6 @@ function DocumentChip({
     isActive ? document.job_id : null
   );
   const latestDocument = documentJob?.subject;
-  const job = documentJob?.job;
   const displayDocument = latestDocument
     ? { ...document, ...latestDocument, job_id: document.job_id }
     : document;
@@ -374,6 +373,67 @@ function ScholarImportSection({ hasScholarFilters }: { hasScholarFilters: boolea
   );
 }
 
+function ProposalCard({
+  filter,
+  targetFilter,
+  onAccept,
+  onReject,
+}: {
+  filter: FilterResponse;
+  targetFilter?: FilterResponse;
+  onAccept: () => void;
+  onReject: () => void;
+}) {
+  const actionLabel =
+    filter.proposed_action === "create"
+      ? "New filter"
+      : filter.proposed_action === "revise"
+        ? "Revise existing filter"
+        : "Delete filter";
+  const badgeVariant =
+    filter.proposed_action === "create"
+      ? "default"
+      : filter.proposed_action === "delete"
+        ? "destructive"
+        : "secondary";
+
+  return (
+    <Card>
+      <CardContent className="pt-4 space-y-2">
+        <div className="flex items-center gap-2">
+          <Badge variant={badgeVariant}>{actionLabel}</Badge>
+        </div>
+        <p className="font-medium">{filter.name}</p>
+        {filter.proposed_action !== "delete" && (
+          <p className="text-sm text-muted-foreground">
+            {filter.definition.description}
+          </p>
+        )}
+        {targetFilter && filter.proposed_action === "revise" && (
+          <div className="rounded border p-2 text-xs text-muted-foreground space-y-1">
+            <p className="font-medium">Current: {targetFilter.name}</p>
+            <p>{targetFilter.definition.description}</p>
+          </div>
+        )}
+        {targetFilter && filter.proposed_action === "delete" && (
+          <p className="text-sm text-muted-foreground">
+            Will archive: {targetFilter.name}
+          </p>
+        )}
+        <div className="flex gap-2">
+          <Button size="sm" onClick={onAccept}>
+            <Check className="mr-1 size-3" />
+            Accept
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onReject}>
+            Dismiss
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function FiltersPage() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -393,10 +453,51 @@ export default function FiltersPage() {
   const { data: draftFilters = [] } = useFilters("draft");
   const { data: allFilters } = useFilters();
 
+  const [processingFeedback, setProcessingFeedback] = useState(false);
+  const [feedbackStatus, setFeedbackStatus] = useState<{ pending_votes: number; pending_notes: number; pending_proposals: number } | null>(null);
+
   const activeFilters = allFilters?.filter((f) => f.status === "active") || [];
   const archivedFilters =
     allFilters?.filter((f) => f.status === "archived") || [];
+  const proposalFilters = allFilters?.filter(
+    (f) => f.proposed_action && ["pending_create", "pending_revision", "pending_deletion"].includes(f.status)
+  ) || [];
   const hasScholarFilters = allFilters?.some((f) => f.source === "scholar") || false;
+
+  useEffect(() => {
+    api.getFeedbackStatus().then(setFeedbackStatus).catch(() => {});
+  }, []);
+
+  const handleProcessFeedback = async () => {
+    setProcessingFeedback(true);
+    try {
+      await api.processFeedback();
+      queryClient.invalidateQueries({ queryKey: ["filters"] });
+      api.getFeedbackStatus().then(setFeedbackStatus).catch(() => {});
+    } catch {
+      // ignore
+    } finally {
+      setProcessingFeedback(false);
+    }
+  };
+
+  const handleAcceptProposal = async (filterId: string) => {
+    try {
+      await api.acceptProposal(filterId);
+      queryClient.invalidateQueries({ queryKey: ["filters"] });
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleRejectProposal = async (filterId: string) => {
+    try {
+      await api.rejectProposal(filterId);
+      queryClient.invalidateQueries({ queryKey: ["filters"] });
+    } catch {
+      // ignore
+    }
+  };
 
   const readyDocuments = documents.filter(
     (document) => document.status === "ready"
@@ -628,6 +729,51 @@ export default function FiltersPage() {
       )}
 
       <ScholarImportSection hasScholarFilters={hasScholarFilters} />
+
+      {feedbackStatus && (feedbackStatus.pending_votes > 0 || feedbackStatus.pending_notes > 0) && (
+        <Card>
+          <CardContent className="pt-4 flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Pending Feedback</p>
+              <p className="text-xs text-muted-foreground">
+                {feedbackStatus.pending_votes} vote{feedbackStatus.pending_votes !== 1 ? "s" : ""}
+                {feedbackStatus.pending_notes > 0 && `, ${feedbackStatus.pending_notes} note${feedbackStatus.pending_notes !== 1 ? "s" : ""}`}
+              </p>
+            </div>
+            <Button
+              size="sm"
+              onClick={handleProcessFeedback}
+              disabled={processingFeedback}
+            >
+              {processingFeedback ? (
+                <Loader2 className="mr-1 size-3 animate-spin" />
+              ) : null}
+              Process Feedback
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {proposalFilters.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-lg font-semibold">
+            Proposals ({proposalFilters.length})
+          </h2>
+          {proposalFilters.map((f) => (
+            <ProposalCard
+              key={f.id}
+              filter={f}
+              targetFilter={
+                f.target_filter_id
+                  ? allFilters?.find((t) => t.id === f.target_filter_id)
+                  : undefined
+              }
+              onAccept={() => handleAcceptProposal(f.id)}
+              onReject={() => handleRejectProposal(f.id)}
+            />
+          ))}
+        </div>
+      )}
 
       {activeFilters.length > 0 && (
         <div className="space-y-3">

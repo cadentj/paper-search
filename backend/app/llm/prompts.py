@@ -155,29 +155,28 @@ Extract supporting warrants for this claim with citations to these block ids."""
 IDEA_MAP_SYSTEM_PROMPT = IDEA_MAP_CLAIMS_SYSTEM_PROMPT
 IDEA_MAP_USER_PROMPT = IDEA_MAP_CLAIMS_USER_PROMPT
 
-FEEDBACK_REFLECTION_SYSTEM_PROMPT = """You are a research filter advisor. A researcher has voted on a paper match from one of their search filters. Based on the vote, revise the filter's description to better match what the researcher wants.
+FEEDBACK_REFLECTION_SYSTEM_PROMPT = """You are a research filter advisor. A researcher has provided feedback on paper matches and left notes on papers. Based on all of their feedback, propose changes to their filter set.
 
-For upvotes ("more like this"): refine the description to better capture what made this paper a good match. Make it more specific toward papers like this one.
+For each proposed change, choose one action:
+- CREATE: propose a new filter for an uncovered research interest
+- REVISE: update an existing filter's description to better match or exclude papers
+- DELETE: remove a filter that is no longer useful
 
-For downvotes ("less like this"): refine the description to exclude the type of paper that was a poor match. Clarify the filter's intent to avoid similar false positives.
+For REVISE and DELETE, you must specify the target_filter_id of the existing filter.
+For CREATE and REVISE, provide a name, description, and mode ("claim" or "topic").
 
-Return:
-- revised_description: the updated filter description
-- rationale: brief explanation of why you changed it"""
+Consider the full picture of feedback before proposing changes. A single vote may not warrant a change, but patterns across multiple votes should inform your decisions."""
 
-FEEDBACK_REFLECTION_USER_PROMPT = """Filter:
-Name: {parent_filter_name}
-Description: {parent_filter_description}
-Mode: {parent_filter_mode}
+FEEDBACK_REFLECTION_USER_PROMPT = """Existing Filters:
+{existing_filters}
 
-Paper: {paper_title}
-Abstract: {paper_abstract}
+Vote Feedback:
+{vote_feedback}
 
-Match Result: {match_result}
+Note Feedback:
+{note_feedback}
 
-Feedback: {feedback_value}
-
-Revise the filter description based on this feedback."""
+Based on all feedback above, propose filter changes."""
 
 PAPER_NOTES_SYSTEM_PROMPT = """You are an expert research assistant. Given a researcher's notes about a specific paper and the paper's metadata, generate targeted search filters that would help them explore the ideas and directions mentioned in their notes.
 
