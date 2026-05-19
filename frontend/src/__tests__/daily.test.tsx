@@ -195,20 +195,137 @@ describe("Daily report page", () => {
       expect(screen.getByText(/daily summary/i)).toBeInTheDocument();
       expect(screen.getByText(/today we found interesting papers/i)).toBeInTheDocument();
       expect(
-        screen.getByRole("link", { name: /open citation 1: 2401.00001/i })
+        screen.getByRole("button", { name: /open citation 1: 2401.00001/i })
       ).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /LLM Reasoning/i })).toBeInTheDocument();
       expect(screen.getByText("Claim")).toBeInTheDocument();
     });
 
     expect(
-      screen.getByRole("link", { name: /open citation 1: 2401.00001/i })
-    ).toHaveAttribute("href", "/dashboard/papers/p1");
+      screen.queryByRole("link", { name: /open citation 1: 2401.00001/i })
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/reasoning evidence/i)).not.toBeInTheDocument();
     expect(screen.queryByText("CoT Paper")).not.toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("button", { name: /open citation 1: 2401.00001/i }));
+    expect(await screen.findByText("Daily Paper One")).toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("button", { name: /LLM Reasoning/i }));
     expect(await screen.findByText("CoT Paper")).toBeInTheDocument();
+  });
+
+  it("recovers in-flight summary job on reload without starting a duplicate", async () => {
+    mockApi.getLatestSearchRun.mockResolvedValue({
+      id: "r1",
+      job_id: "j1",
+      summary_job_id: "s1",
+      status: "running",
+    });
+    mockApi.getSearchRun.mockResolvedValue({
+      id: "r1",
+      job_id: "j1",
+      summary_job_id: "s1",
+      status: "running",
+      match_count: 1,
+    });
+    mockApi.getDailySearchSummaryJob.mockResolvedValue({
+      job: {
+        id: "s1",
+        kind: "daily_search_summary",
+        status: "running",
+        subject_type: "search_run",
+        subject_id: "r1",
+        created_at: "2026-05-17T19:00:00Z",
+        updated_at: "2026-05-17T19:00:01Z",
+      },
+      run: { id: "r1", status: "running", summary_job_id: "s1" },
+      summary: {
+        search_run_id: "r1",
+        summary: "CLAIMS\n\nRecovered partial summary",
+        citations: [],
+      },
+      done: false,
+    });
+
+    renderDaily(<DailyReportView />);
+
+    await waitFor(() => {
+      expect(mockApi.getDailySearchSummaryJob).toHaveBeenCalledWith("s1");
+      expect(screen.getByText(/recovered partial summary/i)).toBeInTheDocument();
+    });
+    expect(mockApi.createDailySearchSummary).not.toHaveBeenCalled();
+  });
+
+  it("shows partial summary while summary job is streaming", async () => {
+    mockApi.getLatestSearchRun.mockResolvedValue({
+      id: "r1",
+      job_id: "j1",
+      summary_job_id: "s1",
+      status: "running",
+    });
+    mockApi.getSearchRun.mockResolvedValue({
+      id: "r1",
+      status: "running",
+      match_count: 1,
+    });
+    mockApi.getDailySearchJob.mockResolvedValue({
+      job: {
+        id: "j1",
+        kind: "daily_search",
+        status: "completed",
+        subject_type: "search_run",
+        subject_id: "r1",
+        created_at: "2026-05-17T19:00:00Z",
+        updated_at: "2026-05-17T19:00:01Z",
+      },
+      subject: {
+        id: "r1",
+        job_id: "j1",
+        summary_job_id: "s1",
+        status: "running",
+      },
+      items: [
+        {
+          id: "m1",
+          search_run_id: "r1",
+          filter_id: "f1",
+          paper_id: "p1",
+          result: "Already found during the run",
+          created_at: "2026-05-17T19:00:00Z",
+          paper_title: "Streaming Match",
+          paper_authors: ["Author A"],
+          filter_name: "LLM Reasoning",
+        },
+      ],
+      done: true,
+    });
+    mockApi.createDailySearchSummary.mockResolvedValue({ job_id: "s1" });
+    mockApi.getDailySearchSummaryJob.mockResolvedValue({
+      job: {
+        id: "s1",
+        kind: "daily_search_summary",
+        status: "running",
+        subject_type: "search_run",
+        subject_id: "r1",
+        created_at: "2026-05-17T19:00:00Z",
+        updated_at: "2026-05-17T19:00:01Z",
+      },
+      run: { id: "r1", status: "running" },
+      summary: {
+        search_run_id: "r1",
+        summary: "CLAIMS\n\nPartial summary text",
+        citations: [],
+      },
+      done: false,
+    });
+
+    renderDaily(<DailyReportView />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/partial summary text/i)).toBeInTheDocument();
+      expect(screen.getByText("Writing…")).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/writing daily summary/i)).not.toBeInTheDocument();
   });
 });
 

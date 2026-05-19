@@ -11,6 +11,7 @@ from app.models.base import Base
 class SearchRun(BaseModel):
     id: str
     job_id: Optional[str] = None
+    summary_job_id: Optional[str] = None
     status: str
     run_date: date
     candidate_count: Optional[int] = None
@@ -44,8 +45,17 @@ class SQLASearchRun(Base):
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
-    def to_pydantic(self, job_id: str | None = None) -> SearchRun:
+    def to_pydantic(
+        self,
+        job_id: str | None = None,
+        summary_job_id: str | None = None,
+    ) -> SearchRun:
         resp = SearchRun.model_validate(self)
+        updates: dict[str, str] = {}
         if job_id is not None:
-            return resp.model_copy(update={"job_id": job_id})
+            updates["job_id"] = job_id
+        if summary_job_id is not None:
+            updates["summary_job_id"] = summary_job_id
+        if updates:
+            return resp.model_copy(update=updates)
         return resp

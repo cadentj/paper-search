@@ -154,9 +154,14 @@ export function DailyProvider({ children }: { children: ReactNode }) {
     activeJob?.status === "queued" || activeJob?.status === "running";
   const { data: fetchedRun } = useSearchRun(runId, false);
   const run = typedRun || fetchedRun || latestRun || null;
-  const { data: summaryJobData } = useDailySearchSummaryJob(
-    state.activeSummaryJobId
-  );
+  const recoveredSummaryJobId =
+    run?.status === "running" &&
+    (run.summary_job_id || latestRun?.summary_job_id)
+      ? run.summary_job_id || latestRun?.summary_job_id || null
+      : null;
+  const currentSummaryJobId =
+    state.activeSummaryJobId || recoveredSummaryJobId;
+  const { data: summaryJobData } = useDailySearchSummaryJob(currentSummaryJobId);
   const { data: runSummary } = useSearchRunSummary(
     runId,
     run?.status === "completed"
@@ -179,8 +184,9 @@ export function DailyProvider({ children }: { children: ReactNode }) {
     if (!dailyJob?.done || !runId) return;
     if (run?.status === "completed" || run?.status === "failed") return;
     if (activeJob?.status !== "completed") return;
-    if (state.activeSummaryJobId || isStartingSummary) return;
+    if (currentSummaryJobId || isStartingSummary) return;
     if (state.summaryStartedForRunId === runId) return;
+    if (recoveredSummaryJobId) return;
 
     dispatch({ type: "summary-requested", runId });
     startSummary(runId, {
@@ -195,7 +201,8 @@ export function DailyProvider({ children }: { children: ReactNode }) {
     runId,
     run?.status,
     activeJob?.status,
-    state.activeSummaryJobId,
+    currentSummaryJobId,
+    recoveredSummaryJobId,
     state.summaryStartedForRunId,
     isStartingSummary,
     startSummary,

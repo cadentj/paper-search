@@ -1,10 +1,49 @@
 "use client";
 
 import { useRef } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { api, DailySchedule, FilterDefinition, FilterResponse, PaperMatch } from "@/lib/api";
 
 const ACTIVE_JOB_STATUSES = new Set(["queued", "running"]);
+
+const PENDING_PROPOSAL_STATUSES = new Set([
+  "pending_create",
+  "pending_revision",
+  "pending_deletion",
+]);
+
+export function countProposalFilters(filters: FilterResponse[]): number {
+  return filters.filter(
+    (filter) =>
+      filter.proposed_action &&
+      PENDING_PROPOSAL_STATUSES.has(filter.status)
+  ).length;
+}
+
+export function getAllFiltersFromCache(qc: QueryClient): FilterResponse[] {
+  const entries = qc.getQueriesData<FilterResponse[]>({ queryKey: ["filters"] });
+  const byId = new Map<string, FilterResponse>();
+  for (const [, filters] of entries) {
+    for (const filter of filters ?? []) {
+      byId.set(filter.id, filter);
+    }
+  }
+  return Array.from(byId.values());
+}
+
+export function invalidateFeedbackCompletionQueries(qc: QueryClient) {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ["feedback", "status"] }),
+    qc.invalidateQueries({ queryKey: ["feedback", "items", "pending"] }),
+    qc.invalidateQueries({ queryKey: ["filters"] }),
+    qc.invalidateQueries({ queryKey: ["jobs", "overview"] }),
+  ]);
+}
 
 export function useJobsOverview() {
   return useQuery({
@@ -32,7 +71,7 @@ export function useDailySearchSummaryJob(id: string | null) {
     queryKey: ["jobs", "daily-search-summary", id],
     queryFn: () => api.getDailySearchSummaryJob(id!),
     enabled: !!id,
-    refetchInterval: (query) => (query.state.data?.done ? false : 1000),
+    refetchInterval: (query) => (query.state.data?.done ? false : 500),
   });
 }
 
@@ -315,10 +354,12 @@ export function useProcessFeedback() {
   return useMutation({
     mutationFn: api.processFeedback,
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["feedback", "status"] });
-      qc.invalidateQueries({ queryKey: ["feedback", "items", "pending"] });
-      qc.invalidateQueries({ queryKey: ["filters"] });
-      qc.invalidateQueries({ queryKey: ["jobs", "overview"] });
+      return Promise.all([
+        qc.invalidateQueries({ queryKey: ["feedback", "status"] }),
+        qc.invalidateQueries({ queryKey: ["feedback", "items", "pending"] }),
+        qc.invalidateQueries({ queryKey: ["filters"] }),
+        qc.invalidateQueries({ queryKey: ["jobs", "overview"] }),
+      ]);
     },
   });
 }

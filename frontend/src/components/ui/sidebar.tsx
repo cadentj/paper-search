@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { use } from "react"
 import { mergeProps } from "@base-ui/react/merge-props"
 import { useRender } from "@base-ui/react/use-render"
 import { cva, type VariantProps } from "class-variance-authority"
@@ -33,7 +34,7 @@ type SidebarContextProps = {
 const SidebarContext = React.createContext<SidebarContextProps | null>(null)
 
 function useSidebar() {
-  const context = React.useContext(SidebarContext)
+  const context = use(SidebarContext)
   if (!context) {
     throw new Error("useSidebar must be used within a SidebarProvider.")
   }
@@ -56,7 +57,7 @@ function SidebarProvider({
 }) {
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
-  const [_open, _setOpen] = React.useState(defaultOpen)
+  const [_open, _setOpen] = React.useState(() => defaultOpen)
   const open = openProp ?? _open
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {

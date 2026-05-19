@@ -10,7 +10,7 @@ from openai import (
     AsyncOpenAI,
     OpenAI,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from app.config import LLM_MAX_RETRIES, LLM_RETRY_BASE_SECONDS, settings
 from app.llm.config import JUDGE_PROFILE, LLMModelConfig, get_llm_config
@@ -25,6 +25,10 @@ def _is_transient_error(exc: Exception) -> bool:
     if isinstance(exc, APIStatusError):
         return exc.status_code in TRANSIENT_STATUS_CODES
     return isinstance(exc, (APIConnectionError, APITimeoutError))
+
+
+def _is_retryable_error(exc: Exception) -> bool:
+    return _is_transient_error(exc) or isinstance(exc, ValidationError)
 
 
 def _require_api_key() -> str:
@@ -104,7 +108,7 @@ async def _async_parse_call(
     base=LLM_RETRY_BASE_SECONDS,
     factor=2,
     jitter=backoff.random_jitter,
-    giveup=lambda exc: not _is_transient_error(exc),
+    giveup=lambda exc: not _is_retryable_error(exc),
 )
 async def _async_call_llm_with_client(
     client: AsyncOpenAI,
@@ -152,6 +156,7 @@ def stream_structured_response(
             input=_response_input(system_prompt, user_prompt),
             extra_body=_provider_body(model_config),
             text_format=response_model,
+            max_output_tokens=16_384,
         ) as stream,
     ):
         for event in stream:

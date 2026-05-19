@@ -12,16 +12,19 @@ from app.models.paper_match import PaperMatch, SQLAPaperMatch
 from app.models.search_run import SQLASearchRun, SearchRun
 from paper_search_core.daily_dates import DEFAULT_DAILY_SEARCH_DATE
 from app.services.jobs import (
+    ACTIVE_JOB_STATUSES,
+    SUMMARY_JOB_MAX_SECONDS,
     commit_refresh,
     create_job,
     enqueue,
     latest_job_for_subject,
+    reconcile_stale_job,
     set_job_status,
     with_progress,
 )
 from app.services.settings import enabled_source_types
 
-ACTIVE_SUMMARY_JOB_STATUSES = {"queued", "running"}
+ACTIVE_SUMMARY_JOB_STATUSES = set(ACTIVE_JOB_STATUSES)
 
 
 def get_search_run(db: Session, search_run_id: str) -> SQLASearchRun:
@@ -29,6 +32,41 @@ def get_search_run(db: Session, search_run_id: str) -> SQLASearchRun:
     if not run:
         raise LookupError("Search run not found")
     return run
+
+
+def _lock_search_run(db: Session, search_run_id: str) -> SQLASearchRun:
+    run = (
+        db.query(SQLASearchRun)
+        .filter(SQLASearchRun.id == search_run_id)
+        .with_for_update()
+        .first()
+    )
+    if not run:
+        raise LookupError("Search run not found")
+    return run
+
+
+def latest_summary_job(db: Session, run_id: str) -> SQLAJob | None:
+    return latest_job_for_subject(
+        db,
+        subject_type="search_run",
+        subject_id=run_id,
+        kind="daily_search_summary",
+    )
+
+
+def reconcile_summary_job_for_run(db: Session, run: SQLASearchRun) -> SQLAJob | None:
+    summary_job = latest_summary_job(db, run.id)
+    if summary_job:
+        reconcile_stale_job(db, summary_job)
+        db.refresh(run)
+    return summary_job
+
+
+def _active_summary_job_id(summary_job: SQLAJob | None) -> str | None:
+    if summary_job and summary_job.status in ACTIVE_SUMMARY_JOB_STATUSES:
+        return summary_job.id
+    return None
 
 
 def list_search_runs(db: Session) -> list[SQLASearchRun]:
@@ -46,7 +84,11 @@ def search_run_payload(db: Session, run: SQLASearchRun) -> SearchRun:
         subject_id=run.id,
         kind="daily_search",
     )
-    return run.to_pydantic(job_id=search_job.id if search_job else None)
+    summary_job = reconcile_summary_job_for_run(db, run)
+    return run.to_pydantic(
+        job_id=search_job.id if search_job else None,
+        summary_job_id=_active_summary_job_id(summary_job),
+    )
 
 
 def summary_payload(run: SQLASearchRun):
@@ -145,7 +187,7 @@ def start_daily_search(
 
 
 def start_daily_summary(db: Session, search_run_id: str) -> SQLAJob:
-    run = get_search_run(db, search_run_id)
+    run = _lock_search_run(db, search_run_id)
 
     search_job = latest_job_for_subject(
         db,
@@ -156,16 +198,9 @@ def start_daily_summary(db: Session, search_run_id: str) -> SQLAJob:
     if not search_job or search_job.status != "completed":
         raise ValueError("Daily search must complete before starting summary")
 
-    existing_summary = latest_job_for_subject(
-        db,
-        subject_type="search_run",
-        subject_id=run.id,
-        kind="daily_search_summary",
-    )
+    existing_summary = reconcile_summary_job_for_run(db, run)
     if existing_summary and existing_summary.status in ACTIVE_SUMMARY_JOB_STATUSES:
-        raise FileExistsError(
-            "A summary job is already in progress for this search run"
-        )
+        return existing_summary
 
     summary_job = create_job(
         db,
@@ -176,7 +211,12 @@ def start_daily_summary(db: Session, search_run_id: str) -> SQLAJob:
     )
 
     commit_refresh(db, summary_job)
-    enqueue(db, summary_job, log_context=f"daily search summary run={run.id}")
+    enqueue(
+        db,
+        summary_job,
+        log_context=f"daily search summary run={run.id}",
+        job_timeout=SUMMARY_JOB_MAX_SECONDS,
+    )
     return summary_job
 
 
@@ -224,6 +264,12 @@ def set_summary_status(
     db.commit()
 
 
+def update_summary_draft(db: Session, run: SQLASearchRun, summary: str) -> None:
+    """Persist in-progress summary text while the summary job is still running."""
+    run.summary = summary
+    db.commit()
+
+
 def complete_summary(
     db: Session, run: SQLASearchRun, job: SQLAJob, summary: str, citations: list
 ) -> None:
@@ -246,18 +292,23 @@ def match_payloads_for_run(db: Session, search_run_id: str):
         .order_by(SQLAPaperMatch.created_at.asc(), SQLAPaperMatch.id.asc())
         .all()
     )
-    return [
-        PaperMatchPayload(
-            match_id=match.id,
-            paper=paper.to_search_payload(),
-            filter_name=filter.name,
-            result=(
-                match.result
-                if isinstance(match.result, str)
-                else json.dumps(match.result)
-                if match.result
-                else ""
-            ),
+    payloads = []
+    for match, paper, filter in rows:
+        definition = dict(filter.definition or {})
+        payloads.append(
+            PaperMatchPayload(
+                match_id=match.id,
+                paper=paper.to_search_payload(),
+                filter_name=filter.name,
+                filter_mode=definition.get("mode", "topic"),
+                filter_description=definition.get("description", ""),
+                result=(
+                    match.result
+                    if isinstance(match.result, str)
+                    else json.dumps(match.result)
+                    if match.result
+                    else ""
+                ),
+            )
         )
-        for match, paper, filter in rows
-    ]
+    return payloads

@@ -38,8 +38,13 @@ import {
   useCreateOnboardingGeneration,
   useFeedbackStatus,
   useFilters,
+  useJob,
+  useJobsOverview,
   useOnboardingGenerationJob,
   usePendingFeedbackItems,
+  countProposalFilters,
+  getAllFiltersFromCache,
+  invalidateFeedbackCompletionQueries,
   useProcessFeedback,
   usePromoteDraftFilters,
   useRestoreFilter,
@@ -74,6 +79,12 @@ import {
 
 const MAX_INPUT_CHARS = 2000;
 const BLOCKING_DOCUMENT_STATUSES = new Set(["queued", "processing"]);
+const FEEDBACK_TIMESTAMP_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
 
 type UploadedDocument = DocumentUploadResponse;
 type ScholarImportStep =
@@ -109,6 +120,9 @@ type FilterPageState = {
   documents: UploadedDocument[];
   uploadError: string | null;
   generationJobId: string | null;
+  feedbackJobId: string | null;
+  feedbackFinalizing: boolean;
+  feedbackCompletion: { proposalCount: number; highlight: boolean } | null;
   archivedOpen: boolean;
 };
 type FilterPageAction =
@@ -117,6 +131,12 @@ type FilterPageAction =
   | { type: "remove-document"; id: string }
   | { type: "set-upload-error"; error: string | null }
   | { type: "generation-started"; jobId: string }
+  | { type: "feedback-started"; jobId: string }
+  | { type: "feedback-finalizing" }
+  | { type: "feedback-completed"; proposalCount: number }
+  | { type: "feedback-failed" }
+  | { type: "feedback-highlight-cleared" }
+  | { type: "feedback-completion-dismiss" }
   | { type: "toggle-archived" };
 
 function documentStatusLabel(status: string) {
@@ -137,12 +157,7 @@ function documentStatusLabel(status: string) {
 }
 
 function formatFeedbackTimestamp(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(value));
+  return FEEDBACK_TIMESTAMP_FORMATTER.format(new Date(value));
 }
 
 function feedbackItemTimestamp(item: FeedbackItem) {
@@ -210,6 +225,36 @@ function filterPageReducer(
       return { ...state, uploadError: action.error };
     case "generation-started":
       return { ...state, generationJobId: action.jobId, inputText: "" };
+    case "feedback-started":
+      return {
+        ...state,
+        feedbackJobId: action.jobId,
+        feedbackFinalizing: false,
+        feedbackCompletion: null,
+      };
+    case "feedback-finalizing":
+      return { ...state, feedbackFinalizing: true };
+    case "feedback-completed":
+      return {
+        ...state,
+        feedbackJobId: null,
+        feedbackFinalizing: false,
+        feedbackCompletion: {
+          proposalCount: action.proposalCount,
+          highlight: action.proposalCount > 0,
+        },
+      };
+    case "feedback-failed":
+      return { ...state, feedbackFinalizing: false };
+    case "feedback-highlight-cleared":
+      return state.feedbackCompletion
+        ? {
+            ...state,
+            feedbackCompletion: { ...state.feedbackCompletion, highlight: false },
+          }
+        : state;
+    case "feedback-completion-dismiss":
+      return { ...state, feedbackCompletion: null };
     case "toggle-archived":
       return { ...state, archivedOpen: !state.archivedOpen };
   }
@@ -700,17 +745,66 @@ function DraftFiltersSection({
   );
 }
 
+function FeedbackCompletionBanner({
+  proposalCount,
+  onDismiss,
+}: {
+  proposalCount: number;
+  onDismiss: () => void;
+}) {
+  const message =
+    proposalCount > 0
+      ? `${proposalCount} filter proposal${proposalCount === 1 ? "" : "s"} ready — review below`
+      : "Feedback processed. No filter changes were suggested.";
+
+  return (
+    <div
+      className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm ${
+        proposalCount > 0
+          ? "border-primary/30 bg-primary/5 text-foreground"
+          : "border-border bg-muted/40 text-muted-foreground"
+      }`}
+      role="status"
+      aria-live="polite"
+    >
+      <span>{message}</span>
+      <Button variant="ghost" size="sm" onClick={onDismiss}>
+        Dismiss
+      </Button>
+    </div>
+  );
+}
+
+function feedbackProcessingLabel(
+  status: "queued" | "running" | "failed" | null
+): string {
+  switch (status) {
+    case "queued":
+      return "Queued — analyzing feedback…";
+    case "running":
+      return "Analyzing feedback and drafting filter proposals…";
+    case "failed":
+      return "Feedback processing failed. Try again.";
+    default:
+      return "";
+  }
+}
+
 function FeedbackCard({
   status,
   items,
   isLoadingItems,
   isProcessing,
+  processingStatus,
+  processingError,
   onProcess,
 }: {
   status?: FeedbackStatus;
   items: FeedbackItem[];
   isLoadingItems: boolean;
   isProcessing: boolean;
+  processingStatus: "queued" | "running" | "failed" | null;
+  processingError?: string | null;
   onProcess: () => void;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -763,10 +857,29 @@ function FeedbackCard({
               {isProcessing ? (
                 <Loader2 className="mr-1 size-3 animate-spin" />
               ) : null}
-              Process Feedback
+              {isProcessing ? "Processing…" : "Process Feedback"}
             </Button>
           </div>
         </div>
+
+        {processingStatus ? (
+          <div
+            className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
+              processingStatus === "failed"
+                ? "border-destructive/50 bg-destructive/5 text-destructive"
+                : "border-border bg-muted/40 text-muted-foreground"
+            }`}
+            role="status"
+            aria-live="polite"
+          >
+            {processingStatus !== "failed" ? (
+              <Loader2 className="size-4 shrink-0 animate-spin" />
+            ) : null}
+            <span>
+              {processingError ?? feedbackProcessingLabel(processingStatus)}
+            </span>
+          </div>
+        ) : null}
 
         {isExpanded ? (
           <div className="space-y-4">
@@ -853,21 +966,32 @@ function FeedbackItemRow({ item }: { item: FeedbackItem }) {
   );
 }
 
-function ProposalSection({
-  filters,
-  allFilters,
-  onAccept,
-  onReject,
-}: {
-  filters: FilterResponse[];
-  allFilters: FilterResponse[];
-  onAccept: (filterId: string) => void;
-  onReject: (filterId: string) => void;
-}) {
+function ProposalSection(
+  {
+    filters,
+    allFilters,
+    onAccept,
+    onReject,
+    highlighted = false,
+    ref,
+  }: {
+    filters: FilterResponse[];
+    allFilters: FilterResponse[];
+    onAccept: (filterId: string) => void;
+    onReject: (filterId: string) => void;
+    highlighted?: boolean;
+    ref?: RefObject<HTMLDivElement | null>;
+  }
+) {
   if (filters.length === 0) return null;
 
   return (
-    <div className="space-y-3">
+    <div
+      ref={ref}
+      className={`space-y-3 rounded-lg transition-shadow duration-500 ${
+        highlighted ? "ring-2 ring-primary/40" : ""
+      }`}
+    >
       <h2 className="text-lg font-semibold">Proposals ({filters.length})</h2>
       {filters.map((filter) => (
         <ProposalCard
@@ -991,6 +1115,164 @@ function ArchivedFiltersSection({
   );
 }
 
+function useUploadedDocumentState(documents: UploadedDocument[]) {
+  const documentJobs = useQueries({
+    queries: documents.map((uploadedDocument) => ({
+      queryKey: ["jobs", "document-processing", uploadedDocument.job_id],
+      queryFn: () => api.getDocumentProcessingJob(uploadedDocument.job_id),
+      enabled: BLOCKING_DOCUMENT_STATUSES.has(uploadedDocument.status),
+      refetchInterval: documentJobRefetchInterval,
+    })),
+  });
+
+  const displayDocuments = useMemo(
+    () =>
+      documents.map((uploadedDocument, index) => {
+        const latestDocument = documentJobs[index]?.data?.subject;
+        return latestDocument
+          ? {
+              ...uploadedDocument,
+              ...latestDocument,
+              job_id: uploadedDocument.job_id,
+            }
+          : uploadedDocument;
+      }),
+    [documents, documentJobs]
+  );
+  const readyDocuments = displayDocuments.filter(
+    (uploadedDocument) => uploadedDocument.status === "ready"
+  );
+  const blockingDocuments = displayDocuments.filter((uploadedDocument) =>
+    BLOCKING_DOCUMENT_STATUSES.has(uploadedDocument.status)
+  );
+  const processedCount = displayDocuments.filter(
+    (uploadedDocument) =>
+      !BLOCKING_DOCUMENT_STATUSES.has(uploadedDocument.status)
+  ).length;
+  const progressText =
+    displayDocuments.length === 0
+      ? null
+      : `${processedCount}/${displayDocuments.length} PDFs processed`;
+
+  return { displayDocuments, readyDocuments, blockingDocuments, progressText };
+}
+
+function useFeedbackProcessingState({
+  feedbackJobId,
+  feedbackFinalizing,
+  dispatch,
+}: {
+  feedbackJobId: string | null;
+  feedbackFinalizing: boolean;
+  dispatch: (action: FilterPageAction) => void;
+}) {
+  const queryClient = useQueryClient();
+  const feedbackCompletionHandledRef = useRef<string | null>(null);
+  const processFeedback = useProcessFeedback();
+  const { data: jobsOverview } = useJobsOverview();
+  const { data: feedbackJob } = useJob(feedbackJobId);
+  const { data: feedbackStatus } = useFeedbackStatus();
+  const hasPendingFeedback = feedbackStatus
+    ? feedbackStatus.pending_votes > 0 || feedbackStatus.pending_notes > 0
+    : false;
+  const { data: pendingFeedbackItems = [], isLoading: isLoadingFeedbackItems } =
+    usePendingFeedbackItems(hasPendingFeedback);
+  const isFeedbackProcessing =
+    processFeedback.isPending ||
+    feedbackFinalizing ||
+    feedbackJob?.status === "queued" ||
+    feedbackJob?.status === "running";
+  const feedbackProcessingStatus: "queued" | "running" | "failed" | null =
+    feedbackJob?.status === "failed"
+      ? "failed"
+      : feedbackFinalizing || feedbackJob?.status === "running"
+        ? "running"
+        : feedbackJob?.status === "queued" || processFeedback.isPending
+          ? "queued"
+          : null;
+
+  useEffect(() => {
+    if (feedbackJobId) return;
+    const activeFeedbackJob = jobsOverview?.active.find(
+      (entry) => entry.job.kind === "feedback_reflection"
+    );
+    if (activeFeedbackJob) {
+      dispatch({
+        type: "feedback-started",
+        jobId: activeFeedbackJob.job.id,
+      });
+    }
+  }, [dispatch, feedbackJobId, jobsOverview]);
+
+  useEffect(() => {
+    if (!feedbackJobId || !feedbackJob) return;
+    if (feedbackJob.status === "queued" || feedbackJob.status === "running") {
+      return;
+    }
+    if (feedbackCompletionHandledRef.current === feedbackJobId) {
+      return;
+    }
+
+    if (feedbackJob.status === "failed") {
+      feedbackCompletionHandledRef.current = feedbackJobId;
+      void invalidateFeedbackCompletionQueries(queryClient);
+      dispatch({ type: "feedback-failed" });
+      return;
+    }
+
+    if (feedbackJob.status !== "completed") {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      dispatch({ type: "feedback-finalizing" });
+      if (cancelled) return;
+      try {
+        await invalidateFeedbackCompletionQueries(queryClient);
+      } catch {
+        if (!cancelled) {
+          dispatch({ type: "feedback-failed" });
+        }
+        return;
+      }
+      if (cancelled) return;
+
+      feedbackCompletionHandledRef.current = feedbackJobId;
+      dispatch({
+        type: "feedback-completed",
+        proposalCount: countProposalFilters(getAllFiltersFromCache(queryClient)),
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dispatch, feedbackJob, feedbackJobId, queryClient]);
+
+  const handleProcessFeedback = async () => {
+    if (isFeedbackProcessing) return;
+    feedbackCompletionHandledRef.current = null;
+    dispatch({ type: "feedback-completion-dismiss" });
+    try {
+      const result = await processFeedback.mutateAsync();
+      dispatch({ type: "feedback-started", jobId: result.job_id });
+    } catch {
+      // mutation error surfaced via react-query
+    }
+  };
+
+  return {
+    feedbackStatus,
+    pendingFeedbackItems,
+    isLoadingFeedbackItems,
+    isFeedbackProcessing,
+    feedbackProcessingStatus,
+    feedbackProcessingError: feedbackJob?.error,
+    handleProcessFeedback,
+  };
+}
+
 function EmptyFiltersState({ isVisible }: { isVisible: boolean }) {
   if (!isVisible) return null;
 
@@ -1008,11 +1290,15 @@ function EmptyFiltersState({ isVisible }: { isVisible: boolean }) {
 export default function FiltersPage() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const proposalsSectionRef = useRef<HTMLDivElement | null>(null);
   const [state, dispatch] = useReducer(filterPageReducer, {
     inputText: "",
     documents: [],
     uploadError: null,
     generationJobId: null,
+    feedbackJobId: null,
+    feedbackFinalizing: false,
+    feedbackCompletion: null,
     archivedOpen: false,
   });
 
@@ -1021,43 +1307,31 @@ export default function FiltersPage() {
   const promoteDraftFilters = usePromoteDraftFilters();
   const archiveFilter = useArchiveFilter();
   const restoreFilter = useRestoreFilter();
-  const processFeedback = useProcessFeedback();
-  const { data: feedbackStatus } = useFeedbackStatus();
-  const hasPendingFeedback = feedbackStatus
-    ? feedbackStatus.pending_votes > 0 || feedbackStatus.pending_notes > 0
-    : false;
-  const { data: pendingFeedbackItems = [], isLoading: isLoadingFeedbackItems } =
-    usePendingFeedbackItems(hasPendingFeedback);
+  const {
+    feedbackStatus,
+    pendingFeedbackItems,
+    isLoadingFeedbackItems,
+    isFeedbackProcessing,
+    feedbackProcessingStatus,
+    feedbackProcessingError,
+    handleProcessFeedback,
+  } = useFeedbackProcessingState({
+    feedbackJobId: state.feedbackJobId,
+    feedbackFinalizing: state.feedbackFinalizing,
+    dispatch,
+  });
   const { data: generationState } = useOnboardingGenerationJob(
     state.generationJobId
   );
   const generationJob = generationState?.job;
   const { data: draftFilters = [] } = useFilters("draft");
   const { data: allFilters = [] } = useFilters();
-
-  const documentJobs = useQueries({
-    queries: state.documents.map((uploadedDocument) => ({
-      queryKey: ["jobs", "document-processing", uploadedDocument.job_id],
-      queryFn: () => api.getDocumentProcessingJob(uploadedDocument.job_id),
-      enabled: BLOCKING_DOCUMENT_STATUSES.has(uploadedDocument.status),
-      refetchInterval: documentJobRefetchInterval,
-    })),
-  });
-
-  const displayDocuments = useMemo(
-    () =>
-      state.documents.map((uploadedDocument, index) => {
-        const latestDocument = documentJobs[index]?.data?.subject;
-        return latestDocument
-          ? {
-              ...uploadedDocument,
-              ...latestDocument,
-              job_id: uploadedDocument.job_id,
-            }
-          : uploadedDocument;
-      }),
-    [state.documents, documentJobs]
-  );
+  const {
+    displayDocuments,
+    readyDocuments,
+    blockingDocuments,
+    progressText,
+  } = useUploadedDocumentState(state.documents);
 
   const activeFilters = allFilters.filter((filter) => filter.status === "active");
   const archivedFilters = allFilters.filter(
@@ -1073,16 +1347,6 @@ export default function FiltersPage() {
   const hasScholarFilters = allFilters.some(
     (filter) => filter.source === "scholar"
   );
-  const readyDocuments = displayDocuments.filter(
-    (uploadedDocument) => uploadedDocument.status === "ready"
-  );
-  const blockingDocuments = displayDocuments.filter((uploadedDocument) =>
-    BLOCKING_DOCUMENT_STATUSES.has(uploadedDocument.status)
-  );
-  const processedCount = displayDocuments.filter(
-    (uploadedDocument) =>
-      !BLOCKING_DOCUMENT_STATUSES.has(uploadedDocument.status)
-  ).length;
   const isGenerating =
     generationJob?.status === "queued" || generationJob?.status === "running";
   const canSend =
@@ -1092,11 +1356,6 @@ export default function FiltersPage() {
     blockingDocuments.length === 0 &&
     state.inputText.length <= MAX_INPUT_CHARS &&
     (state.inputText.trim().length > 0 || readyDocuments.length > 0);
-
-  const progressText = useMemo(() => {
-    if (displayDocuments.length === 0) return null;
-    return `${processedCount}/${displayDocuments.length} PDFs processed`;
-  }, [displayDocuments.length, processedCount]);
 
   useEffect(() => {
     if (!generationState?.items.length) return;
@@ -1109,6 +1368,30 @@ export default function FiltersPage() {
       }
     );
   }, [generationState, queryClient]);
+
+  useEffect(() => {
+    if (!state.feedbackCompletion || state.feedbackCompletion.proposalCount === 0) {
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      proposalsSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [state.feedbackCompletion]);
+
+  useEffect(() => {
+    if (!state.feedbackCompletion || state.feedbackCompletion.proposalCount === 0) {
+      return;
+    }
+    const timeout = window.setTimeout(
+      () => dispatch({ type: "feedback-highlight-cleared" }),
+      2000
+    );
+    return () => window.clearTimeout(timeout);
+  }, [state.feedbackCompletion]);
 
   const handleFiles = async (files: FileList | null) => {
     if (!files?.length) return;
@@ -1245,13 +1528,24 @@ export default function FiltersPage() {
         status={feedbackStatus}
         items={pendingFeedbackItems}
         isLoadingItems={isLoadingFeedbackItems}
-        isProcessing={processFeedback.isPending}
-        onProcess={() => processFeedback.mutate()}
+        isProcessing={isFeedbackProcessing}
+        processingStatus={feedbackProcessingStatus}
+        processingError={feedbackProcessingError}
+        onProcess={handleProcessFeedback}
       />
 
+      {state.feedbackCompletion ? (
+        <FeedbackCompletionBanner
+          proposalCount={state.feedbackCompletion.proposalCount}
+          onDismiss={() => dispatch({ type: "feedback-completion-dismiss" })}
+        />
+      ) : null}
+
       <ProposalSection
+        ref={proposalsSectionRef}
         filters={proposalFilters}
         allFilters={allFilters}
+        highlighted={state.feedbackCompletion?.highlight ?? false}
         onAccept={handleAcceptProposal}
         onReject={handleRejectProposal}
       />

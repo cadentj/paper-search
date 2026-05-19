@@ -237,35 +237,57 @@ def _fake_daily_async_llm(
 
 
 def _fake_summary_llm(matched_arxiv_id: str):
-    calls = {"count": 0}
+    calls = {"count": 0, "deltas": 0}
     item_id = f"arxiv:{matched_arxiv_id}"
+    final_content = {
+        "summary": (
+            "CLAIMS\n\n"
+            "Test Filter\n"
+            "One relevant paper matched today's filters and reports scaling behavior "
+            f'consistent with the claim <cite itemId="{item_id}"/>. '
+            "The match provides direct empirical support rather than a tangential analogy."
+        ),
+        "citations": [
+            {
+                "paperMatchId": "",
+                "itemId": item_id,
+                "sourceType": "arxiv",
+                "sourceId": matched_arxiv_id,
+                "citedFor": "Relevant claim",
+            }
+        ],
+    }
 
-    async def fake_async_call_llm(**kwargs):
+    def fake_stream_structured_response(**kwargs):
+        import json
+
         assert kwargs["profile"] == SUMMARY_PROFILE
         assert kwargs["response_model"] is SearchSummaryResponse
         assert '<cite itemId="' in kwargs["system_prompt"]
         calls["count"] += 1
+        on_text_delta = kwargs.get("on_text_delta")
+        if on_text_delta:
+            serialized = json.dumps(final_content)
+            on_text_delta(
+                '{"summary": "CLAIMS\\n\\nTest Filter\\nOne relevant paper matched'
+            )
+            calls["deltas"] += 1
+            on_text_delta(
+                serialized[
+                    len(
+                        '{"summary": "CLAIMS\\n\\nTest Filter\\nOne relevant paper matched'
+                    ) :
+                ]
+            )
+            calls["deltas"] += 1
         return {
-            "content": {
-                "summary": (
-                    "One relevant paper matched today's filters "
-                    f'<cite itemId="{item_id}"/>.'
-                ),
-                "citations": [
-                    {
-                        "paperMatchId": "",
-                        "itemId": item_id,
-                        "sourceType": "arxiv",
-                        "sourceId": matched_arxiv_id,
-                        "citedFor": "Relevant claim",
-                    }
-                ],
-            },
+            "content": final_content,
             "model": "test-model",
             "response_id": "summary-response",
         }
 
-    return fake_async_call_llm
+    fake_stream_structured_response.calls = calls
+    return fake_stream_structured_response
 
 
 class TestDailySearchTimeouts:
@@ -367,7 +389,7 @@ class TestRunDailySearch:
             _fake_daily_async_llm(matched_arxiv_ids={"2605.00001"}),
         )
         monkeypatch.setattr(
-            "app.jobs.daily_search_summary.async_call_llm",
+            "app.jobs.daily_search_summary.stream_structured_response",
             _fake_summary_llm(matched_arxiv_id="2605.00001"),
         )
 
@@ -649,7 +671,7 @@ class TestRunDailySearch:
             ),
         )
         monkeypatch.setattr(
-            "app.jobs.daily_search_summary.async_call_llm",
+            "app.jobs.daily_search_summary.stream_structured_response",
             _fake_summary_llm(matched_arxiv_id="2605.00010"),
         )
 
@@ -946,9 +968,10 @@ class TestSummarizeDailySearch:
         )
         db_session.commit()
 
+        summary_llm = _fake_summary_llm(matched_arxiv_id="2605.00001")
         monkeypatch.setattr(
-            "app.jobs.daily_search_summary.async_call_llm",
-            _fake_summary_llm(matched_arxiv_id="2605.00001"),
+            "app.jobs.daily_search_summary.stream_structured_response",
+            summary_llm,
         )
 
         from app.services.jobs import create_job
@@ -974,3 +997,191 @@ class TestSummarizeDailySearch:
         assert updated_run.status == "completed"
         assert updated_run.summary is not None
         assert "One relevant paper matched today's filters" in updated_run.summary
+        assert summary_llm.calls["deltas"] >= 1
+
+    def test_summarize_commits_streaming_draft(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
+        from app.services import search_runs
+        from app.services.jobs import create_job
+        from app.jobs.daily_search_summary import run as run_summary
+
+        filt_id = str(uuid.uuid4())
+        db_session.add(
+            SQLAFilter(
+                id=filt_id,
+                name="Test Filter",
+                definition={
+                    "name": "Test Filter",
+                    "description": "Neural network scaling laws",
+                    "mode": "claim",
+                },
+                status="active",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+
+        run_id = str(uuid.uuid4())
+        run = SQLASearchRun(
+            id=run_id,
+            status="running",
+            run_date=datetime.now(timezone.utc).date(),
+            candidate_count=1,
+            candidate_counts={"arxiv": 1},
+            match_count=1,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(run)
+
+        paper = SQLAPaper(
+            id=str(uuid.uuid4()),
+            source_type="arxiv",
+            source_id="2605.00001",
+            title="Included Scaling SQLAPaper",
+            search_text="Abstract",
+            authors=["Author"],
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(paper)
+        db_session.flush()
+        db_session.add(
+            SQLAPaperMatch(
+                search_run_id=run_id,
+                filter_id=filt_id,
+                paper_id=paper.id,
+                result="The paper directly addresses the filter.",
+                llm_model="test-model",
+                llm_response_id="match-response",
+            )
+        )
+        db_session.commit()
+
+        drafts: list[str] = []
+        original_update = search_runs.update_summary_draft
+
+        def track_update_summary_draft(db, run, summary: str) -> None:
+            drafts.append(summary)
+            original_update(db, run, summary)
+
+        monkeypatch.setattr(
+            search_runs, "update_summary_draft", track_update_summary_draft
+        )
+        monkeypatch.setattr(
+            "app.jobs.daily_search_summary.stream_structured_response",
+            _fake_summary_llm(matched_arxiv_id="2605.00001"),
+        )
+
+        summary_job = create_job(
+            db_session,
+            kind="daily_search_summary",
+            subject_type="search_run",
+            subject_id=run_id,
+            status="queued",
+        )
+        db_session.commit()
+        run_summary(db_session, summary_job)
+
+        assert drafts
+        assert any("One relevant paper matched" in draft for draft in drafts)
+
+    def test_summarize_recovers_summary_when_structured_content_empty(
+        self, db_session, patch_worker_database, monkeypatch
+    ):
+        from app.services.jobs import create_job
+        from app.jobs.daily_search_summary import run as run_summary
+
+        filt_id = str(uuid.uuid4())
+        db_session.add(
+            SQLAFilter(
+                id=filt_id,
+                name="Test Filter",
+                definition={
+                    "name": "Test Filter",
+                    "description": "Neural network scaling laws",
+                    "mode": "claim",
+                },
+                status="active",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+
+        run_id = str(uuid.uuid4())
+        run = SQLASearchRun(
+            id=run_id,
+            status="running",
+            run_date=datetime.now(timezone.utc).date(),
+            candidate_count=1,
+            candidate_counts={"arxiv": 1},
+            match_count=1,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(run)
+
+        paper = SQLAPaper(
+            id=str(uuid.uuid4()),
+            source_type="arxiv",
+            source_id="2605.00002",
+            title="Included Scaling SQLAPaper",
+            search_text="Abstract",
+            authors=["Author"],
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(paper)
+        db_session.flush()
+        db_session.add(
+            SQLAPaperMatch(
+                search_run_id=run_id,
+                filter_id=filt_id,
+                paper_id=paper.id,
+                result="The paper directly addresses the filter.",
+                llm_model="test-model",
+                llm_response_id="match-response",
+            )
+        )
+        db_session.commit()
+
+        item_id = "arxiv:2605.00002"
+
+        def fake_stream_structured_response(**kwargs):
+            import json
+
+            on_text_delta = kwargs.get("on_text_delta")
+            recovered = {
+                "summary": (
+                    "CLAIMS\n\n"
+                    "Test Filter\n"
+                    f'Recovered digest text <cite itemId="{item_id}"/> '
+                    + ("Additional synthesis context. " * 8)
+                ),
+                "citations": [],
+            }
+            serialized = json.dumps(recovered)
+            if on_text_delta:
+                midpoint = len('{"summary": "') + 20
+                on_text_delta(serialized[:midpoint])
+                on_text_delta(serialized[midpoint:])
+            return {
+                "content": {"summary": "", "citations": []},
+                "model": "test-model",
+                "response_id": "summary-response",
+            }
+
+        monkeypatch.setattr(
+            "app.jobs.daily_search_summary.stream_structured_response",
+            fake_stream_structured_response,
+        )
+
+        summary_job = create_job(
+            db_session,
+            kind="daily_search_summary",
+            subject_type="search_run",
+            subject_id=run_id,
+            status="queued",
+        )
+        db_session.commit()
+        run_summary(db_session, summary_job)
+
+        db_session.refresh(run)
+        assert "Recovered digest text" in (run.summary or "")

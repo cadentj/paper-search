@@ -18,6 +18,12 @@ from app.models.search_run import SQLASearchRun
 logger = logging.getLogger(__name__)
 
 DONE_STATUSES = frozenset({"completed", "failed", "skipped"})
+ACTIVE_JOB_STATUSES = frozenset({"queued", "running"})
+SUMMARY_JOB_MAX_SECONDS = 600
+
+STALE_JOB_MAX_SECONDS_BY_KIND: dict[str, int] = {
+    "daily_search_summary": SUMMARY_JOB_MAX_SECONDS,
+}
 
 _SUBJECT_MODELS_BY_KIND = {
     "document_processing": SQLADocument,
@@ -109,6 +115,35 @@ def create_job(
     return job
 
 
+def reconcile_stale_job(db: Session, job: SQLAJob) -> bool:
+    """Mark queued/running jobs failed when they exceed per-kind max age."""
+    if job.status not in ACTIVE_JOB_STATUSES:
+        return False
+
+    max_age_seconds = STALE_JOB_MAX_SECONDS_BY_KIND.get(job.kind)
+    if not max_age_seconds:
+        return False
+
+    now = datetime.now(timezone.utc)
+    started_at = job.started_at or job.created_at
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    if (now - started_at).total_seconds() <= max_age_seconds:
+        return False
+
+    error = "Job timed out"
+    set_job_status(job, status="failed", error=error)
+    run: SQLASearchRun | None = None
+    if job.kind == "daily_search_summary" and job.subject_id:
+        run = db.get(SQLASearchRun, job.subject_id)
+        if run and run.status == "running":
+            run.status = "failed"
+            run.error = error
+            run.completed_at = now
+    commit_refresh(db, job, run)
+    return True
+
+
 def latest_job_for_subject(
     db: Session,
     subject_type: str,
@@ -147,12 +182,21 @@ def _dispatcher_run_job():
     return run_job
 
 
-def enqueue(db: Session, job: SQLAJob, *, log_context: str = "") -> None:
+def enqueue(
+    db: Session,
+    job: SQLAJob,
+    *,
+    log_context: str = "",
+    job_timeout: int | None = None,
+) -> None:
     try:
         db.commit()
         run_job = _dispatcher_run_job()
         queue = Queue(job.queue_name, connection=Redis.from_url(settings.REDIS_URL))
-        queue.enqueue(run_job, job.id)
+        enqueue_kwargs: dict = {}
+        if job_timeout is not None:
+            enqueue_kwargs["job_timeout"] = job_timeout
+        queue.enqueue(run_job, job.id, **enqueue_kwargs)
         if log_context:
             logger.info(
                 "%s enqueued job=%s queue=%s",

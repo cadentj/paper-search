@@ -86,7 +86,7 @@ def get_daily_search_job(
         next_cursor = encode_cursor(latest.created_at, latest.id)
     return DailySearchJob(
         job=search_runs.serialize_daily_search_job(db, job, run),
-        subject=run.to_pydantic(job_id=job.id),
+        subject=search_runs.search_run_payload(db, run),
         items=[search_runs.match_to_pydantic(db, match) for match in matches],
         next_cursor=next_cursor,
         done=jobs.is_done(job),
@@ -98,6 +98,7 @@ def get_daily_search_summary_job(job_id: str, db: Session = Depends(get_db)):
     job = jobs.get_job_of_kind(db, job_id, "daily_search_summary")
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    jobs.reconcile_stale_job(db, job)
     run = search_runs.get_search_run_for_job(db, job)
     if not run:
         raise HTTPException(status_code=404, detail="Search run not found")
@@ -153,6 +154,7 @@ def get_search_run_summary(search_run_id: str, db: Session = Depends(get_db)):
         run = search_runs.get_search_run(db, search_run_id)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    search_runs.reconcile_summary_job_for_run(db, run)
     summary = search_runs.summary_payload(run)
     if not summary:
         raise HTTPException(status_code=404, detail="Summary not available")

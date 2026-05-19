@@ -262,6 +262,65 @@ class TestLLMClient:
         assert result["content"] == {"matches": []}
         assert result["model"] == "test-model"
 
+    @pytest.mark.asyncio
+    async def test_async_call_llm_retries_structured_parse_validation(
+        self, monkeypatch
+    ):
+        from types import SimpleNamespace
+
+        from app.llm import client as llm_client
+        from app.llm.config import FILTER_GENERATION_PROFILE
+
+        attempts = {"count": 0}
+        parsed = FeedbackReflectionResponse(actions=[])
+        parsed_response = SimpleNamespace(
+            id="response-id",
+            model="test-model",
+            output=[
+                SimpleNamespace(
+                    content=[
+                        SimpleNamespace(parsed=parsed),
+                    ]
+                )
+            ],
+        )
+
+        class FakeResponses:
+            async def parse(self, **kwargs):
+                attempts["count"] += 1
+                if attempts["count"] == 1:
+                    FeedbackReflectionResponse.model_validate(-float("inf"))
+                return parsed_response
+
+        class FakeAsyncClient:
+            responses = FakeResponses()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+        import asyncio
+
+        async def fake_sleep(delay):
+            return None
+
+        monkeypatch.setattr(llm_client.settings, "OPENROUTER_API_KEY", "test-key")
+        monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+        monkeypatch.setattr(llm_client, "_async_client", lambda: FakeAsyncClient())
+
+        result = await llm_client.async_call_llm(
+            "system",
+            "user",
+            response_model=FeedbackReflectionResponse,
+            profile=FILTER_GENERATION_PROFILE,
+        )
+
+        assert attempts["count"] == 2
+        assert result["content"] == {"actions": []}
+        assert result["model"] == "test-model"
+
 
 class TestFeedbackReflectionSchema:
     def test_parses_create_revise_and_delete_actions(self):

@@ -21,6 +21,7 @@ function isDailyReportPath(pathname: string) {
 export function DailyChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const showRunSearch = isDailyReportPath(pathname);
+  const isReport = isDailyReportPath(pathname);
   const isAllPapers = pathname.startsWith("/dashboard/daily/all-papers");
   const {
     effectiveSelectedDate,
@@ -31,20 +32,17 @@ export function DailyChrome({ children }: { children: React.ReactNode }) {
     isRunning,
     isCreating,
     handleRunSearch,
-    selectedPaperId,
   } = useDaily();
-
   return (
     <div
       className={cn(
         "flex-1 p-6",
-        isAllPapers
+        isAllPapers || isReport
           ? "flex h-full min-h-0 w-full flex-col gap-6 overflow-hidden"
           : "max-w-5xl space-y-6",
-        isAllPapers && selectedPaperId && "max-w-7xl"
       )}
     >
-      <div className={cn(isAllPapers && "shrink-0")}>
+      <div className={cn((isAllPapers || isReport) && "shrink-0")}>
         <DailyHeader
           selectedDate={effectiveSelectedDate}
           dateStatus={{
@@ -67,7 +65,14 @@ export function DailyChrome({ children }: { children: React.ReactNode }) {
           }
         />
       </div>
-      {children}
+      <div
+        className={cn(
+          (isAllPapers || isReport) &&
+            "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+        )}
+      >
+        {children}
+      </div>
     </div>
   );
 }

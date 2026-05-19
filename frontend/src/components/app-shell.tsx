@@ -49,6 +49,7 @@ function isDailyReportPath(pathname: string) {
 function isScrollContainedPath(pathname: string) {
   return (
     pathname.startsWith("/dashboard/papers/") ||
+    pathname.startsWith("/dashboard/daily/report") ||
     pathname.startsWith("/dashboard/daily/all-papers")
   );
 }

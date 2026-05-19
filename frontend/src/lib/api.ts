@@ -118,6 +118,7 @@ export interface DocumentUploadResponse extends DocumentResponse {
 export interface SearchRun {
   id: string;
   job_id?: string | null;
+  summary_job_id?: string | null;
   status: string;
   run_date: string;
   candidate_count?: number;

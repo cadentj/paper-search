@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { format, parseISO } from "date-fns";
@@ -274,20 +274,28 @@ export function SearchProgress({
 export function DailySummary({
   summary,
   matches,
+  isStreaming = false,
+  onSelectPaper,
 }: {
   summary: DailySearchSummary;
   matches: PaperMatch[];
+  isStreaming?: boolean;
+  onSelectPaper?: (paperId: string) => void;
 }) {
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex-row items-center justify-between space-y-0">
         <CardTitle className="text-lg">Daily Summary</CardTitle>
+        {isStreaming && (
+          <span className="text-xs text-muted-foreground">Writing…</span>
+        )}
       </CardHeader>
       <CardContent>
         <SummaryText
           summary={summary.summary}
-          citations={summary.citations}
+          citations={isStreaming ? [] : summary.citations}
           matches={matches}
+          onPaperSelect={onSelectPaper}
           className="max-w-none whitespace-pre-wrap text-base leading-7 text-foreground"
         />
       </CardContent>
@@ -301,12 +309,16 @@ export function MatchesSection({
   isArchiving,
   onToggleFilter,
   onArchiveFilter,
+  selectedPaperId,
+  onSelectPaper,
 }: {
   matchesByFilter: Record<string, MatchGroup>;
   expandedFilters: Set<string>;
   isArchiving: boolean;
   onToggleFilter: (filterId: string) => void;
   onArchiveFilter: (filterId: string) => void;
+  selectedPaperId?: string | null;
+  onSelectPaper?: (paperId: string) => void;
 }) {
   if (Object.keys(matchesByFilter).length === 0) return null;
 
@@ -347,7 +359,12 @@ export function MatchesSection({
           {expandedFilters.has(filterId) && (
             <CardContent className="space-y-3">
               {group.matches.map((match) => (
-                <PaperMatchCard key={match.id} match={match} />
+                <PaperMatchCard
+                  key={match.id}
+                  match={match}
+                  isSelected={selectedPaperId === match.paper_id}
+                  onSelectPaper={onSelectPaper}
+                />
               ))}
             </CardContent>
           )}
@@ -413,6 +430,13 @@ function FeedbackButtons({ matchId }: { matchId: string }) {
     }, 2500);
   };
 
+  useEffect(
+    () => () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    },
+    []
+  );
+
   const active = pending ?? feedback;
 
   return (
@@ -440,7 +464,15 @@ function FeedbackButtons({ matchId }: { matchId: string }) {
   );
 }
 
-function PaperMatchCard({ match }: { match: PaperMatch }) {
+function PaperMatchCard({
+  match,
+  isSelected = false,
+  onSelectPaper,
+}: {
+  match: PaperMatch;
+  isSelected?: boolean;
+  onSelectPaper?: (paperId: string) => void;
+}) {
   const externalUrl =
     match.paper_source_url ||
     (match.paper_source_type === "arxiv" && match.paper_source_id
@@ -454,15 +486,30 @@ function PaperMatchCard({ match }: { match: PaperMatch }) {
         : "Open source";
 
   return (
-    <div className="rounded-lg border p-3 space-y-2">
+    <div
+      className={cn(
+        "rounded-lg border p-3 space-y-2",
+        isSelected && "border-primary bg-muted/50 ring-1 ring-primary"
+      )}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1">
-          <Link
-            href={`/dashboard/papers/${match.paper_id}`}
-            className="text-left text-base font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {match.paper_title}
-          </Link>
+          {onSelectPaper ? (
+            <button
+              type="button"
+              onClick={() => onSelectPaper(match.paper_id)}
+              className="text-left text-base font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {match.paper_title}
+            </button>
+          ) : (
+            <Link
+              href={`/dashboard/papers/${match.paper_id}`}
+              className="text-left text-base font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {match.paper_title}
+            </Link>
+          )}
           <div className="flex items-center gap-2 mt-1">
             {externalUrl && (
               <a
@@ -471,6 +518,7 @@ function PaperMatchCard({ match }: { match: PaperMatch }) {
                 rel="noopener noreferrer"
                 aria-label={externalLabel}
                 className="text-xs text-muted-foreground hover:text-foreground"
+                onClick={(event) => event.stopPropagation()}
               >
                 <ExternalLink className="size-3" />
               </a>
@@ -519,9 +567,7 @@ function AllPaperCard({
       : undefined);
 
   return (
-    <button
-      type="button"
-      onClick={onSelect}
+    <div
       className={cn(
         "w-full rounded-lg border p-3 space-y-1 text-left transition-colors hover:bg-muted/50",
         isSelected && "border-primary bg-muted/50 ring-1 ring-primary"
@@ -529,7 +575,13 @@ function AllPaperCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <span className="text-sm font-medium">{paper.title}</span>
+          <button
+            type="button"
+            onClick={onSelect}
+            className="text-left text-sm font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {paper.title}
+          </button>
           {paper.authors && paper.authors.length > 0 && (
             <p className="text-xs text-muted-foreground truncate mt-0.5">
               {paper.authors.join(", ")}
@@ -544,32 +596,45 @@ function AllPaperCard({
               rel="noopener noreferrer"
               onClick={(event) => event.stopPropagation()}
               className="p-1 text-muted-foreground hover:text-foreground"
+              aria-label={`Open ${paper.title} source`}
             >
               <ExternalLink className="size-3" />
             </a>
           )}
-          <span
-            role="button"
-            tabIndex={0}
+          <button
+            type="button"
             onClick={handleLike}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                void handleLike(event as unknown as React.MouseEvent);
-              }
-            }}
+            disabled={liked || submitPaperFeedback.isPending}
             className={`p-1 rounded hover:bg-muted ${liked ? "text-green-600" : "text-muted-foreground"} ${liked ? "opacity-50 cursor-not-allowed" : ""}`}
             aria-label="Thumbs up"
+            aria-pressed={liked}
           >
             {submitPaperFeedback.isPending ? (
               <Loader2 className="size-3.5 animate-spin" />
             ) : (
               <ThumbsUp className="size-3.5" />
             )}
-          </span>
+          </button>
         </div>
       </div>
-    </button>
+    </div>
+  );
+}
+
+export function DailyPaperSplitLayout({
+  summary,
+  preview,
+}: {
+  summary: ReactNode;
+  preview: ReactNode;
+}) {
+  return (
+    <div className="grid min-h-0 w-full min-w-0 flex-1 grid-cols-1 gap-6 overflow-hidden lg:grid-cols-[minmax(0,45fr)_minmax(0,55fr)]">
+      <div className="flex min-h-0 min-w-0 flex-col overflow-y-auto p-1">
+        {summary}
+      </div>
+      <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">{preview}</div>
+    </div>
   );
 }
 
@@ -593,22 +658,9 @@ export function DailyAllPapersContent({
 
   const totalPages = data ? Math.ceil(data.total / 20) : 0;
 
-  return (
-    <div
-      className={cn(
-        "min-h-0 w-full flex-1 gap-6",
-        selectedPaperId ? "flex flex-col lg:flex-row" : "mx-auto flex max-w-2xl flex-col"
-      )}
-    >
-      <div
-        className={cn(
-          "flex min-h-0 min-w-0 flex-col",
-          selectedPaperId
-            ? "w-full flex-1 lg:w-2/5 lg:max-w-md lg:flex-none"
-            : "w-full flex-1"
-        )}
-      >
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+  const paperList = (
+    <>
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-1">
           {loading && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" /> Loading papers…
@@ -649,10 +701,23 @@ export function DailyAllPapersContent({
             </Button>
           </div>
         )}
-      </div>
-      {selectedPaperId && (
-        <PaperReadPreview paperId={selectedPaperId} onClose={onClosePreview} />
-      )}
+    </>
+  );
+
+  if (selectedPaperId) {
+    return (
+      <DailyPaperSplitLayout
+        summary={<div className="flex min-h-0 flex-col">{paperList}</div>}
+        preview={
+          <PaperReadPreview paperId={selectedPaperId} onClose={onClosePreview} />
+        }
+      />
+    );
+  }
+
+  return (
+    <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col">
+      {paperList}
     </div>
   );
 }

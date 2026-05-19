@@ -15,6 +15,7 @@ const mockApi = vi.hoisted(() => ({
   restoreFilter: vi.fn(),
   updateFilter: vi.fn(),
   getJob: vi.fn(),
+  getJobsOverview: vi.fn(),
   uploadDocument: vi.fn(),
   getDocument: vi.fn(),
   createOnboardingGeneration: vi.fn(),
@@ -50,6 +51,14 @@ describe("FiltersPage", () => {
     });
     mockApi.getPendingFeedbackItems.mockResolvedValue([]);
     mockApi.processFeedback.mockResolvedValue({ job_id: "job-feedback" });
+    mockApi.getJobsOverview.mockResolvedValue({ active: [], recent: [] });
+    mockApi.getJob.mockResolvedValue({
+      id: "job-feedback",
+      kind: "feedback_reflection",
+      status: "running",
+      progress: {},
+      created_at: "2024-01-01T00:00:00Z",
+    });
   });
 
   it("shows active and archived filters", async () => {
@@ -238,10 +247,103 @@ describe("FiltersPage", () => {
       screen.getByText("This should update future filters.")
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /process feedback/i }));
+    const processButton = screen.getByRole("button", {
+      name: /process feedback/i,
+    });
+    fireEvent.click(processButton);
 
     await waitFor(() => {
       expect(mockApi.processFeedback).toHaveBeenCalled();
     });
+
+    await waitFor(() => {
+      expect(processButton).toBeDisabled();
+      expect(processButton).toHaveTextContent(/processing/i);
+      expect(
+        screen.getByText(/analyzing feedback and drafting filter proposals/i)
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("shows proposals and completion banner after feedback job finishes", async () => {
+    const proposalFilter = {
+      id: "proposal-1",
+      name: "Proposed Filter",
+      status: "pending_create",
+      source: "feedback",
+      proposed_action: "create",
+      target_filter_id: null,
+      definition: {
+        name: "Proposed Filter",
+        description: "From feedback",
+        mode: "topic" as const,
+      },
+      created_at: "2024-01-01T00:00:00Z",
+      updated_at: "2024-01-01T00:00:00Z",
+    };
+
+    mockApi.getFilters.mockImplementation((status?: string) => {
+      if (status === "draft") return Promise.resolve([]);
+      return Promise.resolve([proposalFilter]);
+    });
+
+    mockApi.getFeedbackStatus
+      .mockResolvedValueOnce({
+        pending_votes: 1,
+        pending_notes: 0,
+        pending_proposals: 0,
+      })
+      .mockResolvedValue({
+        pending_votes: 0,
+        pending_notes: 0,
+        pending_proposals: 1,
+      });
+
+    mockApi.getPendingFeedbackItems.mockResolvedValue([
+      {
+        id: "feedback-1",
+        kind: "vote",
+        paper_id: "paper-1",
+        paper_title: "Feedback Paper",
+        paper_match_id: "match-1",
+        filter_id: "filter-1",
+        filter_name: "Relevant Filter",
+        value: "down",
+        text: null,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      },
+    ]);
+
+    let jobPollCount = 0;
+    mockApi.getJob.mockImplementation(() => {
+      jobPollCount += 1;
+      return Promise.resolve({
+        id: "job-feedback",
+        kind: "feedback_reflection",
+        status: jobPollCount >= 2 ? "completed" : "running",
+        progress: {},
+        created_at: "2024-01-01T00:00:00Z",
+      });
+    });
+
+    Element.prototype.scrollIntoView = vi.fn();
+
+    renderWithProviders(<FiltersPage />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /process feedback/i })
+    );
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText(/1 filter proposal ready — review below/i)
+        ).toBeInTheDocument();
+        expect(screen.getByText(/proposals \(1\)/i)).toBeInTheDocument();
+        expect(screen.getByText("Proposed Filter")).toBeInTheDocument();
+      },
+      { timeout: 5000 }
+    );
   });
 });
