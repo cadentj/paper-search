@@ -125,6 +125,8 @@ type FilterPageAction =
   | { type: "feedback-completion-dismiss" }
   | { type: "toggle-archived" };
 
+const ACTIVE_SCHOLAR_IMPORT_STATUSES = new Set(["pending", "queued", "running"]);
+
 function formatFeedbackTimestamp(value: string) {
   return FEEDBACK_TIMESTAMP_FORMATTER.format(new Date(value));
 }
@@ -339,20 +341,57 @@ function ScholarImportSection({
     profile: null,
     error: null,
   });
+  const { data: jobsOverview } = useJobsOverview();
+  const activeRecoveredImportJob = jobsOverview?.active.find(
+    (entry) => entry.job.kind === "scholar_import" && entry.job.subject_id
+  );
+  const shouldShowRecentFailure =
+    !importId && state.step === "input" && !state.url.trim();
+  const recentFailedImportJob = shouldShowRecentFailure
+    ? jobsOverview?.recent.find(
+        (entry) =>
+          entry.job.kind === "scholar_import" &&
+          entry.job.status === "failed" &&
+          entry.job.subject_id
+      )
+    : undefined;
+  const recoveredImportJob = activeRecoveredImportJob ?? recentFailedImportJob;
+  const recoveredImportId = recoveredImportJob?.job.subject_id ?? null;
+  const effectiveImportId = importId ?? recoveredImportId;
+  const recoveredStatus = importId ? null : recoveredImportJob?.job.status ?? null;
+  const isRecoveredActive =
+    !!recoveredStatus && ACTIVE_SCHOLAR_IMPORT_STATUSES.has(recoveredStatus);
+  const visibleStep =
+    isRecoveredActive && state.step === "input" ? "polling" : state.step;
+  const isImportInFlight =
+    visibleStep === "importing" || visibleStep === "polling";
   const { data: importStatus } = useScholarImportStatus(
-    importId,
-    state.step === "polling"
+    effectiveImportId,
+    isImportInFlight
   );
 
   useEffect(() => {
-    if (state.step !== "polling" || !importStatus) return;
-    if (importStatus.status === "completed") {
+    if (!effectiveImportId) return;
+    const status = importStatus?.status ?? recoveredStatus;
+    if (status === "completed" && state.step !== "done") {
       dispatch({ type: "done" });
       queryClient.invalidateQueries({ queryKey: ["filters"] });
-    } else if (importStatus.status === "failed") {
-      dispatch({ type: "error", error: importStatus.error || "Import failed" });
+    } else if (status === "failed") {
+      const error =
+        importStatus?.error || recoveredImportJob?.job.error || "Import failed";
+      if (state.step !== "error" || state.error !== error) {
+        dispatch({ type: "error", error });
+      }
     }
-  }, [importStatus, state.step, queryClient]);
+  }, [
+    effectiveImportId,
+    importStatus,
+    queryClient,
+    recoveredImportJob?.job.error,
+    recoveredStatus,
+    state.error,
+    state.step,
+  ]);
 
   if (hasScholarFilters || state.step === "done") return null;
 
@@ -406,12 +445,12 @@ function ScholarImportSection({
               dispatch({ type: "set-url", url: event.target.value })
             }
             disabled={
-              state.step === "verifying" ||
-              state.step === "importing" ||
-              state.step === "polling"
+              visibleStep === "verifying" ||
+              visibleStep === "importing" ||
+              visibleStep === "polling"
             }
           />
-          {(state.step === "input" || state.step === "error") && (
+          {(visibleStep === "input" || visibleStep === "error") && (
             <Button
               size="sm"
               onClick={handleVerify}
@@ -422,13 +461,13 @@ function ScholarImportSection({
           )}
         </div>
         {state.error && <p className="text-sm text-destructive">{state.error}</p>}
-        {state.step === "verifying" && (
+        {visibleStep === "verifying" && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
             Verifying profile…
           </div>
         )}
-        {state.step === "verified" && state.profile && (
+        {visibleStep === "verified" && state.profile && (
           <div className="space-y-2">
             <div className="text-sm">
               <p className="font-medium">{state.profile.name}</p>
@@ -448,12 +487,14 @@ function ScholarImportSection({
             </Button>
           </div>
         )}
-        {(state.step === "importing" || state.step === "polling") && (
+        {(visibleStep === "importing" || visibleStep === "polling") && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
-            {state.step === "importing"
+            {visibleStep === "importing"
               ? "Starting import…"
-              : "Generating filters from publications…"}
+              : importStatus?.display_name
+                ? `Generating filters from publications for ${importStatus.display_name}…`
+                : "Generating filters from publications…"}
           </div>
         )}
       </CardContent>
@@ -554,7 +595,7 @@ function ResearchContextForm({
             onChange={(event) => onInputTextChange(event.target.value)}
             disabled={status.isGenerating}
           />
-          <InputGroupAddon align="block-end" className="gap-2">
+          <InputGroupAddon align="block-end" className="gap-2 items-end">
             <InputGroupText>
               {inputText.length}/{MAX_INPUT_CHARS}
             </InputGroupText>
@@ -1115,7 +1156,7 @@ function EmptyFiltersState({ isVisible }: { isVisible: boolean }) {
 
   return (
     <Card>
-      <CardContent className="pt-6 text-center">
+      <CardContent className="text-center">
         <p className="text-muted-foreground">
           No filters yet. Add research context above to generate filters.
         </p>

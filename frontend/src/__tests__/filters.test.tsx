@@ -196,6 +196,99 @@ describe("FiltersPage", () => {
     );
   });
 
+  it("resumes an active Semantic Scholar import after reload", async () => {
+    mockApi.getFilters.mockImplementation(() => Promise.resolve([]));
+    mockApi.getJobsOverview.mockResolvedValue({
+      active: [
+        {
+          job: {
+            id: "job-scholar",
+            kind: "scholar_import",
+            status: "running",
+            subject_type: "research_profile_import",
+            subject_id: "imp-active",
+            queue_name: "interactive",
+            progress: {},
+            created_at: "2024-01-01T00:00:00Z",
+          },
+        },
+      ],
+      recent: [],
+    });
+    mockApi.getScholarImportStatus.mockResolvedValue({
+      id: "imp-active",
+      status: "running",
+      display_name: "Test Author",
+    });
+
+    renderWithProviders(<FiltersPage />);
+
+    expect(
+      await screen.findByText(/generating filters from publications for test author/i)
+    ).toBeInTheDocument();
+    expect(mockApi.getScholarImportStatus).toHaveBeenCalledWith("imp-active");
+    expect(
+      screen.getByPlaceholderText(/paste semantic scholar profile url/i)
+    ).toBeDisabled();
+  });
+
+  it("shows a failed Semantic Scholar import after reload and allows retry", async () => {
+    mockApi.getFilters.mockImplementation(() => Promise.resolve([]));
+    mockApi.getJobsOverview.mockResolvedValue({
+      active: [],
+      recent: [
+        {
+          job: {
+            id: "job-scholar",
+            kind: "scholar_import",
+            status: "failed",
+            subject_type: "research_profile_import",
+            subject_id: "imp-failed",
+            queue_name: "interactive",
+            progress: {},
+            error: "Import timed out",
+            created_at: "2024-01-01T00:00:00Z",
+            completed_at: "2024-01-01T00:03:00Z",
+          },
+        },
+      ],
+    });
+    mockApi.getScholarImportStatus.mockResolvedValue({
+      id: "imp-failed",
+      status: "failed",
+      error: "Import timed out",
+    });
+    mockApi.verifyScholarProfile.mockResolvedValue({
+      author_id: "a1",
+      name: "Retry Author",
+      affiliations: [],
+      paper_count: 3,
+    });
+
+    renderWithProviders(<FiltersPage />);
+
+    expect(await screen.findByText("Import timed out")).toBeInTheDocument();
+    expect(mockApi.getScholarImportStatus).toHaveBeenCalledWith("imp-failed");
+    const input = screen.getByPlaceholderText(
+      /paste semantic scholar profile url/i
+    );
+    const verifyButton = screen.getByRole("button", { name: /verify/i });
+    expect(input).toBeEnabled();
+    expect(verifyButton).toBeDisabled();
+
+    fireEvent.change(input, {
+      target: { value: "https://www.semanticscholar.org/author/123" },
+    });
+
+    expect(verifyButton).toBeEnabled();
+    fireEvent.click(verifyButton);
+
+    expect(await screen.findByText("Retry Author")).toBeInTheDocument();
+    expect(mockApi.verifyScholarProfile).toHaveBeenCalledWith(
+      "https://www.semanticscholar.org/author/123"
+    );
+  });
+
   it("expands pending feedback and processes the listed items", async () => {
     mockApi.getFilters.mockImplementation(() => Promise.resolve([]));
     mockApi.getFeedbackStatus.mockResolvedValue({
