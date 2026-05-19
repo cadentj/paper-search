@@ -108,17 +108,17 @@ cd frontend && pnpm test
 │   │   ├── jobs/         # RQ worker jobs
 │   │   ├── llm/          # OpenRouter client, prompts, config
 │   │   ├── models/       # SQLAlchemy models
-│   │   ├── schemas/      # Pydantic schemas
-│   │   └── services/     # Business logic layer
+│   │   ├── services/     # Business logic layer
+│   │   └── utils/        # Cursor pagination, HTML parser
 │   ├── tests/
 │   └── pyproject.toml
+├── core/                 # Shared paper_search_core package
 ├── frontend/
 │   ├── src/
-│   │   ├── app/          # Next.js pages
+│   │   ├── app/          # Next.js pages (App Router)
 │   │   ├── components/   # UI components
 │   │   ├── hooks/        # React Query hooks
-│   │   ├── lib/          # API client, utilities
-│   │   └── stores/       # Zustand UI state
+│   │   └── lib/          # API client, utilities
 │   └── package.json
 ├── scripts/              # Sync, ingest, and dev helper scripts
 ├── docker-compose.yml
